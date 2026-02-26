@@ -51,12 +51,9 @@ def git(
 
 
 def login_to_lp(credentials):
-    if credentials:
-        lp = Launchpad.login_with(
-            "launchpad-ci", "production", credentials_file=credentials, version="devel"
-        )
-    else:
-        lp = Launchpad.login_anonymously("launchpad-ci", "production", version="devel")
+    lp = Launchpad.login_with(
+        "launchpad-ci", "production", credentials_file=credentials, version="devel"
+    )
     return lp
 
 
@@ -703,8 +700,8 @@ def main():
         "jobs_cfg_dir",
         type=Path,
         help=(
-            "Path to directory containing yaml launchpad-ci configs"
-            " listing the repos to look for open MPs in."
+            "Path to directory containing yaml launchpad-ci configs "
+            "listing the repos to look for open MPs in."
         ),
     )
     reviewable_jobs_parser.set_defaults(func=handle_reviewable_jobs)
@@ -714,8 +711,8 @@ def main():
         "jobs_cfg_dir",
         type=Path,
         help=(
-            "Path to directory containing yaml launchpad-ci configs"
-            " listing the repos to look for open MPs in."
+            "Path to directory containing yaml launchpad-ci configs "
+            "listing the repos to look for open MPs in."
         ),
     )
     mergeable_jobs_parser.set_defaults(func=handle_mergable_jobs)
