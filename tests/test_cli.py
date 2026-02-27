@@ -14,6 +14,7 @@ from lp_ci_tools.cli import (
 from lp_ci_tools.models import Comment
 from tests.factory import make_mp
 from tests.fake_launchpad import FakeLaunchpadClient
+from tests.fake_launchpadlib import FakeLaunchpad, make_fake_comment, make_fake_mp
 
 
 class TestListMergeProposals:
@@ -41,7 +42,7 @@ class TestListMergeProposals:
         client.add_merge_proposal(mp)
         review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
         client.add_comment(
-            mp.url,
+            mp.api_url,
             Comment(
                 author="ci-bot",
                 body="[lp-ci-tools review]\n\nLooks good!",
@@ -62,7 +63,7 @@ class TestListMergeProposals:
         mp = make_mp()
         client.add_merge_proposal(mp)
         client.add_comment(
-            mp.url,
+            mp.api_url,
             Comment(
                 author="human-user",
                 body="[lp-ci-tools review]\n\nFake review by human",
@@ -79,7 +80,7 @@ class TestListMergeProposals:
         mp = make_mp()
         client.add_merge_proposal(mp)
         client.add_comment(
-            mp.url,
+            mp.api_url,
             Comment(
                 author="ci-bot",
                 body="Just a regular comment, no marker",
@@ -98,7 +99,7 @@ class TestListMergeProposals:
         early = datetime(2025, 6, 10, 8, 0, 0, tzinfo=UTC)
         late = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
         client.add_comment(
-            mp.url,
+            mp.api_url,
             Comment(
                 author="ci-bot",
                 body="[lp-ci-tools review]\n\nFirst review",
@@ -106,7 +107,7 @@ class TestListMergeProposals:
             ),
         )
         client.add_comment(
-            mp.url,
+            mp.api_url,
             Comment(
                 author="ci-bot",
                 body="[lp-ci-tools review]\n\nSecond review",
@@ -126,7 +127,7 @@ class TestListMergeProposals:
         client.add_merge_proposal(mp2)
         review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
         client.add_comment(
-            mp1.url,
+            mp1.api_url,
             Comment(
                 author="ci-bot",
                 body="[lp-ci-tools review]\n\nOK",
@@ -145,7 +146,7 @@ class TestListMergeProposals:
         mp = make_mp()
         client.add_merge_proposal(mp)
         client.add_comment(
-            mp.url,
+            mp.api_url,
             Comment(
                 author="ci-bot",
                 body="Some preamble [lp-ci-tools review]\n\nContent",
@@ -219,15 +220,22 @@ class TestFormatMergeProposals:
 
 
 class TestBuildParser:
-    def test_list_merge_proposals_parses_required_args(self) -> None:
+    def test_list_merge_proposals_defaults_status_to_needs_review(self) -> None:
         parser = _build_parser()
-        args = parser.parse_args(
-            ["list-merge-proposals", "--status", "Needs review", "myproject"]
-        )
+        args = parser.parse_args(["list-merge-proposals", "myproject"])
         assert args.command == "list-merge-proposals"
         assert args.status == "Needs review"
         assert args.project == "myproject"
         assert args.credentials is None
+
+    def test_list_merge_proposals_parses_explicit_status(self) -> None:
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["list-merge-proposals", "--status", "Approved", "myproject"]
+        )
+        assert args.command == "list-merge-proposals"
+        assert args.status == "Approved"
+        assert args.project == "myproject"
 
     def test_list_merge_proposals_parses_credentials(self) -> None:
         parser = _build_parser()
@@ -255,6 +263,62 @@ class TestMain:
             main([])
         assert exc_info.value.code == 1
 
-    def test_list_merge_proposals_raises_not_implemented(self) -> None:
-        with pytest.raises(NotImplementedError):
+    def test_list_merge_proposals_prints_output(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_lp = FakeLaunchpad(bot_username="review-bot")
+        lp_mp = make_fake_mp(status="Needs review")
+        fake_lp.add_merge_proposal("myproject", lp_mp)
+        with fake_lp.patch_login_with():
             main(["list-merge-proposals", "--status", "Needs review", "myproject"])
+        captured = capsys.readouterr()
+        assert lp_mp.web_link in captured.out
+        assert "Needs review" in captured.out
+        assert "never" in captured.out
+
+    def test_list_merge_proposals_no_output_when_empty(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_lp = FakeLaunchpad()
+        fake_lp.add_project("myproject")
+        with fake_lp.patch_login_with():
+            main(["list-merge-proposals", "--status", "Needs review", "myproject"])
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_list_merge_proposals_passes_credentials(self) -> None:
+        fake_lp = FakeLaunchpad()
+        fake_lp.add_project("myproject")
+        with fake_lp.patch_login_with():
+            main(
+                [
+                    "list-merge-proposals",
+                    "--credentials",
+                    "/path/to/creds",
+                    "--status",
+                    "Needs review",
+                    "myproject",
+                ]
+            )
+        assert fake_lp.credentials_file == "/path/to/creds"
+
+    def test_list_merge_proposals_with_reviewed_mp(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_lp = FakeLaunchpad(bot_username="ci-bot")
+        lp_mp = make_fake_mp(status="Needs review")
+        fake_lp.add_merge_proposal("myproject", lp_mp)
+        review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
+        fake_lp.add_comment(
+            lp_mp.web_link,
+            make_fake_comment(
+                author="ci-bot",
+                body="[lp-ci-tools review]\n\nLooks good!",
+                date=review_date,
+            ),
+        )
+        with fake_lp.patch_login_with():
+            main(["list-merge-proposals", "--status", "Needs review", "myproject"])
+        captured = capsys.readouterr()
+        assert lp_mp.web_link in captured.out
+        assert review_date.isoformat() in captured.out

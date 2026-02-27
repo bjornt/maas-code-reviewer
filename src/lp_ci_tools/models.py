@@ -5,6 +5,7 @@ from datetime import datetime
 @dataclass(frozen=True)
 class MergeProposal:
     url: str
+    api_url: str
     source_git_repository: str
     source_git_path: str
     target_git_repository: str

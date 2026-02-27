@@ -7,6 +7,7 @@ from datetime import datetime
 
 from lp_ci_tools.launchpad_client import LaunchpadClient
 from lp_ci_tools.models import Comment
+from lp_ci_tools.real_launchpad_client import RealLaunchpadClient
 
 REVIEW_MARKER = "[lp-ci-tools review]"
 
@@ -26,7 +27,7 @@ def list_merge_proposals(
     bot_username = client.get_bot_username()
     summaries = []
     for mp in proposals:
-        comments = client.get_comments(mp.url)
+        comments = client.get_comments(mp.api_url)
         last_reviewed = _find_last_review_date(comments, bot_username)
         summaries.append(
             MergeProposalSummary(
@@ -77,8 +78,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     list_parser.add_argument(
         "--status",
-        required=True,
-        help="Filter merge proposals by status (e.g. 'Needs review').",
+        default="Needs review",
+        help="Filter merge proposals by status (default: 'Needs review').",
     )
     list_parser.add_argument(
         "project",
@@ -97,5 +98,8 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     if args.command == "list-merge-proposals":
-        # Real LaunchpadClient wiring will be added in a later chunk.
-        raise NotImplementedError("Real LaunchpadClient is not yet available")
+        client = RealLaunchpadClient(credentials_file=args.credentials)
+        summaries = list_merge_proposals(client, args.project, args.status)
+        output = format_merge_proposals(summaries)
+        if output:
+            print(output)
