@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-lp-ci-tools = "lp_ci_tools.main:main"
+lp-ci-tools = "lp_ci_tools.cli:main"
 
 [build-system]
 requires = ["hatchling"]
