@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from lp_ci_tools.launchpad_client import LaunchpadClient, _web_url_to_api_url
+from lp_ci_tools.launchpad_client import LaunchpadClient, web_url_to_api_url
 from tests.fake_launchpadlib import (
     FakeLaunchpad,
     make_fake_comment,
@@ -156,7 +156,7 @@ class TestGetMergeProposal:
 class TestWebUrlToApiUrl:
     def test_converts_web_url(self) -> None:
         url = "https://code.launchpad.net/~user/project/+git/repo/+merge/123"
-        result = _web_url_to_api_url(url)
+        result = web_url_to_api_url(url)
         assert (
             result
             == "https://api.launchpad.net/devel/~user/project/+git/repo/+merge/123"
@@ -164,12 +164,12 @@ class TestWebUrlToApiUrl:
 
     def test_leaves_api_url_unchanged(self) -> None:
         url = "https://api.launchpad.net/devel/~user/project/+git/repo/+merge/123"
-        result = _web_url_to_api_url(url)
+        result = web_url_to_api_url(url)
         assert result == url
 
     def test_leaves_unknown_url_unchanged(self) -> None:
         url = "https://example.com/something"
-        result = _web_url_to_api_url(url)
+        result = web_url_to_api_url(url)
         assert result == url
 
 

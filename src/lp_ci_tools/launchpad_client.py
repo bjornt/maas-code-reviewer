@@ -10,7 +10,7 @@ _SERVICE_ROOT = "https://api.launchpad.net/devel/"
 _WEB_ROOT = "https://code.launchpad.net/"
 
 
-def _web_url_to_api_url(url: str) -> str:
+def web_url_to_api_url(url: str) -> str:
     """Convert a Launchpad web URL to its API equivalent.
 
     If the URL is already an API URL or doesn't match the web root,
@@ -33,7 +33,7 @@ class LaunchpadClient:
         )
 
     def get_merge_proposal(self, mp_url: str) -> MergeProposal:
-        api_url = _web_url_to_api_url(mp_url)
+        api_url = web_url_to_api_url(mp_url)
         lp_mp = self._lp.load(api_url)
         return _to_merge_proposal(lp_mp)
 

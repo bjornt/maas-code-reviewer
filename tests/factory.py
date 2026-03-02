@@ -1,19 +1,7 @@
 from __future__ import annotations
 
+from lp_ci_tools.launchpad_client import web_url_to_api_url
 from lp_ci_tools.models import MergeProposal
-
-
-def _web_link_to_api_url(web_link: str) -> str:
-    """Derive a plausible API URL from a web link.
-
-    Example:
-        https://code.launchpad.net/~user/project/+git/repo/+merge/1
-        -> https://api.launchpad.net/devel/~user/project/+git/repo/+merge/1
-    """
-    prefix = "https://code.launchpad.net/"
-    if web_link.startswith(prefix):
-        return "https://api.launchpad.net/devel/" + web_link[len(prefix) :]
-    return web_link
 
 
 def make_mp(
@@ -30,7 +18,7 @@ def make_mp(
 ) -> MergeProposal:
     return MergeProposal(
         url=url,
-        api_url=api_url if api_url is not None else _web_link_to_api_url(url),
+        api_url=api_url if api_url is not None else web_url_to_api_url(url),
         source_git_repository=source_git_repository,
         source_git_path=source_git_path,
         target_git_repository=target_git_repository,

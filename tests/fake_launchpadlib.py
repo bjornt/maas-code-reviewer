@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from unittest.mock import patch
 
+from lp_ci_tools.launchpad_client import web_url_to_api_url
+
 # ------------------------------------------------------------------
 # Leaf fakes – these mimic the attribute-access API that
 # ``LaunchpadClient`` uses on launchpadlib entry objects.
@@ -173,19 +175,6 @@ class FakeLaunchpad:
             yield
 
 
-def _web_link_to_self_link(web_link: str) -> str:
-    """Derive a plausible API self_link from a web_link.
-
-    Example:
-        https://code.launchpad.net/~user/project/+git/repo/+merge/1
-        -> https://api.launchpad.net/devel/~user/project/+git/repo/+merge/1
-    """
-    prefix = "https://code.launchpad.net/"
-    if web_link.startswith(prefix):
-        return "https://api.launchpad.net/devel/" + web_link[len(prefix) :]
-    return web_link
-
-
 def make_fake_mp(
     *,
     web_link: str = "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
@@ -201,9 +190,7 @@ def make_fake_mp(
     """Convenience factory for ``FakeMergeProposal``."""
     return FakeMergeProposal(
         web_link=web_link,
-        self_link=self_link
-        if self_link is not None
-        else _web_link_to_self_link(web_link),
+        self_link=self_link if self_link is not None else web_url_to_api_url(web_link),
         source_git_repository=FakeGitRepository(unique_name=source_repo),
         source_git_path=source_path,
         target_git_repository=FakeGitRepository(unique_name=target_repo),

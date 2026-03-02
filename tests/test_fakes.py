@@ -6,11 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.factory import _web_link_to_api_url
+from lp_ci_tools.launchpad_client import web_url_to_api_url
 from tests.fake_git import FakeGitClient
 from tests.fake_launchpadlib import (
     FakeLaunchpad,
-    _web_link_to_self_link,
     make_fake_comment,
     make_fake_mp,
 )
@@ -21,7 +20,9 @@ class TestFakeLLMClientErrors:
     def test_raises_when_no_scripted_responses(self) -> None:
         llm = FakeLLMClient()
 
-        with pytest.raises(RuntimeError, match="no more scripted responses"):
+        with pytest.raises(
+            RuntimeError, match="FakeGenaiClient: no more scripted responses"
+        ):
             llm.review("prompt", [])
 
     def test_raises_when_tool_not_found(self) -> None:
@@ -37,7 +38,9 @@ class TestFakeLLMClientErrors:
             ]
         )
 
-        with pytest.raises(RuntimeError, match="tool 'nonexistent' not found"):
+        with pytest.raises(
+            RuntimeError, match="FakeGenaiClient: tool 'nonexistent' not found"
+        ):
             llm.review("prompt", [some_tool])
 
 
@@ -55,9 +58,9 @@ class TestFakeLaunchpadlibEdgeCases:
         with pytest.raises(KeyError, match="Nothing loaded"):
             fake_lp.load("https://example.com/unknown")
 
-    def test_web_link_to_self_link_returns_unchanged_for_non_lp_url(self) -> None:
+    def test_web_url_to_api_url_returns_unchanged_for_non_lp_url(self) -> None:
         url = "https://example.com/something"
-        assert _web_link_to_self_link(url) == url
+        assert web_url_to_api_url(url) == url
 
     def test_create_comment_on_fake_mp(self) -> None:
         fake_lp = FakeLaunchpad(bot_username="ci-bot")
@@ -80,16 +83,3 @@ class TestFakeGitClientBareRepo:
         assert bare_repo.exists()
         # A bare repo has a HEAD file at the top level
         assert (bare_repo / "HEAD").exists()
-
-
-class TestFactoryWebLinkToApiUrl:
-    def test_non_launchpad_url_returned_unchanged(self) -> None:
-        url = "https://example.com/something"
-        assert _web_link_to_api_url(url) == url
-
-    def test_launchpad_url_converted(self) -> None:
-        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
-        result = _web_link_to_api_url(url)
-        assert (
-            result == "https://api.launchpad.net/devel/~user/project/+git/repo/+merge/1"
-        )
