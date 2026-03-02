@@ -556,7 +556,7 @@ class TestReviewMergeProposal:
 
         llm = FakeLLMClient([ScriptedResponse(text="LGTM, no issues found.")])
 
-        result = review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
+        result = review_merge_proposal(lp, git, llm, mp.url)
 
         assert result is not None
         assert result.startswith(REVIEW_MARKER)
@@ -592,7 +592,7 @@ class TestReviewMergeProposal:
 
         llm = FakeLLMClient()  # no responses needed — should not be called
 
-        result = review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
+        result = review_merge_proposal(lp, git, llm, mp.url)
 
         assert result is None
         # No new comment should have been posted
@@ -615,9 +615,7 @@ class TestReviewMergeProposal:
 
         llm = FakeLLMClient([ScriptedResponse(text="Some review text.")])
 
-        result = review_merge_proposal(
-            lp, git, llm, mp.url, dry_run=True, repo_url_fn=str
-        )
+        result = review_merge_proposal(lp, git, llm, mp.url, dry_run=True)
 
         assert result is not None
         assert "Some review text." in result
@@ -646,7 +644,7 @@ class TestReviewMergeProposal:
 
         llm = FakeLLMClient([ScriptedResponse(text="Nice change.")])
 
-        review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
+        review_merge_proposal(lp, git, llm, mp.url)
 
         prompt = llm._client.received_prompts[0]
         assert "pass" in prompt
@@ -669,7 +667,7 @@ class TestReviewMergeProposal:
 
         llm = FakeLLMClient([ScriptedResponse(text="Looks good.")])
 
-        review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
+        review_merge_proposal(lp, git, llm, mp.url)
 
         prompt = llm._client.received_prompts[0]
         assert "Fix the widget rendering bug" in prompt
@@ -692,7 +690,7 @@ class TestReviewMergeProposal:
 
         llm = FakeLLMClient([ScriptedResponse(text="OK.")])
 
-        review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
+        review_merge_proposal(lp, git, llm, mp.url)
 
         prompt = llm._client.received_prompts[0]
         assert "Refactor auth module" in prompt
@@ -729,7 +727,7 @@ class TestReviewMergeProposal:
             ]
         )
 
-        result = review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
+        result = review_merge_proposal(lp, git, llm, mp.url)
 
         assert result is not None
         assert "Reviewed with context." in result
@@ -764,7 +762,7 @@ class TestReviewMergeProposal:
             ]
         )
 
-        result = review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
+        result = review_merge_proposal(lp, git, llm, mp.url)
 
         assert result is not None
         assert "File missing, moving on." in result
@@ -799,7 +797,7 @@ class TestReviewMergeProposal:
             ]
         )
 
-        result = review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
+        result = review_merge_proposal(lp, git, llm, mp.url)
 
         assert result is not None
         assert "Checked src directory." in result
@@ -834,7 +832,7 @@ class TestReviewMergeProposal:
             ]
         )
 
-        result = review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
+        result = review_merge_proposal(lp, git, llm, mp.url)
 
         assert result is not None
         assert "Dir not found, continuing." in result
@@ -855,6 +853,6 @@ class TestReviewMergeProposal:
 
         llm = FakeLLMClient([ScriptedResponse(text="Review body here.")])
 
-        result = review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
+        result = review_merge_proposal(lp, git, llm, mp.url)
 
         assert result == "[lp-ci-tools review]\n\nReview body here."

@@ -58,24 +58,13 @@ def review_merge_proposal(
     git: GitClient,
     llm: GeminiClient,
     mp_url: str,
-    *,
     dry_run: bool = False,
-    repo_url_fn: Callable[[str], str] | None = None,
 ) -> str | None:
     """Review a single merge proposal end to end.
-
-    Parameters
-    ----------
-    repo_url_fn:
-        Converts a repository unique name to a git-clone-able URL.
-        Defaults to prepending the Launchpad git base URL.
 
     Returns the review comment body, or ``None`` if the MP was already
     reviewed.
     """
-    if repo_url_fn is None:
-        repo_url_fn = _lp_repo_url
-
     mp = lp.get_merge_proposal(mp_url)
 
     if has_existing_review(lp, mp.api_url):
@@ -83,8 +72,8 @@ def review_merge_proposal(
 
     target_branch = _ref_to_branch(mp.target_git_path)
     source_branch = _ref_to_branch(mp.source_git_path)
-    target_url = repo_url_fn(mp.target_git_repository)
-    source_url = repo_url_fn(mp.source_git_repository)
+    target_url = _lp_repo_url(mp.target_git_repository)
+    source_url = _lp_repo_url(mp.source_git_repository)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_dir = Path(tmpdir) / "repo"
@@ -164,7 +153,18 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _lp_repo_url(unique_name: str) -> str:
-    """Convert a Launchpad repo unique name to a git clone URL."""
+    """Convert a Launchpad repo unique name to a git clone URL.
+
+    If the provided name already looks like an absolute path or URL
+    (leading '/', 'file://', 'http://', or 'https://'), return it unchanged.
+    """
+    if (
+        unique_name.startswith("/")
+        or unique_name.startswith("file://")
+        or unique_name.startswith("http://")
+        or unique_name.startswith("https://")
+    ):
+        return unique_name
     return _LP_GIT_BASE + unique_name
 
 
