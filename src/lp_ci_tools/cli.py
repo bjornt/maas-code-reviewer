@@ -8,11 +8,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from lp_ci_tools.git import GitClient, RealGitClient
+from lp_ci_tools.git import GitClient
 from lp_ci_tools.launchpad_client import LaunchpadClient
-from lp_ci_tools.llm_client import GeminiClient, LLMClient
+from lp_ci_tools.llm_client import LLMClient
 from lp_ci_tools.models import Comment
-from lp_ci_tools.real_launchpad_client import RealLaunchpadClient
 from lp_ci_tools.reviewer import review_diff
 
 REVIEW_MARKER = "[lp-ci-tools review]"
@@ -225,17 +224,17 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     if args.command == "list-merge-proposals":
-        client = RealLaunchpadClient(credentials_file=args.launchpad_credentials)
+        client = LaunchpadClient(credentials_file=args.launchpad_credentials)
         summaries = list_merge_proposals(client, args.project, args.status)
         output = format_merge_proposals(summaries)
         if output:
             print(output)
 
     elif args.command == "review":  # pragma: no cover
-        lp_client = RealLaunchpadClient(credentials_file=args.launchpad_credentials)
-        git_client = RealGitClient()
+        lp_client = LaunchpadClient(credentials_file=args.launchpad_credentials)
+        git_client = GitClient()
         api_key = Path(args.gemini_api_key_file).read_text().strip()
-        llm_client = GeminiClient(api_key=api_key, model=args.model)
+        llm_client = LLMClient(api_key=api_key, model=args.model)
         result = review_merge_proposal(
             lp_client,
             git_client,

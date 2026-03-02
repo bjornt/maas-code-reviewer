@@ -1,9 +1,9 @@
 """Fake that mimics the launchpadlib object model.
 
-``RealLaunchpadClient`` talks to launchpadlib objects (``Launchpad``,
+``LaunchpadClient`` talks to launchpadlib objects (``Launchpad``,
 project entries, merge-proposal entries, comment entries).  This module
 provides in-memory fakes for all of those so that tests can exercise
-``RealLaunchpadClient`` without hitting the network.
+``LaunchpadClient`` without hitting the network.
 
 Usage in tests::
 
@@ -11,7 +11,7 @@ Usage in tests::
     # … populate with add_project / add_merge_proposal / add_comment …
 
     with fake_lp.patch_login_with():
-        client = RealLaunchpadClient(credentials_file="/some/creds")
+        client = LaunchpadClient(credentials_file="/some/creds")
         # client now operates against the fake data
     assert fake_lp.credentials_file == "/some/creds"
 """
@@ -26,7 +26,7 @@ from unittest.mock import patch
 
 # ------------------------------------------------------------------
 # Leaf fakes – these mimic the attribute-access API that
-# ``RealLaunchpadClient`` uses on launchpadlib entry objects.
+# ``LaunchpadClient`` uses on launchpadlib entry objects.
 # ------------------------------------------------------------------
 
 
@@ -101,7 +101,7 @@ class FakeLaunchpad:
     """In-memory replacement for a ``launchpadlib.launchpad.Launchpad`` instance.
 
     Populate it with ``add_project``, ``add_merge_proposal``, and
-    ``add_comment``, then pass it to ``RealLaunchpadClient`` (by
+    ``add_comment``, then pass it to ``LaunchpadClient`` (by
     patching ``Launchpad.login_with`` to return this object).
     """
 
@@ -137,11 +137,11 @@ class FakeLaunchpad:
         raise KeyError(f"No merge proposal with web_link {mp_web_link!r}")
 
     # ------------------------------------------------------------------
-    # launchpadlib API surface used by RealLaunchpadClient
+    # launchpadlib API surface used by LaunchpadClient
     # ------------------------------------------------------------------
 
     def load(self, url: str) -> FakeProject | FakeMergeProposal:
-        # RealLaunchpadClient calls lp.load(_SERVICE_ROOT + project_name)
+        # LaunchpadClient calls lp.load(_SERVICE_ROOT + project_name)
         # for projects, and lp.load(mp_url) for merge proposals.
         # Check merge proposals first since their self_links also start
         # with _SERVICE_ROOT.
@@ -167,7 +167,7 @@ class FakeLaunchpad:
             return self
 
         with patch(
-            "lp_ci_tools.real_launchpad_client.Launchpad.login_with",
+            "lp_ci_tools.launchpad_client.Launchpad.login_with",
             side_effect=_fake_login_with,
         ):
             yield

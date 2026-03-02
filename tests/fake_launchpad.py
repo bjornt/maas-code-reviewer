@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 
 from lp_ci_tools.launchpad_client import LaunchpadClient
 from lp_ci_tools.models import Comment, MergeProposal
 
 
-class FakeLaunchpadClient:
-    """In-memory fake that satisfies the LaunchpadClient protocol.
+class FakeLaunchpadClient(LaunchpadClient):
+    """In-memory fake that inherits from LaunchpadClient.
 
     Test code uses the helper methods (``add_merge_proposal``,
-    ``add_comment``) to set up state, then exercises the protocol
-    methods to verify behaviour.
+    ``add_comment``) to set up state, then exercises the methods
+    to verify behaviour.
     """
 
     def __init__(self, bot_username: str = "review-bot") -> None:
+        # Deliberately skip super().__init__() — we don't want a real
+        # launchpadlib connection.
         self._bot_username = bot_username
         self._proposals: list[MergeProposal] = []
         # mp api_url -> list of comments
@@ -32,7 +34,7 @@ class FakeLaunchpadClient:
         self._comments.setdefault(mp_api_url, []).append(comment)
 
     # ------------------------------------------------------------------
-    # Protocol methods
+    # Overridden methods
     # ------------------------------------------------------------------
 
     def get_merge_proposal(self, mp_url: str) -> MergeProposal:
@@ -52,8 +54,6 @@ class FakeLaunchpadClient:
         return list(self._comments.get(mp_api_url, []))
 
     def post_comment(self, mp_api_url: str, content: str, subject: str) -> None:
-        from datetime import datetime
-
         comment = Comment(
             author=self._bot_username,
             body=content,
@@ -63,9 +63,3 @@ class FakeLaunchpadClient:
 
     def get_bot_username(self) -> str:
         return self._bot_username
-
-
-def _check_protocol_compliance() -> LaunchpadClient:
-    """Purely a static type-check: FakeLaunchpadClient satisfies the protocol."""
-    client: LaunchpadClient = FakeLaunchpadClient()
-    return client

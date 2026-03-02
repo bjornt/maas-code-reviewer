@@ -2,26 +2,9 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Protocol
 
 
-class GitClient(Protocol):
-    def clone(self, repo_url: str, dest: Path, branch: str) -> None: ...
-
-    def diff(self, repo_dir: Path, base_ref: str, head_ref: str) -> str: ...
-
-    def merge_into(
-        self, repo_dir: Path, source_url: str, source_branch: str
-    ) -> None: ...
-
-    def read_file(self, repo_dir: Path, path: str) -> str | None: ...
-
-    def list_changed_files(
-        self, repo_dir: Path, base_ref: str, head_ref: str
-    ) -> list[str]: ...
-
-
-class RealGitClient:
+class GitClient:
     """GitClient implementation that wraps subprocess calls to git."""
 
     def clone(self, repo_url: str, dest: Path, branch: str) -> None:

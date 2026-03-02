@@ -22,7 +22,7 @@ class ScriptedResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
 
 
-class FakeLLMClient:
+class FakeLLMClient(LLMClient):
     """LLMClient fake that returns scripted responses and records calls.
 
     Each call to ``review()`` pops the next ``ScriptedResponse`` from the
@@ -58,9 +58,3 @@ class FakeLLMClient:
             fn(**tc.args)
 
         return response.text
-
-
-def _check_protocol_compliance() -> LLMClient:
-    """Purely a static type-check: FakeLLMClient satisfies the protocol."""
-    client: LLMClient = FakeLLMClient()
-    return client

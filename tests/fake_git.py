@@ -3,23 +3,20 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from lp_ci_tools.git import GitClient, RealGitClient
+from lp_ci_tools.git import GitClient
 
 
-class FakeGitClient:
+class FakeGitClient(GitClient):
     """GitClient backed by real git repos in temporary directories.
 
-    This is *not* a pure in-memory fake.  It delegates to ``RealGitClient``
-    for every protocol method, so it exercises the real git interaction
+    This is *not* a pure in-memory fake.  It delegates to ``GitClient``
+    for every method, so it exercises the real git interaction
     without needing network access.
 
     Test code uses the helper functions (``create_repo``, ``add_commit``)
-    to build small local repos, then calls the protocol methods against
+    to build small local repos, then calls the methods against
     those repos.
     """
-
-    def __init__(self) -> None:
-        self._real = RealGitClient()
 
     # ------------------------------------------------------------------
     # Helpers – used by tests to set up repo state
@@ -98,30 +95,3 @@ class FakeGitClient:
             check=True,
             capture_output=True,
         )
-
-    # ------------------------------------------------------------------
-    # Protocol methods – delegated to RealGitClient
-    # ------------------------------------------------------------------
-
-    def clone(self, repo_url: str, dest: Path, branch: str) -> None:
-        self._real.clone(repo_url, dest, branch)
-
-    def diff(self, repo_dir: Path, base_ref: str, head_ref: str) -> str:
-        return self._real.diff(repo_dir, base_ref, head_ref)
-
-    def merge_into(self, repo_dir: Path, source_url: str, source_branch: str) -> None:
-        self._real.merge_into(repo_dir, source_url, source_branch)
-
-    def read_file(self, repo_dir: Path, path: str) -> str | None:
-        return self._real.read_file(repo_dir, path)
-
-    def list_changed_files(
-        self, repo_dir: Path, base_ref: str, head_ref: str
-    ) -> list[str]:
-        return self._real.list_changed_files(repo_dir, base_ref, head_ref)
-
-
-def _check_protocol_compliance() -> GitClient:
-    """Purely a static type-check: FakeGitClient satisfies the protocol."""
-    client: GitClient = FakeGitClient()
-    return client

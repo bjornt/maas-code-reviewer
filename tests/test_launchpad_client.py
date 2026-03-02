@@ -2,228 +2,277 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
+from lp_ci_tools.launchpad_client import LaunchpadClient, _web_url_to_api_url
+from tests.fake_launchpadlib import (
+    FakeLaunchpad,
+    make_fake_comment,
+    make_fake_mp,
+)
 
-from lp_ci_tools.models import Comment
-from tests.factory import make_mp
-from tests.fake_launchpad import FakeLaunchpadClient
+
+def _make_client(
+    fake_lp: FakeLaunchpad, credentials_file: str | None = None
+) -> LaunchpadClient:
+    with fake_lp.patch_login_with():
+        return LaunchpadClient(credentials_file=credentials_file)
 
 
 class TestGetMergeProposals:
-    def test_empty_by_default(self) -> None:
-        client = FakeLaunchpadClient()
-        assert client.get_merge_proposals("myproject", "Needs review") == []
+    def test_empty_project(self) -> None:
+        fake_lp = FakeLaunchpad()
+        fake_lp.add_project("myproject")
+        client = _make_client(fake_lp)
+
+        result = client.get_merge_proposals("myproject", "Needs review")
+
+        assert result == []
 
     def test_returns_matching_proposals(self) -> None:
-        client = FakeLaunchpadClient()
-        mp = make_mp()
-        client.add_merge_proposal(mp)
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp(status="Needs review")
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
 
         result = client.get_merge_proposals("myproject", "Needs review")
 
-        assert result == [mp]
-
-    def test_filters_by_project(self) -> None:
-        client = FakeLaunchpadClient()
-        mp_match = make_mp(target_git_repository="myproject")
-        mp_other = make_mp(
-            url="https://code.launchpad.net/~user/other/+git/repo/+merge/2",
-            target_git_repository="other-project",
-        )
-        client.add_merge_proposal(mp_match)
-        client.add_merge_proposal(mp_other)
-
-        result = client.get_merge_proposals("myproject", "Needs review")
-
-        assert result == [mp_match]
+        assert len(result) == 1
+        assert result[0].url == mp.web_link
+        assert result[0].api_url == mp.self_link
+        assert result[0].source_git_repository == "~user/project/+git/repo"
+        assert result[0].source_git_path == "refs/heads/feature"
+        assert result[0].target_git_repository == "~user/project/+git/repo"
+        assert result[0].target_git_path == "refs/heads/main"
+        assert result[0].status == "Needs review"
 
     def test_filters_by_status(self) -> None:
-        client = FakeLaunchpadClient()
-        mp_needs_review = make_mp(status="Needs review")
-        mp_approved = make_mp(
-            url="https://code.launchpad.net/~user/project/+git/repo/+merge/2",
-            status="Approved",
-        )
-        client.add_merge_proposal(mp_needs_review)
-        client.add_merge_proposal(mp_approved)
-
-        result = client.get_merge_proposals("myproject", "Needs review")
-
-        assert result == [mp_needs_review]
-
-    def test_filters_by_both_project_and_status(self) -> None:
-        client = FakeLaunchpadClient()
-        mp_match = make_mp(target_git_repository="myproject", status="Needs review")
-        mp_wrong_project = make_mp(
-            url="https://code.launchpad.net/~user/other/+git/repo/+merge/2",
-            target_git_repository="other-project",
+        fake_lp = FakeLaunchpad()
+        mp_review = make_fake_mp(
+            web_link="https://code.launchpad.net/~user/project/+git/repo/+merge/1",
             status="Needs review",
         )
-        mp_wrong_status = make_mp(
-            url="https://code.launchpad.net/~user/project/+git/repo/+merge/3",
-            target_git_repository="myproject",
+        mp_approved = make_fake_mp(
+            web_link="https://code.launchpad.net/~user/project/+git/repo/+merge/2",
             status="Approved",
         )
-        client.add_merge_proposal(mp_match)
-        client.add_merge_proposal(mp_wrong_project)
-        client.add_merge_proposal(mp_wrong_status)
+        fake_lp.add_merge_proposal("myproject", mp_review)
+        fake_lp.add_merge_proposal("myproject", mp_approved)
+        client = _make_client(fake_lp)
 
         result = client.get_merge_proposals("myproject", "Needs review")
 
-        assert result == [mp_match]
+        assert len(result) == 1
+        assert result[0].url == mp_review.web_link
 
-    def test_returns_multiple_matches(self) -> None:
-        client = FakeLaunchpadClient()
-        mp1 = make_mp(url="https://code.launchpad.net/~user/project/+git/repo/+merge/1")
-        mp2 = make_mp(url="https://code.launchpad.net/~user/project/+git/repo/+merge/2")
-        client.add_merge_proposal(mp1)
-        client.add_merge_proposal(mp2)
+    def test_commit_message_none_when_empty(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp(commit_message="")
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
 
         result = client.get_merge_proposals("myproject", "Needs review")
 
-        assert result == [mp1, mp2]
+        assert result[0].commit_message is None
+
+    def test_description_none_when_empty(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp(description="")
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
+
+        result = client.get_merge_proposals("myproject", "Needs review")
+
+        assert result[0].description is None
+
+    def test_commit_message_preserved_when_set(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp(commit_message="Fix the thing")
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
+
+        result = client.get_merge_proposals("myproject", "Needs review")
+
+        assert result[0].commit_message == "Fix the thing"
+
+    def test_description_preserved_when_set(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp(description="A detailed description")
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
+
+        result = client.get_merge_proposals("myproject", "Needs review")
+
+        assert result[0].description == "A detailed description"
 
 
 class TestGetMergeProposal:
-    def test_returns_mp_by_web_url(self) -> None:
-        client = FakeLaunchpadClient()
-        mp = make_mp()
-        client.add_merge_proposal(mp)
+    def test_returns_merge_proposal_by_api_url(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp(status="Needs review")
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
 
-        result = client.get_merge_proposal(mp.url)
+        result = client.get_merge_proposal(mp.self_link)
 
-        assert result is mp
+        assert result.url == mp.web_link
+        assert result.api_url == mp.self_link
+        assert result.source_git_repository == "~user/project/+git/repo"
+        assert result.source_git_path == "refs/heads/feature"
+        assert result.target_git_repository == "~user/project/+git/repo"
+        assert result.target_git_path == "refs/heads/main"
+        assert result.status == "Needs review"
 
-    def test_returns_mp_by_api_url(self) -> None:
-        client = FakeLaunchpadClient()
-        mp = make_mp()
-        client.add_merge_proposal(mp)
+    def test_preserves_commit_message(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp(commit_message="Fix the thing")
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
 
-        result = client.get_merge_proposal(mp.api_url)
+        result = client.get_merge_proposal(mp.self_link)
 
-        assert result is mp
+        assert result.commit_message == "Fix the thing"
 
-    def test_raises_key_error_for_unknown_url(self) -> None:
-        client = FakeLaunchpadClient()
-        mp = make_mp()
-        client.add_merge_proposal(mp)
+    def test_preserves_description(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp(description="A detailed description")
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
 
-        with pytest.raises(KeyError):
-            client.get_merge_proposal("https://example.com/unknown")
+        result = client.get_merge_proposal(mp.self_link)
+
+        assert result.description == "A detailed description"
+
+    def test_returns_merge_proposal_by_web_url(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp(status="Needs review")
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
+
+        result = client.get_merge_proposal(mp.web_link)
+
+        assert result.url == mp.web_link
+        assert result.api_url == mp.self_link
+
+
+class TestWebUrlToApiUrl:
+    def test_converts_web_url(self) -> None:
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/123"
+        result = _web_url_to_api_url(url)
+        assert (
+            result
+            == "https://api.launchpad.net/devel/~user/project/+git/repo/+merge/123"
+        )
+
+    def test_leaves_api_url_unchanged(self) -> None:
+        url = "https://api.launchpad.net/devel/~user/project/+git/repo/+merge/123"
+        result = _web_url_to_api_url(url)
+        assert result == url
+
+    def test_leaves_unknown_url_unchanged(self) -> None:
+        url = "https://example.com/something"
+        result = _web_url_to_api_url(url)
+        assert result == url
 
 
 class TestGetComments:
-    def test_no_comments_returns_empty_list(self) -> None:
-        client = FakeLaunchpadClient()
-        assert client.get_comments("https://example.com/mp/1") == []
+    def test_no_comments(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp()
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
 
-    def test_returns_comments_for_mp(self) -> None:
-        client = FakeLaunchpadClient()
-        mp = make_mp()
-        client.add_merge_proposal(mp)
-        comment = Comment(
-            author="alice",
-            body="Looks good!",
-            date=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
-        )
-        client.add_comment(mp.url, comment)
+        result = client.get_comments(mp.self_link)
 
-        result = client.get_comments(mp.url)
+        assert result == []
 
-        assert result == [comment]
+    def test_returns_comments(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp()
+        fake_lp.add_merge_proposal("myproject", mp)
+        date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
+        comment = make_fake_comment(author="alice", body="Looks good!", date=date)
+        fake_lp.add_comment(mp.web_link, comment)
+        client = _make_client(fake_lp)
 
-    def test_comments_are_isolated_per_mp(self) -> None:
-        client = FakeLaunchpadClient()
-        mp1 = make_mp(url="https://code.launchpad.net/~user/project/+git/repo/+merge/1")
-        mp2 = make_mp(url="https://code.launchpad.net/~user/project/+git/repo/+merge/2")
-        client.add_merge_proposal(mp1)
-        client.add_merge_proposal(mp2)
-        comment1 = Comment(
-            author="alice",
-            body="Comment on MP 1",
-            date=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
-        )
-        comment2 = Comment(
-            author="bob",
-            body="Comment on MP 2",
-            date=datetime(2025, 1, 15, 13, 0, 0, tzinfo=UTC),
-        )
-        client.add_comment(mp1.url, comment1)
-        client.add_comment(mp2.url, comment2)
+        result = client.get_comments(mp.self_link)
 
-        assert client.get_comments(mp1.url) == [comment1]
-        assert client.get_comments(mp2.url) == [comment2]
+        assert len(result) == 1
+        assert result[0].author == "alice"
+        assert result[0].body == "Looks good!"
+        assert result[0].date == date
 
-    def test_returns_copy_not_reference(self) -> None:
-        client = FakeLaunchpadClient()
-        mp = make_mp()
-        client.add_merge_proposal(mp)
-        comment = Comment(
-            author="alice",
-            body="Hello",
-            date=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
-        )
-        client.add_comment(mp.url, comment)
+    def test_multiple_comments(self) -> None:
+        fake_lp = FakeLaunchpad()
+        mp = make_fake_mp()
+        fake_lp.add_merge_proposal("myproject", mp)
+        c1 = make_fake_comment(author="alice", body="First")
+        c2 = make_fake_comment(author="bob", body="Second")
+        fake_lp.add_comment(mp.web_link, c1)
+        fake_lp.add_comment(mp.web_link, c2)
+        client = _make_client(fake_lp)
 
-        result = client.get_comments(mp.url)
-        result.clear()
+        result = client.get_comments(mp.self_link)
 
-        assert client.get_comments(mp.url) == [comment]
+        assert len(result) == 2
+        assert result[0].author == "alice"
+        assert result[1].author == "bob"
 
 
 class TestPostComment:
-    def test_post_comment_adds_comment_by_bot(self) -> None:
-        client = FakeLaunchpadClient(bot_username="ci-bot")
-        mp = make_mp()
-        client.add_merge_proposal(mp)
+    def test_post_comment_adds_comment(self) -> None:
+        fake_lp = FakeLaunchpad(bot_username="ci-bot")
+        mp = make_fake_mp()
+        fake_lp.add_merge_proposal("myproject", mp)
+        client = _make_client(fake_lp)
 
-        client.post_comment(mp.url, "Nice work!", subject="Review")
+        client.post_comment(mp.self_link, "Great work!", subject="Review")
 
-        comments = client.get_comments(mp.url)
-        assert len(comments) == 1
-        assert comments[0].author == "ci-bot"
-        assert comments[0].body == "Nice work!"
+        result = client.get_comments(mp.self_link)
+        assert len(result) == 1
+        assert result[0].author == "ci-bot"
+        assert result[0].body == "Great work!"
 
     def test_post_comment_appends_to_existing(self) -> None:
-        client = FakeLaunchpadClient()
-        mp = make_mp()
-        client.add_merge_proposal(mp)
-        existing = Comment(
-            author="alice",
-            body="First comment",
-            date=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
-        )
-        client.add_comment(mp.url, existing)
+        fake_lp = FakeLaunchpad(bot_username="ci-bot")
+        mp = make_fake_mp()
+        fake_lp.add_merge_proposal("myproject", mp)
+        existing = make_fake_comment(author="alice", body="First comment")
+        fake_lp.add_comment(mp.web_link, existing)
+        client = _make_client(fake_lp)
 
-        client.post_comment(mp.url, "Bot comment", subject="Review")
+        client.post_comment(mp.self_link, "Bot comment", subject="Review")
 
-        comments = client.get_comments(mp.url)
-        assert len(comments) == 2
-        assert comments[0] is existing
-        assert comments[1].author == client.get_bot_username()
+        result = client.get_comments(mp.self_link)
+        assert len(result) == 2
+        assert result[0].author == "alice"
+        assert result[1].author == "ci-bot"
+        assert result[1].body == "Bot comment"
 
 
 class TestGetBotUsername:
+    def test_returns_bot_username(self) -> None:
+        fake_lp = FakeLaunchpad(bot_username="ci-bot")
+        client = _make_client(fake_lp)
+
+        assert client.get_bot_username() == "ci-bot"
+
     def test_default_username(self) -> None:
-        client = FakeLaunchpadClient()
+        fake_lp = FakeLaunchpad()
+        client = _make_client(fake_lp)
+
         assert client.get_bot_username() == "review-bot"
 
-    def test_custom_username(self) -> None:
-        client = FakeLaunchpadClient(bot_username="my-bot")
-        assert client.get_bot_username() == "my-bot"
 
+class TestCredentials:
+    def test_credentials_file_is_recorded(self) -> None:
+        fake_lp = FakeLaunchpad()
+        fake_lp.add_project("myproject")
+        _make_client(fake_lp, credentials_file="/path/to/creds")
 
-class TestDataModelsAreFrozen:
-    def test_merge_proposal_is_frozen(self) -> None:
-        mp = make_mp()
-        with pytest.raises(AttributeError):
-            mp.status = "Approved"  # type: ignore[misc]
+        assert fake_lp.credentials_file == "/path/to/creds"
 
-    def test_comment_is_frozen(self) -> None:
-        comment = Comment(
-            author="alice",
-            body="Hello",
-            date=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC),
-        )
-        with pytest.raises(AttributeError):
-            comment.body = "Changed"  # type: ignore[misc]
+    def test_credentials_file_none_when_omitted(self) -> None:
+        fake_lp = FakeLaunchpad()
+        fake_lp.add_project("myproject")
+        _make_client(fake_lp)
+
+        assert fake_lp.credentials_file is None

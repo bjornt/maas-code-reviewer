@@ -36,7 +36,7 @@ tests/
 ├── fake_llm.py           # FakeLLMClient
 ├── fake_git.py           # FakeGitClient
 ├── test_cli.py
-├── test_launchpad_client.py
+├── test_models.py
 ├── test_git.py
 ├── test_reviewer.py
 └── test_llm_client.py
@@ -235,8 +235,7 @@ of diff per chunk.
 - `src/lp_ci_tools/models.py` — `MergeProposal` and `Comment` dataclasses
 - `src/lp_ci_tools/launchpad_client.py` — `LaunchpadClient` protocol
 - `tests/fake_launchpad.py` — `FakeLaunchpadClient` with internal state
-- `tests/test_launchpad_client.py` — tests that exercise the fake to verify
-  the contract (add proposals, list them, add/read comments, filter by status)
+- `tests/test_models.py` — tests for data model invariants (e.g. frozen dataclasses)
 
 **Files to modify:**
 - `pyproject.toml` — add `pytest` and `pytest-cov` to dev dependencies
