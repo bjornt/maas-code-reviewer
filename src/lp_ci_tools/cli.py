@@ -19,11 +19,6 @@ REVIEW_MARKER = "[lp-ci-tools review]"
 _LP_GIT_BASE = "https://git.launchpad.net/"
 
 
-def _lp_repo_url(unique_name: str) -> str:
-    """Convert a Launchpad repo unique name to a git clone URL."""
-    return _LP_GIT_BASE + unique_name
-
-
 @dataclass(frozen=True)
 class MergeProposalSummary:
     url: str
@@ -51,33 +46,11 @@ def list_merge_proposals(
     return summaries
 
 
-def _find_last_review_date(
-    comments: list[Comment], bot_username: str
-) -> datetime | None:
-    """Find the timestamp of the most recent review comment by the bot."""
-    review_dates = [
-        c.date
-        for c in comments
-        if c.author == bot_username and c.body.startswith(REVIEW_MARKER)
-    ]
-    if not review_dates:
-        return None
-    return max(review_dates)
-
-
 def has_existing_review(client: LaunchpadClient, mp_api_url: str) -> bool:
     """Return True if the bot has already posted a review on this MP."""
     comments = client.get_comments(mp_api_url)
     bot_username = client.get_bot_username()
     return _find_last_review_date(comments, bot_username) is not None
-
-
-def _ref_to_branch(git_path: str) -> str:
-    """Convert a refs/heads/branch-name path to just the branch name."""
-    prefix = "refs/heads/"
-    if git_path.startswith(prefix):
-        return git_path[len(prefix) :]
-    return git_path
 
 
 def review_merge_proposal(
@@ -87,7 +60,7 @@ def review_merge_proposal(
     mp_url: str,
     *,
     dry_run: bool = False,
-    repo_url_fn: Callable[[str], str] = _lp_repo_url,
+    repo_url_fn: Callable[[str], str] | None = None,
 ) -> str | None:
     """Review a single merge proposal end to end.
 
@@ -100,6 +73,9 @@ def review_merge_proposal(
     Returns the review comment body, or ``None`` if the MP was already
     reviewed.
     """
+    if repo_url_fn is None:
+        repo_url_fn = _lp_repo_url
+
     mp = lp.get_merge_proposal(mp_url)
 
     if has_existing_review(lp, mp.api_url):
@@ -152,6 +128,66 @@ def format_merge_proposals(summaries: list[MergeProposalSummary]) -> str:
         reviewed = s.last_reviewed.isoformat() if s.last_reviewed else "never"
         lines.append(f"{s.url} {s.status} {reviewed}")
     return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command is None:
+        parser.print_help()
+        sys.exit(1)
+
+    if args.command == "list-merge-proposals":
+        client = LaunchpadClient(credentials_file=args.launchpad_credentials)
+        summaries = list_merge_proposals(client, args.project, args.status)
+        output = format_merge_proposals(summaries)
+        if output:
+            print(output)
+
+    elif args.command == "review":  # pragma: no cover
+        lp_client = LaunchpadClient(credentials_file=args.launchpad_credentials)
+        git_client = GitClient()
+        api_key = Path(args.gemini_api_key_file).read_text().strip()
+        llm_client = GeminiClient(api_key=api_key, model=args.model)
+        result = review_merge_proposal(
+            lp_client,
+            git_client,
+            llm_client,
+            args.mp_url,
+            dry_run=args.dry_run,
+        )
+        if result is None:
+            print("Already reviewed, skipping.")
+        elif args.dry_run:
+            print(result)
+
+
+def _lp_repo_url(unique_name: str) -> str:
+    """Convert a Launchpad repo unique name to a git clone URL."""
+    return _LP_GIT_BASE + unique_name
+
+
+def _find_last_review_date(
+    comments: list[Comment], bot_username: str
+) -> datetime | None:
+    """Find the timestamp of the most recent review comment by the bot."""
+    review_dates = [
+        c.date
+        for c in comments
+        if c.author == bot_username and c.body.startswith(REVIEW_MARKER)
+    ]
+    if not review_dates:
+        return None
+    return max(review_dates)
+
+
+def _ref_to_branch(git_path: str) -> str:
+    """Convert a refs/heads/branch-name path to just the branch name."""
+    prefix = "refs/heads/"
+    if git_path.startswith(prefix):
+        return git_path[len(prefix) :]
+    return git_path
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -213,36 +249,3 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
-
-
-def main(argv: list[str] | None = None) -> None:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
-    if args.command is None:
-        parser.print_help()
-        sys.exit(1)
-
-    if args.command == "list-merge-proposals":
-        client = LaunchpadClient(credentials_file=args.launchpad_credentials)
-        summaries = list_merge_proposals(client, args.project, args.status)
-        output = format_merge_proposals(summaries)
-        if output:
-            print(output)
-
-    elif args.command == "review":  # pragma: no cover
-        lp_client = LaunchpadClient(credentials_file=args.launchpad_credentials)
-        git_client = GitClient()
-        api_key = Path(args.gemini_api_key_file).read_text().strip()
-        llm_client = GeminiClient(api_key=api_key, model=args.model)
-        result = review_merge_proposal(
-            lp_client,
-            git_client,
-            llm_client,
-            args.mp_url,
-            dry_run=args.dry_run,
-        )
-        if result is None:
-            print("Already reviewed, skipping.")
-        elif args.dry_run:
-            print(result)

@@ -27,9 +27,10 @@ This runs linting (`ruff`), type checking (`ty`), and tests (`pytest`). All thre
 
 ## Conventions
 
-- Python ≥ 3.13
+- Python ≥ 3.12
 - Keep `try`/`except` blocks minimal — only wrap the code that can actually raise the caught exception.
 - Catch specific exceptions, never bare `Exception`.
 - Avoid regular expressions. Prefer string methods (`.split()`, `.startswith()`, `.endswith()`).
 - Avoid mocking. Use fakes (see `tests/fake_launchpad.py`) — objects with the same API as the real thing but with exposed internal state for test control.
 - Follow the protocols defined in `SPEC.md` when adding new clients or services.
+- In modules and classes that have both public and private (underscore-prefixed) methods/functions, public ones come first, private ones at the bottom.

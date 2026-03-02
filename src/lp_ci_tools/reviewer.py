@@ -31,31 +31,6 @@ TRUNCATION_NOTE = (
 )
 
 
-def _build_prompt(diff: str, description: str | None) -> str:
-    """Construct the full prompt from the system instruction, diff, and description."""
-    parts: list[str] = [SYSTEM_INSTRUCTION, "\n\n## Diff\n\n```\n", diff, "\n```\n"]
-
-    if description:
-        parts.append("\n## Merge Proposal Description\n\n")
-        parts.append(description)
-        parts.append("\n")
-
-    parts.append(
-        "\n## Instructions\n\n"
-        "Review the diff above. Use the provided tools to read files or list "
-        "directories if you need additional context. Provide your review."
-    )
-
-    return "".join(parts)
-
-
-def _truncate_diff(diff: str, max_chars: int) -> str:
-    """Truncate *diff* to *max_chars*, appending a note if truncated."""
-    if len(diff) <= max_chars:
-        return diff
-    return diff[:max_chars] + TRUNCATION_NOTE
-
-
 def review_diff(
     llm: GeminiClient,
     diff: str,
@@ -96,3 +71,28 @@ def review_diff(
     review_text = llm.review(prompt, tools)
 
     return f"{REVIEW_MARKER}\n\n{review_text}"
+
+
+def _build_prompt(diff: str, description: str | None) -> str:
+    """Construct the full prompt from the system instruction, diff, and description."""
+    parts: list[str] = [SYSTEM_INSTRUCTION, "\n\n## Diff\n\n```\n", diff, "\n```\n"]
+
+    if description:
+        parts.append("\n## Merge Proposal Description\n\n")
+        parts.append(description)
+        parts.append("\n")
+
+    parts.append(
+        "\n## Instructions\n\n"
+        "Review the diff above. Use the provided tools to read files or list "
+        "directories if you need additional context. Provide your review."
+    )
+
+    return "".join(parts)
+
+
+def _truncate_diff(diff: str, max_chars: int) -> str:
+    """Truncate *diff* to *max_chars*, appending a note if truncated."""
+    if len(diff) <= max_chars:
+        return diff
+    return diff[:max_chars] + TRUNCATION_NOTE
