@@ -11,10 +11,6 @@
 - `pyproject.toml` — project config (hatchling build, uv for deps)
 - `Makefile` — lint, typecheck, test, and build targets
 
-## Note on `main.py`
-
-`src/lp_ci_tools/main.py` is **legacy code**. Use it as a reference only — it will eventually be deleted. Do not build on top of it.
-
 ## Workflow
 
 After every change, run:
