@@ -10,7 +10,7 @@ from pathlib import Path
 
 from lp_ci_tools.git import GitClient
 from lp_ci_tools.launchpad_client import LaunchpadClient
-from lp_ci_tools.llm_client import LLMClient
+from lp_ci_tools.llm_client import GeminiClient
 from lp_ci_tools.models import Comment
 from lp_ci_tools.reviewer import review_diff
 
@@ -83,7 +83,7 @@ def _ref_to_branch(git_path: str) -> str:
 def review_merge_proposal(
     lp: LaunchpadClient,
     git: GitClient,
-    llm: LLMClient,
+    llm: GeminiClient,
     mp_url: str,
     *,
     dry_run: bool = False,
@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> None:
         lp_client = LaunchpadClient(credentials_file=args.launchpad_credentials)
         git_client = GitClient()
         api_key = Path(args.gemini_api_key_file).read_text().strip()
-        llm_client = LLMClient(api_key=api_key, model=args.model)
+        llm_client = GeminiClient(api_key=api_key, model=args.model)
         result = review_merge_proposal(
             lp_client,
             git_client,

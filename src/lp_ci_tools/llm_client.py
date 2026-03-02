@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 
 
-class LLMClient:
+class GeminiClient:
     """LLM client backed by the Google Gemini API.
 
     Uses ``chats.create`` with automatic function calling — the SDK
@@ -17,10 +17,14 @@ class LLMClient:
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str = "",
         model: str = "gemini-3-flash-preview",
+        client: genai.Client | None = None,
     ) -> None:
-        self._client = genai.Client(api_key=api_key)
+        if client is not None:
+            self._client = client
+        else:
+            self._client = genai.Client(api_key=api_key)  # pragma: no cover
         self._model = model
 
     def review(self, prompt: str, tools: list[Callable[..., str]]) -> str:

@@ -130,7 +130,7 @@ class TestReviewDiff:
             read_file=_make_read_file(),
             list_directory=_make_list_directory(),
         )
-        assert "my-diff" in llm.received_prompts[0]
+        assert "my-diff" in llm._client.received_prompts[0]
 
     def test_prompt_contains_description(self) -> None:
         llm = FakeLLMClient([ScriptedResponse(text="ok")])
@@ -141,7 +141,7 @@ class TestReviewDiff:
             read_file=_make_read_file(),
             list_directory=_make_list_directory(),
         )
-        assert "Add feature X" in llm.received_prompts[0]
+        assert "Add feature X" in llm._client.received_prompts[0]
 
     def test_diff_truncated_when_exceeding_max(self) -> None:
         llm = FakeLLMClient([ScriptedResponse(text="ok")])
@@ -154,7 +154,7 @@ class TestReviewDiff:
             list_directory=_make_list_directory(),
             max_diff_chars=50,
         )
-        prompt = llm.received_prompts[0]
+        prompt = llm._client.received_prompts[0]
         # The full 200-char diff should NOT appear
         assert "x" * 200 not in prompt
         # But the truncated portion and note should
@@ -172,7 +172,7 @@ class TestReviewDiff:
             list_directory=_make_list_directory(),
             max_diff_chars=100,
         )
-        prompt = llm.received_prompts[0]
+        prompt = llm._client.received_prompts[0]
         assert "y" * 50 in prompt
         assert TRUNCATION_NOTE not in prompt
 
@@ -187,7 +187,7 @@ class TestReviewDiff:
             read_file=rf,
             list_directory=ld,
         )
-        tool_names = {t.__name__ for t in llm.received_tools[0]}
+        tool_names = {t.__name__ for t in llm._client.received_tools[0]}
         assert "read_file" in tool_names
         assert "list_directory" in tool_names
 

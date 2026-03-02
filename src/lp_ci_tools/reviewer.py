@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from lp_ci_tools.llm_client import LLMClient
+from lp_ci_tools.llm_client import GeminiClient
 
 REVIEW_MARKER = "[lp-ci-tools review]"
 
@@ -57,7 +57,7 @@ def _truncate_diff(diff: str, max_chars: int) -> str:
 
 
 def review_diff(
-    llm: LLMClient,
+    llm: GeminiClient,
     diff: str,
     description: str | None,
     read_file: Callable[[str], str],

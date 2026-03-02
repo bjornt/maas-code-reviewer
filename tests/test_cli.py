@@ -648,7 +648,7 @@ class TestReviewMergeProposal:
 
         review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
 
-        prompt = llm.received_prompts[0]
+        prompt = llm._client.received_prompts[0]
         assert "pass" in prompt
         assert "print" in prompt
 
@@ -671,7 +671,7 @@ class TestReviewMergeProposal:
 
         review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
 
-        prompt = llm.received_prompts[0]
+        prompt = llm._client.received_prompts[0]
         assert "Fix the widget rendering bug" in prompt
 
     def test_commit_message_used_when_no_description(self, tmp_path: Path) -> None:
@@ -694,7 +694,7 @@ class TestReviewMergeProposal:
 
         review_merge_proposal(lp, git, llm, mp.url, repo_url_fn=str)
 
-        prompt = llm.received_prompts[0]
+        prompt = llm._client.received_prompts[0]
         assert "Refactor auth module" in prompt
 
     def test_tools_provided_to_llm_can_read_files(self, tmp_path: Path) -> None:

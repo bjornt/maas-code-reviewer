@@ -44,7 +44,6 @@ source = ["src/lp_ci_tools", "tests"]
 exclude_lines = [
     "pragma: no cover",
     "def _check_protocol_compliance",
-    "class GeminiClient",
     "raise NotImplementedError",
     "if __name__",
     "raised = False",
