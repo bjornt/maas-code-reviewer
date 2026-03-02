@@ -39,7 +39,6 @@ select = ["E", "F", "I", "UP"]
 
 [tool.coverage.run]
 source = ["src/lp_ci_tools", "tests"]
-omit = ["src/lp_ci_tools/main.py"]
 
 [tool.coverage.report]
 exclude_lines = [
