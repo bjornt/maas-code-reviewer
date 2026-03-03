@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> None:
         if output:
             print(output)
 
-    elif args.command == "review":  # pragma: no cover
+    elif args.command == "review":
         lp_client = LaunchpadClient(credentials_file=args.launchpad_credentials)
         git_client = GitClient()
         api_key = Path(args.gemini_api_key_file).read_text().strip()

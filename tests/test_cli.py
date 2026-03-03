@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -429,6 +430,130 @@ class TestMain:
         captured = capsys.readouterr()
         assert lp_mp.web_link in captured.out
         assert review_date.isoformat() in captured.out
+
+    def test_review_command_posts_review(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        git = FakeGitClient()
+        target_repo, source_repo = _setup_repos(tmp_path, git)
+
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(
+            source_git_repository=str(source_repo),
+            source_git_path="refs/heads/feature",
+            target_git_repository=str(target_repo),
+            target_git_path="refs/heads/main",
+        )
+        lp.add_merge_proposal(mp)
+
+        llm = FakeLLMClient([ScriptedResponse(text="Looks great.")])
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        with (
+            patch("lp_ci_tools.cli.LaunchpadClient", return_value=lp),
+            patch("lp_ci_tools.cli.GitClient", return_value=git),
+            patch("lp_ci_tools.cli.GeminiClient", return_value=llm),
+        ):
+            main(
+                [
+                    "review",
+                    "--gemini-api-key-file",
+                    str(api_key_file),
+                    mp.url,
+                ]
+            )
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        comments = lp.get_comments(mp.api_url)
+        assert len(comments) == 1
+        assert "Looks great." in comments[0].body
+
+    def test_review_command_prints_already_reviewed(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        git = FakeGitClient()
+        target_repo, source_repo = _setup_repos(tmp_path, git)
+
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(
+            source_git_repository=str(source_repo),
+            source_git_path="refs/heads/feature",
+            target_git_repository=str(target_repo),
+            target_git_path="refs/heads/main",
+        )
+        lp.add_merge_proposal(mp)
+        lp.add_comment(
+            mp.api_url,
+            Comment(
+                author="ci-bot",
+                body="[lp-ci-tools review]\n\nAlready done.",
+                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+            ),
+        )
+
+        llm = FakeLLMClient()
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        with (
+            patch("lp_ci_tools.cli.LaunchpadClient", return_value=lp),
+            patch("lp_ci_tools.cli.GitClient", return_value=git),
+            patch("lp_ci_tools.cli.GeminiClient", return_value=llm),
+        ):
+            main(
+                [
+                    "review",
+                    "--gemini-api-key-file",
+                    str(api_key_file),
+                    mp.url,
+                ]
+            )
+
+        captured = capsys.readouterr()
+        assert "Already reviewed, skipping." in captured.out
+
+    def test_review_command_dry_run_prints_review(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        git = FakeGitClient()
+        target_repo, source_repo = _setup_repos(tmp_path, git)
+
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(
+            source_git_repository=str(source_repo),
+            source_git_path="refs/heads/feature",
+            target_git_repository=str(target_repo),
+            target_git_path="refs/heads/main",
+        )
+        lp.add_merge_proposal(mp)
+
+        llm = FakeLLMClient([ScriptedResponse(text="Dry run review.")])
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        with (
+            patch("lp_ci_tools.cli.LaunchpadClient", return_value=lp),
+            patch("lp_ci_tools.cli.GitClient", return_value=git),
+            patch("lp_ci_tools.cli.GeminiClient", return_value=llm),
+        ):
+            main(
+                [
+                    "review",
+                    "--dry-run",
+                    "--gemini-api-key-file",
+                    str(api_key_file),
+                    mp.url,
+                ]
+            )
+
+        captured = capsys.readouterr()
+        assert "Dry run review." in captured.out
+        assert len(lp.get_comments(mp.api_url)) == 0
 
 
 class TestLpRepoUrl:
