@@ -38,7 +38,7 @@ line-length = 88
 select = ["E", "F", "I", "UP"]
 
 [tool.coverage.run]
-source = ["src/lp_ci_tools", "tests"]
+source = ["src/lp_ci_tools"]
 
 [tool.coverage.report]
 exclude_lines = [
