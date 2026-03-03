@@ -54,13 +54,25 @@ class LaunchpadClient:
         return self._lp.me.name
 
 
+def _get_git_unique_name(repo_link: str) -> str:
+    """Extract git repository unique name from a self_link URL.
+
+    Given a URL like https://api.launchpad.net/devel/~user/project/+git/repo,
+    returns ~user/project/+git/repo.
+    """
+    assert repo_link.startswith(_SERVICE_ROOT), (
+        f"Expected repo_link to start with {_SERVICE_ROOT}, got {repo_link}"
+    )
+    return repo_link[len(_SERVICE_ROOT) :]
+
+
 def _to_merge_proposal(lp_mp: object) -> MergeProposal:
     return MergeProposal(
         url=lp_mp.web_link,  # type: ignore[attr-defined]
         api_url=lp_mp.self_link,  # type: ignore[attr-defined]
-        source_git_repository=lp_mp.source_git_repository.unique_name,  # type: ignore[attr-defined]
+        source_git_repository=_get_git_unique_name(lp_mp.source_git_repository_link),  # type: ignore[attr-defined]
         source_git_path=lp_mp.source_git_path,  # type: ignore[attr-defined]
-        target_git_repository=lp_mp.target_git_repository.unique_name,  # type: ignore[attr-defined]
+        target_git_repository=_get_git_unique_name(lp_mp.target_git_repository_link),  # type: ignore[attr-defined]
         target_git_path=lp_mp.target_git_path,  # type: ignore[attr-defined]
         status=lp_mp.queue_status,  # type: ignore[attr-defined]
         commit_message=lp_mp.commit_message or None,  # type: ignore[attr-defined]

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from lp_ci_tools.launchpad_client import LaunchpadClient, web_url_to_api_url
+from lp_ci_tools.launchpad_client import (
+    LaunchpadClient,
+    _get_git_unique_name,
+    web_url_to_api_url,
+)
 from tests.fake_launchpadlib import (
     FakeLaunchpad,
     make_fake_comment,
@@ -276,3 +280,15 @@ class TestCredentials:
         _make_client(fake_lp)
 
         assert fake_lp.credentials_file is None
+
+
+class TestGetGitUniqueName:
+    def test_extracts_unique_name_from_service_root_url(self) -> None:
+        repo_link = "https://api.launchpad.net/devel/~user/project/+git/repo"
+        result = _get_git_unique_name(repo_link)
+        assert result == "~user/project/+git/repo"
+
+    def test_extracts_nested_project_unique_name(self) -> None:
+        repo_link = "https://api.launchpad.net/devel/~maas-committers/maas-site-manager/+git/site-manager"
+        result = _get_git_unique_name(repo_link)
+        assert result == "~maas-committers/maas-site-manager/+git/site-manager"

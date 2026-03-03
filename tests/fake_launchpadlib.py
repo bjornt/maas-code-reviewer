@@ -59,8 +59,10 @@ class FakeMergeProposal:
     web_link: str
     self_link: str
     source_git_repository: FakeGitRepository
+    source_git_repository_link: str
     source_git_path: str
     target_git_repository: FakeGitRepository
+    target_git_repository_link: str
     target_git_path: str
     queue_status: str
     commit_message: str | None = None
@@ -192,8 +194,10 @@ def make_fake_mp(
         web_link=web_link,
         self_link=self_link if self_link is not None else web_url_to_api_url(web_link),
         source_git_repository=FakeGitRepository(unique_name=source_repo),
+        source_git_repository_link=_SERVICE_ROOT + source_repo,
         source_git_path=source_path,
         target_git_repository=FakeGitRepository(unique_name=target_repo),
+        target_git_repository_link=_SERVICE_ROOT + target_repo,
         target_git_path=target_path,
         queue_status=status,
         commit_message=commit_message,
