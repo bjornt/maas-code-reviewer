@@ -1,0 +1,70 @@
+name: AI Code Review
+
+# Use pull_request_target so the workflow always runs from the main branch.
+# This gives it access to repository secrets while still being triggered by
+# PRs from forks or feature branches.
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# ---- Configuration ----
+# Change the model to use for reviews here.
+env:
+  MODEL: gemini-2.5-flash
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out the PR HEAD so the LLM can read the actual files being
+      #    reviewed via --repo-dir.  We do NOT run any code from this checkout.
+      - name: Check out PR head (for file context)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # 2. Check out the maas-code-reviewer tool from its canonical repo.
+      #    In the future this will likely become a snap or a dedicated GitHub
+      #    Action, but for now we install from source.
+      - name: Check out maas-code-reviewer
+        uses: actions/checkout@v4
+        with:
+          repository: canonical/maas-code-reviewer
+          path: maas-code-reviewer
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install maas-code-reviewer
+        run: uv sync --frozen
+        working-directory: maas-code-reviewer
+
+      - name: Write Gemini API key to file
+        run: printenv GEMINI_API_KEY > "$RUNNER_TEMP/gemini-api-key"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Run AI review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          uv run maas-code-reviewer review-pr \
+            -g "$RUNNER_TEMP/gemini-api-key" \
+            --model "$MODEL" \
+            --repo-dir "$GITHUB_WORKSPACE" \
+            "https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+        working-directory: maas-code-reviewer
+
+      - name: Clean up API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gemini-api-key"
