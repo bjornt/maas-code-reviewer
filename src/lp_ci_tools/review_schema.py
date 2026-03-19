@@ -100,6 +100,11 @@ def validate_review_json(data: dict, diff_text: str) -> list[str]:
     """
     errors: list[str] = []
 
+    if not isinstance(data, dict):
+        got = type(data).__name__
+        errors.append(f"Review must be a JSON object (dict), got {got}.")
+        return errors
+
     if "general_comment" not in data:
         errors.append("Missing required key: 'general_comment'.")
     elif not isinstance(data["general_comment"], str):

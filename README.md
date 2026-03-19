@@ -1,13 +1,13 @@
 # lp-ci-tools
 
-A command-line tool that discovers merge proposals on
-[Launchpad](https://launchpad.net/) and reviews them using a Gemini LLM. It
-posts its findings as comments on the merge proposal. Designed to run in
-Jenkins but also works standalone for local testing.
+A command-line tool that reviews [Launchpad](https://launchpad.net/) merge
+proposals and [GitHub](https://github.com/) pull requests using a Gemini LLM.
+It posts its findings as comments on the merge proposal or pull request.
+Designed to run in Jenkins but also works standalone for local testing.
 
 ## Installation
 
-Requires Python ≥ 3.13.
+Requires Python ≥ 3.12.
 
 ```sh
 uv sync
@@ -20,6 +20,15 @@ make build
 ```
 
 ## Configuration
+
+### Gemini API Key
+
+All review commands require a Gemini API key. Provide the path to a file
+containing the key with the `-g` / `--gemini-api-key-file` flag:
+
+```sh
+lp-ci-tools review-mp -g /path/to/gemini-api-key MP_URL
+```
 
 ### Launchpad Credentials
 
@@ -34,24 +43,24 @@ to authenticate with Launchpad. You can provide credentials in two ways:
 If neither is provided, `launchpadlib` will use its default OAuth flow
 (opening a browser for authorization on first use).
 
-### Gemini API Key
+### GitHub Token
 
-The `review` and `review-new` commands require a Gemini API key. Provide the
-path to a file containing the key with the `-g` / `--gemini-api-key-file`
-flag:
+The `review-pr` command requires a GitHub personal access token. Provide it
+in one of two ways:
 
-```sh
-lp-ci-tools review -g /path/to/gemini-api-key MP_URL
-```
+| Method | Details |
+|---|---|
+| `--github-token TOKEN` | Pass the token directly on the command line. |
+| `GITHUB_TOKEN` | Set this environment variable. Overridden by `--github-token`. |
 
 ## Usage
 
-### `list-merge-proposals`
+### `list-lp-mps`
 
 List merge proposals for a Launchpad project, filtered by status.
 
 ```sh
-lp-ci-tools list-merge-proposals [--launchpad-credentials FILE] [--status STATUS] PROJECT
+lp-ci-tools list-lp-mps [--launchpad-credentials FILE] [--status STATUS] PROJECT
 ```
 
 | Argument | Description |
@@ -66,15 +75,15 @@ review posted by this tool (or `never`).
 **Example:**
 
 ```sh
-lp-ci-tools list-merge-proposals --status "Needs review" maas
+lp-ci-tools list-lp-mps --status "Needs review" maas
 ```
 
-### `review`
+### `review-mp`
 
-Review a single merge proposal using Gemini.
+Review a single Launchpad merge proposal using Gemini.
 
 ```sh
-lp-ci-tools review [--launchpad-credentials FILE] -g KEY_FILE [--model MODEL] [--dry-run] MP_URL
+lp-ci-tools review-mp [--launchpad-credentials FILE] -g KEY_FILE [--model MODEL] [--dry-run] MP_URL
 ```
 
 | Argument | Description |
@@ -97,43 +106,116 @@ The tool will:
 **Example:**
 
 ```sh
-lp-ci-tools review -g gemini-api-key --dry-run \
+lp-ci-tools review-mp -g gemini-api-key --dry-run \
   https://code.launchpad.net/~user/project/+git/repo/+merge/123
 ```
 
-### `review-new`
+### `review-diff`
 
-Review all unreviewed merge proposals for a project. This is the command
-intended for Jenkins.
+Review a unified diff file and print the result to stdout. The diff can be
+read from a file or from stdin (pass `-` as the filename).
 
 ```sh
-lp-ci-tools review-new [--launchpad-credentials FILE] -g KEY_FILE [--model MODEL] [--dry-run] --status STATUS PROJECT
+lp-ci-tools review-diff -g KEY_FILE [--model MODEL] [--repo-dir DIR] [--json-output FILE] DIFF_FILE
 ```
 
 | Argument | Description |
 |---|---|
-| `PROJECT` | Launchpad project name. |
-| `--status STATUS` | Filter by merge proposal status (default: `Needs review`). |
+| `DIFF_FILE` | Path to a unified diff file, or `-` to read from stdin. |
 | `-g`, `--gemini-api-key-file` | **(required)** Path to file containing the Gemini API key. |
 | `--model MODEL` | Gemini model to use (default: `gemini-3-flash-preview`). |
-| `--dry-run` | Print reviews to stdout instead of posting them as comments. |
-| `--launchpad-credentials FILE` | Path to Launchpad credentials file. |
+| `--repo-dir DIR` | Path to the local git repository (default: current working directory). Used for `read_file` and `list_directory` tool calls. |
+| `--json-output FILE` | Write structured JSON review output to `FILE` instead of plain text to stdout. |
 
-The tool iterates over all merge proposals matching the given status, skips
-any that have already been reviewed, and reviews the rest. An error reviewing
-one proposal does not prevent the others from being reviewed.
+When `--json-output` is provided, the LLM produces structured output with a
+general comment and inline comments keyed by file path and line number (see
+[JSON Review Format](#json-review-format) below).
 
-**Example:**
+**Examples:**
 
 ```sh
-lp-ci-tools review-new -g gemini-api-key --status "Needs review" maas
+# Review a diff file, print plain text to stdout
+lp-ci-tools review-diff -g gemini-api-key changes.diff
+
+# Review from stdin
+git diff HEAD~1 | lp-ci-tools review-diff -g gemini-api-key -
+
+# Produce structured JSON output
+lp-ci-tools review-diff -g gemini-api-key --json-output review.json changes.diff
 ```
+
+### `review-pr`
+
+Review a GitHub pull request using Gemini and post the review via the GitHub
+API.
+
+```sh
+lp-ci-tools review-pr -g KEY_FILE [--github-token TOKEN] [--model MODEL] [--repo-dir DIR] [--dry-run] PR_URL
+```
+
+| Argument | Description |
+|---|---|
+| `PR_URL` | Full GitHub PR URL, e.g. `https://github.com/owner/repo/pull/42`. |
+| `-g`, `--gemini-api-key-file` | **(required)** Path to file containing the Gemini API key. |
+| `--github-token TOKEN` | GitHub personal access token. Falls back to `GITHUB_TOKEN` env var. |
+| `--model MODEL` | Gemini model to use (default: `gemini-3-flash-preview`). |
+| `--repo-dir DIR` | Path to a local checkout of the repository (default: current working directory). Used for `read_file` and `list_directory` tool calls. The caller is responsible for having the repo checked out already. |
+| `--dry-run` | Print the review JSON to stdout instead of posting it. |
+
+The tool will:
+
+1. Parse the PR URL to extract the owner, repository, and PR number.
+2. Fetch the diff and description from GitHub.
+3. Send the diff to the LLM for a structured review.
+4. Post the review as a GitHub pull request review (unless `--dry-run`).
+
+**Examples:**
+
+```sh
+# Review a PR and post the result
+lp-ci-tools review-pr -g gemini-api-key \
+  https://github.com/canonical/maas/pull/42
+
+# Dry run — print the JSON review to stdout
+lp-ci-tools review-pr -g gemini-api-key --dry-run \
+  https://github.com/canonical/maas/pull/42
+
+# Use a local checkout for extra context
+lp-ci-tools review-pr -g gemini-api-key --repo-dir /path/to/maas \
+  https://github.com/canonical/maas/pull/42
+```
+
+## JSON Review Format
+
+When `review-diff --json-output` is used, or when `review-pr` posts a review,
+the LLM produces structured output with this schema:
+
+```json
+{
+  "general_comment": "Overall review summary...",
+  "inline_comments": {
+    "src/foo.py": {
+      "42": "This variable is unused.",
+      "108": "Consider using a context manager here."
+    },
+    "src/bar.py": {
+      "17": "This condition is always true."
+    }
+  }
+}
+```
+
+- `general_comment` — An overall review summary string.
+- `inline_comments` — A map from file path to a map from line number string
+  to comment string. Only file paths and line numbers that appear in the diff
+  are valid. Use `{}` for no inline comments.
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
 | `LP_CREDENTIALS_FILE` | No | Path to launchpadlib credentials. Overridden by `--launchpad-credentials`. |
+| `GITHUB_TOKEN` | No | GitHub personal access token. Overridden by `--github-token`. Used by `review-pr`. |
 
 ## Development
 

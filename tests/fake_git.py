@@ -43,6 +43,12 @@ class FakeGitClient(GitClient):
                 check=True,
                 capture_output=True,
             )
+            subprocess.run(
+                ["git", "config", "commit.gpgsign", "false"],
+                cwd=path,
+                check=True,
+                capture_output=True,
+            )
 
     @staticmethod
     def add_commit(

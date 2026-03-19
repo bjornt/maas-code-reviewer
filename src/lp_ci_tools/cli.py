@@ -250,10 +250,6 @@ def _find_last_review_date(
     comments: list[Comment], bot_username: str
 ) -> datetime | None:
     """Find the timestamp of the most recent review comment by the bot."""
-    print(f"REVIEW_MARKER: {REVIEW_MARKER}")
-    print(f"bot_username: {bot_username}")
-    for comment in comments:
-        print(f"comment author: {comment.author}")
     review_dates = [
         comment.date
         for comment in comments

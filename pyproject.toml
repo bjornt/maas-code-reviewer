@@ -1,7 +1,7 @@
 [project]
 name = "lp-ci-tools"
 version = "0.1.0"
-description = "CI tools that interact with Launchpad."
+description = "CI tools for reviewing Launchpad merge proposals and GitHub pull requests using a Gemini LLM."
 readme = "README.md"
 authors = [
     { name = "MAAS Developers" }

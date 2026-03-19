@@ -1,21 +1,12 @@
-# lp-ci-tools: Merge Proposal Review Tool — Specification
+# lp-ci-tools: Specification
 
 ## Overview
 
-A command-line tool that discovers new merge proposals on launchpad.net for a
-given project and reviews them using a Gemini LLM. It posts its findings as
-comments on the merge proposal. The tool is designed to run in Jenkins but must
-also work standalone for local testing.
-
-## Existing Project State
-
-- Python project managed with `uv` and `hatchling`.
-- Entry point: `lp-ci-tools` → `lp_ci_tools.main:main`.
-- `src/lp_ci_tools/main.py` contains legacy code that interacts with the
-  Launchpad API. This code is **reference only** — it shows how to use
-  `launchpadlib` to list merge proposals, read comments, and post comments.
-  It will be deleted once the new implementation is complete.
-- Dependencies already declared: `launchpadlib`, `keyring`, `pyyaml`.
+A command-line tool that discovers and reviews merge proposals on
+[Launchpad](https://launchpad.net/) and pull requests on
+[GitHub](https://github.com/), using a Gemini LLM. It posts its findings as
+comments on the merge proposal or pull request. The tool is designed to run in
+Jenkins but must also work standalone for local testing.
 
 ## Architecture
 
@@ -23,23 +14,33 @@ also work standalone for local testing.
 src/lp_ci_tools/
 ├── __init__.py
 ├── cli.py               # argparse CLI entry point
-├── launchpad_client.py   # LaunchpadClient protocol + real implementation
-├── git.py                # Git checkout / diff operations
-├── reviewer.py           # LLM-based diff review logic
-├── llm_client.py         # LLM client protocol + real google.genai implementation
-└── main.py               # Legacy code (deleted in final chunk)
+├── launchpad_client.py  # LaunchpadClient protocol + real implementation
+├── git.py               # Git checkout / diff operations
+├── github_client.py     # GitHubClient + parse_pr_url
+├── llm_client.py        # LLMClient protocol + real google.genai implementation
+├── models.py            # MergeProposal and Comment dataclasses
+├── repo_tools.py        # RepoTools: file-system tools scoped to a repo dir
+├── review_schema.py     # JSON review schema, validation, and diff parsing
+└── reviewer.py          # LLM-based diff review logic
 
 tests/
 ├── __init__.py
 ├── conftest.py           # Shared fixtures
+├── factory.py            # Test data factories
+├── fake_git.py           # FakeGitClient (uses real temp git repos)
+├── fake_github.py        # FakeGitHubClient
 ├── fake_launchpad.py     # FakeLaunchpadClient
-├── fake_llm.py           # FakeLLMClient
-├── fake_git.py           # FakeGitClient
+├── fake_launchpadlib.py  # Low-level launchpadlib fake
+├── fake_llm.py           # FakeLLMClient / ScriptedResponse
 ├── test_cli.py
-├── test_models.py
+├── test_fakes.py
 ├── test_git.py
-├── test_reviewer.py
-└── test_llm_client.py
+├── test_github_client.py
+├── test_launchpad_client.py
+├── test_models.py
+├── test_repo_tools.py
+├── test_review_schema.py
+└── test_reviewer.py
 ```
 
 ### Key Design Decisions
@@ -52,8 +53,9 @@ tests/
   real logic paths.
 - **Thin CLI layer.** `cli.py` only parses arguments and wires dependencies.
   All logic lives in modules that receive their dependencies as arguments.
-- **100% test coverage target.** Every module except `main.py` (legacy) must
-  have full test coverage.
+- **`RepoTools` for file access.** File-system access is scoped to a single
+  repo directory via `RepoTools`. This prevents path traversal and is reused
+  across `review-mp`, `review-diff`, and `review-pr`.
 
 ## Data Models
 
@@ -89,9 +91,11 @@ class LaunchpadClient(Protocol):
         self, project: str, status: str
     ) -> list[MergeProposal]: ...
 
-    def get_comments(self, mp_url: str) -> list[Comment]: ...
+    def get_merge_proposal(self, mp_url: str) -> MergeProposal: ...
 
-    def post_comment(self, mp_url: str, content: str, subject: str) -> None: ...
+    def get_comments(self, mp: MergeProposal) -> list[Comment]: ...
+
+    def post_comment(self, mp: MergeProposal, content: str, subject: str) -> None: ...
 
     def get_bot_username(self) -> str: ...
 ```
@@ -118,6 +122,32 @@ class GitClient(Protocol):
     ) -> list[str]: ...
 ```
 
+### GitHubClient
+
+```python
+class GitHubClient:
+    def get_pr_diff(self, owner: str, repo: str, pr_number: int) -> str: ...
+
+    def get_pr_description(self, owner: str, repo: str, pr_number: int) -> str | None: ...
+
+    def post_review(
+        self,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        body: str,
+        comments: list[dict],
+    ) -> None: ...
+```
+
+`post_review()` submits a pull request review. Each entry in `comments` is a
+dict with keys `path` (file path), `line` (new-file line number), and `body`
+(comment text).
+
+A free function `parse_pr_url(url: str) -> tuple[str, str, int]` extracts
+`(owner, repo, pr_number)` from a GitHub PR URL of the form
+`https://github.com/owner/repo/pull/42`.
+
 ### LLMClient
 
 ```python
@@ -128,82 +158,190 @@ class LLMClient(Protocol):
 Where `Tool` is a callable the LLM can invoke (e.g. `read_file`). The real
 implementation uses `google.genai`; the fake returns canned responses.
 
+### RepoTools
+
+`RepoTools` provides file-system access scoped to a single repository
+directory. All paths are resolved and checked against `repo_dir` before any
+operation is performed, preventing path traversal outside the repository tree.
+
+```python
+class RepoTools:
+    def __init__(self, repo_dir: Path) -> None: ...
+
+    def read_file(self, path: str) -> str: ...
+
+    def list_directory(self, path: str) -> str: ...
+```
+
+`read_file` returns the file contents as a string, or an error message string
+if the path is outside the repo or the file does not exist.
+
+`list_directory` returns directory entries as a newline-separated string, or
+an error message string if the path is outside the repo or is not a directory.
+
 ## CLI Commands
 
-### `lp-ci-tools list-merge-proposals`
+### `lp-ci-tools list-lp-mps`
 
 ```
-lp-ci-tools list-merge-proposals [--launchpad-credentials FILE] --status STATUS PROJECT
+lp-ci-tools list-lp-mps [--launchpad-credentials FILE] [--status STATUS] PROJECT
 ```
 
-Lists merge proposals for PROJECT filtered by STATUS. For each proposal,
-prints the URL, status, and the timestamp of the last comment posted by
-this tool (or "never").
+Lists merge proposals for `PROJECT` filtered by `STATUS`. For each proposal,
+prints the URL, status, and the timestamp of the last comment posted by this
+tool (or `never`).
 
-### `lp-ci-tools review`
+| Argument | Description |
+|---|---|
+| `PROJECT` | Launchpad project name. |
+| `--status STATUS` | Filter by MP status (default: `Needs review`). |
+| `--launchpad-credentials FILE` | Path to Launchpad credentials file. |
+
+### `lp-ci-tools review-mp`
 
 ```
-lp-ci-tools review [--launchpad-credentials FILE] -g KEY_FILE [--dry-run] MP_URL
+lp-ci-tools review-mp [--launchpad-credentials FILE] -g KEY_FILE [--model MODEL] [--dry-run] MP_URL
 ```
 
-Reviews a single merge proposal:
+Reviews a single Launchpad merge proposal:
 
 1. Fetch MP metadata and comments from Launchpad.
 2. Check whether this tool has already reviewed the MP. If so, skip (exit 0).
 3. Clone the target repository, then merge the source branch into it.
 4. Generate the diff.
 5. Send the diff to the LLM for review, providing tools so it can read
-   full files for context and look for an `AGENTS.md` file.
+   full files for context.
 6. Post the LLM's review as a comment on the MP (unless `--dry-run`).
 
-### `lp-ci-tools review-new`
+| Argument | Description |
+|---|---|
+| `MP_URL` | URL of the merge proposal to review. |
+| `-g`, `--gemini-api-key-file` | **(required)** Path to file containing the Gemini API key. |
+| `--model MODEL` | Gemini model to use (default: `gemini-3-flash-preview`). |
+| `--dry-run` | Print the review to stdout instead of posting it as a comment. |
+| `--launchpad-credentials FILE` | Path to Launchpad credentials file. |
+
+### `lp-ci-tools review-diff`
 
 ```
-lp-ci-tools review-new [--launchpad-credentials FILE] -g KEY_FILE [--dry-run] --status STATUS PROJECT
+lp-ci-tools review-diff -g KEY_FILE [--model MODEL] [--repo-dir DIR] [--json-output FILE] DIFF_FILE
 ```
 
-Combines list + review: finds all merge proposals matching STATUS for
-PROJECT, filters out already-reviewed ones, and reviews each remaining one.
-This is the command Jenkins will call.
+Reviews a unified diff read from a file (or stdin when `DIFF_FILE` is `-`).
 
-## Duplicate Review Prevention
+| Argument | Description |
+|---|---|
+| `DIFF_FILE` | Path to a unified diff file, or `-` to read from stdin. |
+| `-g`, `--gemini-api-key-file` | **(required)** Path to file containing the Gemini API key. |
+| `--model MODEL` | Gemini model to use (default: `gemini-3-flash-preview`). |
+| `--repo-dir DIR` | Path to the local git repository (default: current working directory). Used for `read_file` and `list_directory` tool calls. |
+| `--json-output FILE` | Write structured JSON review output to `FILE` instead of plain text to stdout. |
+
+When `--json-output` is not provided, the plain-text review is printed to
+stdout.
+
+When `--json-output` is provided, the LLM is instructed to produce structured
+JSON output (see [JSON Review Schema](#json-review-schema) below) and the
+result is written to the specified file.
+
+### `lp-ci-tools review-pr`
+
+```
+lp-ci-tools review-pr -g KEY_FILE [--github-token TOKEN] [--model MODEL] [--repo-dir DIR] [--dry-run] PR_URL
+```
+
+Reviews a GitHub pull request:
+
+1. Parse the PR URL to extract owner, repo, and PR number.
+2. Resolve the GitHub token (from `--github-token` or the `GITHUB_TOKEN`
+   environment variable). Error if neither is set.
+3. Fetch the diff and description from GitHub.
+4. Create `RepoTools` pointed at `--repo-dir` (default: cwd).
+5. Call the LLM to produce a structured JSON review.
+6. Post the review as a GitHub pull request review (or print on `--dry-run`).
+
+| Argument | Description |
+|---|---|
+| `PR_URL` | Full GitHub PR URL, e.g. `https://github.com/owner/repo/pull/42`. |
+| `-g`, `--gemini-api-key-file` | **(required)** Path to file containing the Gemini API key. |
+| `--github-token TOKEN` | GitHub personal access token. Falls back to `GITHUB_TOKEN` env var. |
+| `--model MODEL` | Gemini model to use (default: `gemini-3-flash-preview`). |
+| `--repo-dir DIR` | Path to a local checkout of the repository (default: current working directory). Used for `read_file` and `list_directory` tool calls. The caller is responsible for having the repo checked out already. |
+| `--dry-run` | Print the review JSON to stdout instead of posting it. |
+
+## JSON Review Schema
+
+When `--json-output` is used with `review-diff`, or when `review-pr` posts a
+review, the LLM is instructed to produce output in the following JSON format:
+
+```json
+{
+  "general_comment": "Overall review summary...",
+  "inline_comments": {
+    "src/foo.py": {
+      "42": "This variable is unused.",
+      "108": "Consider using a context manager here."
+    },
+    "src/bar.py": {
+      "17": "This condition is always true."
+    }
+  }
+}
+```
+
+- `general_comment` — A string containing the overall review. Required.
+- `inline_comments` — A JSON object mapping file paths to line-comment maps.
+  Required (use `{}` if there are no inline comments).
+  - Each key is a file path that must appear in the diff.
+  - Each value is a JSON object mapping line number strings to comment strings.
+  - Line numbers must correspond to new-file line numbers that appear in the
+    diff for that file.
+
+The `validate_review_json(data, diff_text)` function in `review_schema.py`
+validates a candidate JSON object against both the schema and the actual diff,
+returning a list of error strings (empty means valid). This function is also
+exposed to the LLM as a `validate_review` tool so it can self-check its output
+before finalising.
+
+## Duplicate Review Prevention (Launchpad)
 
 A merge proposal is considered "already reviewed" if:
 
-1. The tool finds a comment authored by its own bot user
-   (`get_bot_username()`).
-2. That comment's body starts with a known marker prefix:
-   `[lp-ci-tools review]`.
-
-This is deliberately simple. Future work can extend it to track the source
-commit SHA that was reviewed, enabling re-review when new commits are pushed.
+1. The tool finds a comment authored by its own bot user (`get_bot_username()`).
+2. That comment's body starts with the marker prefix: `[lp-ci-tools review]`.
 
 ## LLM Review Details
 
-### Prompt Structure
-
-The reviewer builds a prompt containing:
-
-1. A system instruction explaining the role (code reviewer) and output format.
-2. The diff.
-3. The merge proposal description / commit message (if available).
-4. Instructions to use the provided tools for additional context when needed.
-
 ### Tools Provided to the LLM
 
-- `read_file(path: str) -> str` — Read a file from the merged working tree.
-  The reviewer imposes a size limit (e.g. 100 KB) and truncates with a
-  message if exceeded.
-- `list_directory(path: str) -> list[str]` — List directory contents.
+All review commands provide the following tools to the LLM:
+
+- `read_file(path: str) -> str` — Read a file from the working tree (scoped to
+  `--repo-dir`). Returns an error message string if the path is outside the
+  repo or the file does not exist.
+- `list_directory(path: str) -> str` — List directory contents (scoped to
+  `--repo-dir`). Returns a newline-separated list of entry names, or an error
+  message string if the path is invalid.
+
+The structured review commands (`review-diff --json-output`, `review-pr`)
+additionally provide:
+
+- `validate_review(json_text: str) -> str` — Validate a JSON review object
+  against the schema and the diff. Returns an empty string if valid, or a
+  newline-separated list of errors if invalid. The LLM is instructed to call
+  this tool before finalising its output and to fix any reported errors.
 
 ### Context Size Management
 
-- The diff is truncated to a configurable maximum (default 30,000 chars).
-  If truncated, a note is appended telling the LLM it's seeing a partial diff.
-- File reads requested by the LLM are individually capped.
-- The total number of tool calls the LLM can make is capped (default 20).
+- The diff is truncated to a configurable maximum (default 30,000 characters).
+  If truncated, a note is appended telling the LLM it is seeing a partial diff.
+- The total number of tool call rounds the LLM can make is capped (default 20,
+  enforced in `GeminiClient`).
 
-## Review Comment Format
+### Review Comment Format (Launchpad)
+
+Comments posted to Launchpad merge proposals are prefixed with the review
+marker so duplicate detection works:
 
 ```
 [lp-ci-tools review]
@@ -211,244 +349,14 @@ The reviewer builds a prompt containing:
 <LLM review content here>
 ```
 
-The `[lp-ci-tools review]` prefix is mandatory — it's how duplicate detection
-works.
-
----
-
-## Implementation Plan
-
-Each chunk is a self-contained unit of work. Tests are written first (TDD).
-Each chunk should produce a working, testable increment. Target ≤ 1000 lines
-of diff per chunk.
-
----
-
-### Chunk 1: Project Setup, Data Models, and Fake Launchpad Client
-
-**Goal:** Establish the test infrastructure, define data models, define the
-`LaunchpadClient` protocol, and implement `FakeLaunchpadClient`.
-
-**Files to create:**
-- `tests/__init__.py`
-- `tests/conftest.py` — shared fixtures (empty initially)
-- `src/lp_ci_tools/models.py` — `MergeProposal` and `Comment` dataclasses
-- `src/lp_ci_tools/launchpad_client.py` — `LaunchpadClient` protocol
-- `tests/fake_launchpad.py` — `FakeLaunchpadClient` with internal state
-- `tests/test_models.py` — tests for data model invariants (e.g. frozen dataclasses)
-
-**Files to modify:**
-- `pyproject.toml` — add `pytest` and `pytest-cov` to dev dependencies
-
-**Acceptance criteria:**
-- `uv run pytest` passes.
-- `FakeLaunchpadClient` can:
-  - Store merge proposals (added via helper methods on the fake).
-  - Return them filtered by project and status.
-  - Store and return comments per MP.
-  - Track a bot username.
-- Data models are frozen dataclasses.
-
----
-
-### Chunk 2: `list-merge-proposals` Command
-
-**Goal:** Implement the CLI command that lists merge proposals and shows the
-last review timestamp.
-
-**Files to create:**
-- `src/lp_ci_tools/cli.py` — argument parsing and `list_merge_proposals`
-  handler
-- `tests/test_cli.py` — tests for `list-merge-proposals`, using
-  `FakeLaunchpadClient`
-
-**Files to modify:**
-- `pyproject.toml` — update entry point to `lp_ci_tools.cli:main`
-
-**Details:**
-- `list_merge_proposals(client: LaunchpadClient, project: str, status: str)`
-  is a pure function that returns structured data. The CLI layer formats it.
-- The handler scans comments for each MP to find the latest one by the bot
-  user that starts with `[lp-ci-tools review]`.
-
-**Acceptance criteria:**
-- `uv run pytest` passes with full coverage of new code.
-- The command outputs the expected format given fake data with various
-  combinations of reviewed / not-reviewed proposals.
-
----
-
-### Chunk 3: Git Client Protocol, Fake, and Diff Generation
-
-**Goal:** Implement the `GitClient` protocol, `FakeGitClient`, and the real
-`GitClient` (wrapping subprocess calls to git).
-
-**Files to create:**
-- `src/lp_ci_tools/git.py` — `GitClient` protocol + `RealGitClient`
-- `tests/fake_git.py` — `FakeGitClient` that operates on a real temp
-  directory with actual git commands (creating small test repos)
-- `tests/test_git.py` — tests for diff generation, merge, file reading
-
-**Details:**
-- `FakeGitClient` is *not* a pure in-memory fake. Instead, the test helper
-  creates real git repos in a temp directory with known commits. This tests
-  the real git interaction without needing network access.
-- `RealGitClient` wraps subprocess calls to `git clone`, `git merge`,
-  `git diff`, etc.
-- `read_file` reads a file from the working tree relative to the repo root.
-  Returns `None` if the file doesn't exist.
-- `list_changed_files` returns the list of files changed between two refs.
-
-**Acceptance criteria:**
-- `uv run pytest` passes with full coverage of new code.
-- Tests create temp git repos, make commits, and verify diffs/merges.
-
----
-
-### Chunk 4: LLM Client Protocol, Fake, and Reviewer Logic
-
-**Goal:** Implement the reviewer module that takes a diff and produces a
-review using an LLM, with tool support for reading files.
-
-**Files to create:**
-- `src/lp_ci_tools/llm_client.py` — `LLMClient` protocol + real
-  `GeminiClient` (using `google.genai`)
-- `tests/fake_llm.py` — `FakeLLMClient` that returns canned/scripted
-  responses and records tool calls
-- `src/lp_ci_tools/reviewer.py` — `review_diff()` function that orchestrates
-  prompt construction, tool binding, and LLM invocation
-- `tests/test_reviewer.py` — tests for review logic
-
-**Files to modify:**
-- `pyproject.toml` — add `google-genai` dependency
-
-**Details for `reviewer.py`:**
-- `review_diff(llm: LLMClient, diff: str, description: str | None,
-  read_file: Callable, list_directory: Callable, max_diff_chars: int = 30000)
-  -> str`
-- Truncates the diff if it exceeds `max_diff_chars`.
-- Constructs the prompt with the system instruction, diff, and description.
-- Provides `read_file` and `list_directory` as tools.
-- Returns the LLM's textual review.
-
-**Details for `FakeLLMClient`:**
-- Accepts a list of scripted responses at construction time.
-- Each call to `review()` pops the next response.
-- Records the prompts and tool definitions it received, so tests can assert
-  on them.
-- Can be configured to call tools (e.g. "call read_file('AGENTS.md') then
-  return review text").
-
-**Details for `GeminiClient`:**
-- Uses `google.genai` to create a chat session.
-- Translates the tool definitions into the google.genai function-calling
-  format.
-- Caps the number of tool-call rounds (default 20).
-- Reads the API key from the `GEMINI_API_KEY` environment variable.
-
-**Acceptance criteria:**
-- `uv run pytest` passes with full coverage of new code (excluding the real
-  `GeminiClient` which depends on an API key).
-- Tests verify: prompt construction, diff truncation, tool invocation, and
-  response extraction.
-
----
-
-### Chunk 5: `review` Command — Wire Everything Together
-
-**Goal:** Implement the `review` CLI command that reviews a single merge
-proposal end to end.
-
-**Files to modify:**
-- `src/lp_ci_tools/cli.py` — add `review` subcommand and handler
-- `tests/test_cli.py` — end-to-end tests for the `review` command
-
-**Details:**
-- The `review` handler:
-  1. Fetches the MP from Launchpad.
-  2. Checks for an existing review comment. If found, prints a message and
-     exits.
-  3. Clones the target repo into a temp directory.
-  4. Merges the source branch.
-  5. Generates the diff.
-  6. Calls `review_diff()` with tool callbacks bound to the working tree.
-  7. Posts the review as a comment (unless `--dry-run`, in which case it
-     prints to stdout).
-- The comment body is prefixed with `[lp-ci-tools review]\n\n`.
-
-**Acceptance criteria:**
-- `uv run pytest` passes with full coverage.
-- An end-to-end test using all fakes verifies the full flow: MP exists →
-  not yet reviewed → clone → merge → diff → LLM review → comment posted.
-- A test verifies that an already-reviewed MP is skipped.
-- A test verifies `--dry-run` prints to stdout instead of posting.
-
----
-
-### Chunk 6: `review-new` Command and Jenkins Integration
-
-**Goal:** Implement the `review-new` command that combines listing and
-reviewing, suitable for Jenkins.
-
-**Files to modify:**
-- `src/lp_ci_tools/cli.py` — add `review-new` subcommand
-- `tests/test_cli.py` — tests for `review-new`
-
-**Details:**
-- Iterates over all merge proposals matching the given status.
-- Skips already-reviewed ones.
-- Reviews each remaining one.
-- Prints a summary at the end (number reviewed, number skipped).
-- Errors reviewing one MP do not prevent reviewing the next (catch and log).
-
-**Acceptance criteria:**
-- `uv run pytest` passes with full coverage.
-- Test with multiple MPs: some reviewed, some not. Verify only the
-  unreviewed ones get reviewed.
-- Test that an error during one review doesn't stop the others.
-
----
-
-### Chunk 7: Cleanup and Documentation
-
-**Goal:** Remove legacy code, finalize documentation, and polish.
-
-**Files to delete:**
-- The body of `src/lp_ci_tools/main.py` — replace with a stub that imports
-  and calls `cli.main()` for backwards compatibility, or delete entirely.
-
-**Files to modify:**
-- `README.md` — document installation, configuration, and usage.
-- `Makefile` — add `test` and `coverage` targets; update `lint`/`format` to
-  include `tests/`.
-- `pyproject.toml` — clean up any unused dependencies (e.g. `pyyaml` if not
-  needed).
-
-**Files to create:**
-- `src/lp_ci_tools/real_launchpad_client.py` — the real `LaunchpadClient`
-  implementation using `launchpadlib`. This is separated from the protocol
-  file to keep the protocol dependency-free.
-
-**Acceptance criteria:**
-- `uv run pytest --cov --cov-fail-under=100` passes.
-- `lp-ci-tools --help` shows the new commands.
-- `README.md` documents all commands and environment variables.
-
----
-
-## Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `LP_CREDENTIALS_FILE` | No | Path to launchpadlib credentials. Overridden by `--launchpad-credentials`. |
-
-## Dependencies (Final)
+## Dependencies
 
 ```toml
 dependencies = [
     "google-genai",
     "keyring",
     "launchpadlib",
+    "PyGithub",
 ]
 
 [dependency-groups]
@@ -456,18 +364,14 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
+    "ty",
 ]
 ```
 
-## Future Work (Out of Scope)
+## Environment Variables
 
-These are **not** part of the current implementation plan but inform the
-architecture:
-
-- **Incremental reviews:** Track the source commit SHA in the review comment.
-  Re-review when new commits are pushed.
-- **Conversational reviews:** After the initial review, wait for the MP author
-  to reply, then perform a follow-up review incorporating their feedback.
-- **Configurable review instructions:** Read project-specific review
-  guidelines from a config file in the repo (e.g. `.lp-ci-tools.yml`).
-- **Multiple LLM backends:** Support other LLM providers beyond Gemini.
+| Variable | Required | Description |
+|---|---|---|
+| `LP_CREDENTIALS_FILE` | No | Path to launchpadlib credentials file. Overridden by `--launchpad-credentials`. |
+| `GITHUB_TOKEN` | No | GitHub personal access token. Overridden by `--github-token`. Used by `review-pr`. |
+| `GEMINI_API_KEY` | No | Gemini API key. Used internally by `GeminiClient`. Normally supplied via `-g`/`--gemini-api-key-file` instead. |
