@@ -1,31 +1,64 @@
 # maas-code-reviewer
 
-An LLM-powered code reviewer for [Launchpad](https://launchpad.net/) merge
-proposals and [GitHub](https://github.com/) pull requests. It uses a Gemini
-LLM to review diffs and post findings as comments on the merge proposal or
-pull request.
+An LLM-powered code reviewer agent for [GitHub](https://github.com/) pull
+requests and [Launchpad](https://launchpad.net/) merge proposals. It can also be
+used to review changes locally before submitting.
 
-Built and maintained by the [MAAS](https://maas.io/) team at
+Its purpose is to help a human reviewer by taking care of the initial review quickly.
+The person proposing the change can then make any changes they feel are necessary
+before a human reviewer picks up the PR/MP.
+
+It uses a Gemini LLM to review diffs and post findings as comments on the merge proposal or pull request. 
+
+It's built and maintained by the [MAAS](https://maas.io/) team at
 [Canonical](https://canonical.com/). The tool's review defaults reflect what
 the MAAS team considers sane behaviour for their projects — but there is
 nothing MAAS-specific in how it works, and anyone is welcome to use it on
 their own repositories.
 
-The name `maas-code-reviewer` was chosen to avoid confusion with the many
-generic `llm-code-reviewer`-style tools that already exist.
+## How to use
+
+The primary use case for the code reviewer is on GitHub, where it can
+automatically post reviews on new PRs. But it can also be used with
+Launchpad MPs or even to review the changes locally. The latter is mostly used
+to test out changes to the code reviewer itself.
+
+### Github
+
+Copy the same workflow this project uses: [.github/workflows/review-pr.yml](.github/workflows/review-pr.yml) 
+
+It works as it is. The only thing you might change is `env.MODEL`, which controls
+which Gemini model is being used to do the code review.
+
+You also need to create a secret in the repo called `GEMINI_API_KEY` which
+contains the API key that you can get from https://aistudio.google.com.
+
+### Launchpad
+
+There's currently no automation to run code reviews automatically on new merge proposals.
+At the moment you have to set up your own automation and then use the `review-mp` command.
+
+### Locally
+
+To use it locally, generate the diff that you want reviewed and use the `review-diff`
+command. For example
+
+  `git show HEAD | maas-code-reviewer review-diff -`
 
 ## Installation
 
-Requires Python ≥ 3.12.
+Requires uv and Python ≥ 3.12.
 
 ```sh
+git clone https://github.com/canonical/maas-code-reviewer
+cd maas-code-reviewer
 uv sync
 ```
 
-To build a distributable wheel:
+You can now run it using uv:
 
 ```sh
-make build
+uv run maas-code-reviewer
 ```
 
 ## Configuration
@@ -38,6 +71,17 @@ containing the key with the `-g` / `--gemini-api-key-file` flag:
 ```sh
 maas-code-reviewer review-mp -g /path/to/gemini-api-key MP_URL
 ```
+
+### GitHub Token
+
+The `review-pr` command requires a GitHub personal access token. Provide it
+in one of two ways:
+
+| Method | Details |
+|---|---|
+| `--github-token TOKEN` | Pass the token directly on the command line. |
+| `GITHUB_TOKEN` | Set this environment variable. Overridden by `--github-token`. |
+
 
 ### Launchpad Credentials
 
@@ -53,17 +97,8 @@ with Launchpad. You can provide credentials in two ways:
 If neither is provided, `launchpadlib` will use its default OAuth flow
 (opening a browser for authorization on first use).
 
-### GitHub Token
 
-The `review-pr` command requires a GitHub personal access token. Provide it
-in one of two ways:
-
-| Method | Details |
-|---|---|
-| `--github-token TOKEN` | Pass the token directly on the command line. |
-| `GITHUB_TOKEN` | Set this environment variable. Overridden by `--github-token`. |
-
-## Usage
+## Command reference
 
 ### `list-lp-mps`
 
@@ -224,7 +259,6 @@ the LLM produces structured output with this schema:
 
 | Variable | Required | Description |
 |---|---|---|
-| `LP_CREDENTIALS_FILE` | No | Path to launchpadlib credentials. Overridden by `--launchpad-credentials`. |
 | `GITHUB_TOKEN` | No | GitHub personal access token. Overridden by `--github-token`. Used by `review-pr`. |
 
 ## Development
