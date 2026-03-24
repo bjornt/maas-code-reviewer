@@ -1,3 +1,6 @@
+# Copyright 2026 Canonical Ltd.  This software is licensed under the
+# GNU Affero General Public License version 3 (see the file LICENSE).
+
 from __future__ import annotations
 
 from maas_code_reviewer.launchpad_client import _get_git_unique_name, web_url_to_api_url
