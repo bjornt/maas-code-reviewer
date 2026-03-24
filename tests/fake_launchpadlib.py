@@ -1,3 +1,6 @@
+# Copyright 2026 Canonical Ltd.  This software is licensed under the
+# GNU Affero General Public License version 3 (see the file LICENSE).
+
 """Fake that mimics the launchpadlib object model.
 
 ``LaunchpadClient`` talks to launchpadlib objects (``Launchpad``,
