@@ -1,0 +1,35 @@
+name: maas-code-reviewer
+adopt-info: maas-code-reviewer
+license: AGPL-3.0-only
+website: https://github.com/canonical/maas-code-reviewer
+contact: https://github.com/canonical/maas-code-reviewer/issues
+issues: https://github.com/canonical/maas-code-reviewer/issues
+source-code: https://github.com/canonical/maas-code-reviewer
+title: MAAS Code Reviewer
+summary: LLM-powered code reviewer for Launchpad MPs and GitHub PRs
+description: |
+  An LLM-powered code reviewer agent for GitHub pull requests and Launchpad
+  merge proposals. It uses a Gemini LLM to review diffs and post findings as
+  comments. Built and maintained by the MAAS team at Canonical.
+
+base: core24
+confinement: strict
+
+apps:
+  maas-code-reviewer:
+    command: bin/maas-code-reviewer
+    plugs:
+      - network
+      - home
+
+parts:
+  maas-code-reviewer:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+    stage-packages:
+      - git
+    override-build: |
+      craftctl default
+      craftctl set version="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
