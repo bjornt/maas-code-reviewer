@@ -77,6 +77,11 @@ class _FakeChat:
                     ),
                 ),
             ],
+            usage_metadata=types.GenerateContentResponseUsageMetadata(
+                prompt_token_count=0,
+                candidates_token_count=0,
+                total_token_count=0,
+            ),
         )
 
 

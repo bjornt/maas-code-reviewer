@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 
 from google import genai
@@ -32,10 +33,52 @@ class GeminiClient:
 
     def review(self, prompt: str, tools: list[Callable[..., str]]) -> str:
         config = types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(include_thoughts=True),
             tools=tools if tools else None,  # type: ignore[arg-type]
         )
 
         chat = self._client.chats.create(model=self._model, config=config)
         response = chat.send_message(prompt)
 
+        _print_thoughts(response)
+
+        usage = response.usage_metadata
+        if usage is not None:
+            thoughts_count = usage.thoughts_token_count or 0
+            thoughts_info = f", thinking: {thoughts_count}" if thoughts_count else ""
+            print(
+                f"Tokens used — input: {usage.prompt_token_count}, "
+                f"output: {usage.candidates_token_count}"
+                f"{thoughts_info}, "
+                f"total: {usage.total_token_count}",
+                file=sys.stderr,
+            )
+
         return response.text or ""
+
+
+def _print_thoughts(response: types.GenerateContentResponse) -> None:
+    """Print any thought parts from *response* to stderr.
+
+    Also prints thoughts embedded in intermediate AFC steps, which are stored
+    in ``response.automatic_function_calling_history`` as model-role
+    ``Content`` objects interleaved with function-response entries.
+    """
+    afc_history = response.automatic_function_calling_history or []
+    for content in afc_history:
+        if content.role != "model" or not content.parts:
+            continue
+        for part in content.parts:
+            if part.thought and part.text:
+                print(
+                    f"[Thinking (tool step)]\n{part.text.rstrip()}\n", file=sys.stderr
+                )
+
+    if not response.candidates:
+        return
+    content = response.candidates[0].content
+    if content is None or not content.parts:
+        return
+    for part in content.parts:
+        if part.thought and part.text:
+            print(f"[Thinking]\n{part.text.rstrip()}\n", file=sys.stderr)

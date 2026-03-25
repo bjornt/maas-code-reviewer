@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 
@@ -18,6 +19,7 @@ class RepoTools:
         self._repo_dir = repo_dir.resolve()
 
     def read_file(self, path: str) -> str:
+        print(f"Tool call: read_file(path={path!r})", file=sys.stderr)
         target = (self._repo_dir / path).resolve()
         if not target.is_relative_to(self._repo_dir):
             return f"Error: path outside repository: {path}"
@@ -26,6 +28,7 @@ class RepoTools:
         return target.read_text()
 
     def list_directory(self, path: str) -> str:
+        print(f"Tool call: list_directory(path={path!r})", file=sys.stderr)
         target = (self._repo_dir / path).resolve()
         if not target.is_relative_to(self._repo_dir):
             return f"Error: path outside repository: {path}"
