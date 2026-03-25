@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 
 from maas_code_reviewer.llm_client import GeminiClient
@@ -121,6 +122,10 @@ def review_diff_structured(
         Returns an empty string if valid, or a newline-separated list of
         errors if invalid.
         """
+        print(
+            f"Tool call: validate_review(json_text=<{len(json_text)} chars>)",
+            file=sys.stderr,
+        )
         try:
             data = json.loads(json_text)
         except json.JSONDecodeError as exc:
