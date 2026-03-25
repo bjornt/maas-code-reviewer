@@ -19,8 +19,6 @@ Usage in tests::
     assert fake_lp.credentials_file == "/some/creds"
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -83,10 +81,6 @@ class FakeMergeProposal:
             date_created=datetime(2025, 1, 1, tzinfo=UTC),
         )
         self.all_comments.append(comment)
-
-    def getMergeProposals(self, status: str) -> list[FakeMergeProposal]:
-        """Only here so the type looks right; real filtering is on FakeProject."""
-        raise NotImplementedError
 
 
 @dataclass

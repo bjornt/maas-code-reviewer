@@ -3,8 +3,6 @@
 
 """Tests for edge cases in fake objects and factories."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
