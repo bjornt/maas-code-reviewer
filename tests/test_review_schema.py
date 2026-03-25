@@ -1,8 +1,6 @@
 # Copyright 2026 Canonical Ltd.  This software is licensed under the
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
-from __future__ import annotations
-
 from maas_code_reviewer.review_schema import (
     parse_diff_files_and_lines,
     validate_review_json,

@@ -1,8 +1,6 @@
 # Copyright 2026 Canonical Ltd.  This software is licensed under the
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -25,6 +23,39 @@ class ScriptedResponse:
 
     text: str
     tool_calls: list[ToolCall] = field(default_factory=list)
+
+
+class FakeGenaiClient:
+    """Drop-in fake for ``google.genai.Client``.
+
+    Provides a ``.chats`` attribute whose ``.create()`` method returns a
+    ``_FakeChat`` that pops scripted responses.
+
+    After use, ``received_prompts`` and ``received_tools`` expose what
+    was passed to each ``send_message()`` call for assertion.
+    """
+
+    def __init__(self, responses: list[ScriptedResponse] | None = None) -> None:
+        self.received_prompts: list[str] = []
+        self.received_tools: list[list[Callable[..., str]]] = []
+        self.chats = _FakeChats(list(responses) if responses else [], self)
+
+
+def FakeLLMClient(
+    responses: list[ScriptedResponse] | None = None,
+) -> GeminiClient:
+    """Build a ``GeminiClient`` backed by a ``FakeGenaiClient``.
+
+    This exercises the real ``GeminiClient.review()`` code path while
+    allowing tests to script the responses returned by the underlying
+    genai client.
+
+    The ``FakeGenaiClient`` is accessible via the returned client's
+    ``_client`` attribute for test assertions on ``received_prompts``
+    and ``received_tools``.
+    """
+    fake_genai = FakeGenaiClient(responses)
+    return GeminiClient(client=fake_genai)  # type: ignore[arg-type]
 
 
 class _FakeChat:
@@ -101,36 +132,3 @@ class _FakeChats:
         config: types.GenerateContentConfig | None = None,
     ) -> _FakeChat:
         return _FakeChat(self._responses, config, self._owner)
-
-
-class FakeGenaiClient:
-    """Drop-in fake for ``google.genai.Client``.
-
-    Provides a ``.chats`` attribute whose ``.create()`` method returns a
-    ``_FakeChat`` that pops scripted responses.
-
-    After use, ``received_prompts`` and ``received_tools`` expose what
-    was passed to each ``send_message()`` call for assertion.
-    """
-
-    def __init__(self, responses: list[ScriptedResponse] | None = None) -> None:
-        self.received_prompts: list[str] = []
-        self.received_tools: list[list[Callable[..., str]]] = []
-        self.chats = _FakeChats(list(responses) if responses else [], self)
-
-
-def FakeLLMClient(
-    responses: list[ScriptedResponse] | None = None,
-) -> GeminiClient:
-    """Build a ``GeminiClient`` backed by a ``FakeGenaiClient``.
-
-    This exercises the real ``GeminiClient.review()`` code path while
-    allowing tests to script the responses returned by the underlying
-    genai client.
-
-    The ``FakeGenaiClient`` is accessible via the returned client's
-    ``_client`` attribute for test assertions on ``received_prompts``
-    and ``received_tools``.
-    """
-    fake_genai = FakeGenaiClient(responses)
-    return GeminiClient(client=fake_genai)  # type: ignore[arg-type]

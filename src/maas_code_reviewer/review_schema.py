@@ -1,8 +1,6 @@
 # Copyright 2026 Canonical Ltd.  This software is licensed under the
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
-from __future__ import annotations
-
 REVIEW_JSON_SCHEMA: dict = {
     "type": "object",
     "required": ["general_comment", "inline_comments"],
