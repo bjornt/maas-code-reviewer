@@ -13,10 +13,7 @@ format:
 	uv run ruff format src/ tests/
 
 test:
-	uv run pytest
-
-coverage:
-	uv run pytest --cov --cov-fail-under=100
+	uv run pytest --cov --cov-fail-under=100 $(if $(COVERAGE_XML),--cov-report=xml:$(COVERAGE_XML))
 
 check: lint typecheck test
 
