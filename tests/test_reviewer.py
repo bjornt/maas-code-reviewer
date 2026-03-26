@@ -14,6 +14,7 @@ from maas_code_reviewer.reviewer import (
     _build_structured_prompt,
     _extract_json,
     _truncate_diff,
+    _validate_review,
     review_diff,
     review_diff_structured,
 )
@@ -373,6 +374,36 @@ _EMPTY_INLINE_JSON_RESPONSE = json.dumps(
 )
 
 
+class TestValidateReview:
+    def test_returns_empty_string_for_valid_json(self) -> None:
+        result = _validate_review(_VALID_JSON_RESPONSE, _SIMPLE_DIFF)
+        assert result == ""
+
+    def test_returns_error_for_invalid_json(self) -> None:
+        result = _validate_review("not json {{{", _SIMPLE_DIFF)
+        assert result.startswith("Invalid JSON:")
+
+    def test_returns_errors_for_invalid_review(self) -> None:
+        bad_review = json.dumps({"wrong_key": "value", "inline_comments": {}})
+        result = _validate_review(bad_review, _SIMPLE_DIFF)
+        assert "general_comment" in result
+
+    def test_returns_multiple_errors_joined_by_newline(self) -> None:
+        bad_review = json.dumps({"inline_comments": {}})
+        result = _validate_review(bad_review, _SIMPLE_DIFF)
+        assert "\n" not in result  # only one error: missing general_comment
+
+    def test_validates_against_diff(self) -> None:
+        review = json.dumps(
+            {
+                "general_comment": "ok",
+                "inline_comments": {"nonexistent.py": {"1": "nope"}},
+            }
+        )
+        result = _validate_review(review, _SIMPLE_DIFF)
+        assert "nonexistent.py" in result
+
+
 class TestExtractJson:
     def test_plain_json_unchanged(self) -> None:
         text = '{"a": 1}'
@@ -471,18 +502,6 @@ class TestReviewDiffStructured:
         )
         assert result["inline_comments"] == {}
 
-    def test_validate_review_tool_provided_to_llm(self) -> None:
-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
-        review_diff_structured(
-            llm,
-            diff=_SIMPLE_DIFF,
-            description=None,
-            read_file=_make_read_file(),
-            list_directory=_make_list_directory(),
-        )
-        tool_names = {t.__name__ for t in llm._client.received_tools[0]}
-        assert "validate_review" in tool_names
-
     def test_read_file_tool_provided_to_llm(self) -> None:
         llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
         review_diff_structured(
@@ -494,18 +513,6 @@ class TestReviewDiffStructured:
         )
         tool_names = {t.__name__ for t in llm._client.received_tools[0]}
         assert "read_file" in tool_names
-
-    def test_list_directory_tool_provided_to_llm(self) -> None:
-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
-        review_diff_structured(
-            llm,
-            diff=_SIMPLE_DIFF,
-            description=None,
-            read_file=_make_read_file(),
-            list_directory=_make_list_directory(),
-        )
-        tool_names = {t.__name__ for t in llm._client.received_tools[0]}
-        assert "list_directory" in tool_names
 
     def test_prompt_contains_diff(self) -> None:
         llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_INLINE_JSON_RESPONSE)])
@@ -584,31 +591,6 @@ class TestReviewDiffStructured:
         )
         assert result["general_comment"] == "Looks good."
 
-    def test_validate_review_returns_empty_string_for_valid_json(self) -> None:
-        """validate_review tool call succeeds without exception for valid JSON."""
-        # The fake discards the tool return value, but the call must not raise.
-        llm = FakeLLMClient(
-            [
-                ScriptedResponse(
-                    text=_VALID_JSON_RESPONSE,
-                    tool_calls=[
-                        ToolCall(
-                            name="validate_review",
-                            args={"json_text": _VALID_JSON_RESPONSE},
-                        )
-                    ],
-                )
-            ]
-        )
-        result = review_diff_structured(
-            llm,
-            diff=_SIMPLE_DIFF,
-            description=None,
-            read_file=_make_read_file(),
-            list_directory=_make_list_directory(),
-        )
-        assert isinstance(result, dict)
-
     def test_raises_on_invalid_json_response(self) -> None:
         llm = FakeLLMClient([ScriptedResponse(text="this is not json at all")])
         with pytest.raises(Exception):
@@ -619,6 +601,18 @@ class TestReviewDiffStructured:
                 read_file=_make_read_file(),
                 list_directory=_make_list_directory(),
             )
+
+    def test_validate_review_tool_provided_to_llm(self) -> None:
+        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
+        review_diff_structured(
+            llm,
+            diff=_SIMPLE_DIFF,
+            description=None,
+            read_file=_make_read_file(),
+            list_directory=_make_list_directory(),
+        )
+        tool_names = {t.__name__ for t in llm._client.received_tools[0]}
+        assert "validate_review" in tool_names
 
     def test_tool_calls_read_file_for_context(self) -> None:
         rf = _make_read_file({"src/foo.py": "import os\nimport sys\n"})
