@@ -24,7 +24,7 @@ jobs:
       # 1. Check out the PR HEAD so the LLM can read the actual files being
       #    reviewed via --repo-dir.  We do NOT run any code from this checkout.
       - name: Check out PR head (for file context)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
@@ -32,18 +32,18 @@ jobs:
       #    In the future this will likely become a snap or a dedicated GitHub
       #    Action, but for now we install from source.
       - name: Check out maas-code-reviewer
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: canonical/maas-code-reviewer
           path: maas-code-reviewer
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
 
       - name: Install maas-code-reviewer
         run: uv sync --frozen
