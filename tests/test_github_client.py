@@ -3,8 +3,9 @@
 
 import pytest
 
-from maas_code_reviewer.github_client import parse_pr_url
+from maas_code_reviewer.github_client import GitHubClient, parse_pr_url
 from tests.fake_github import FakeGitHubClient
+from tests.fake_pygithub import FakeGithubFile, FakePyGithub
 
 
 class TestParsePrUrl:
@@ -52,6 +53,10 @@ class TestParsePrUrl:
         with pytest.raises(ValueError, match="Invalid GitHub PR URL"):
             parse_pr_url("https://github.com/owner/repo/pull/-5")
 
+    def test_rejects_empty_owner(self) -> None:
+        with pytest.raises(ValueError, match="Invalid GitHub PR URL"):
+            parse_pr_url("https://github.com//repo/pull/1")
+
     def test_rejects_url_with_no_path(self) -> None:
         with pytest.raises(ValueError, match="Invalid GitHub PR URL"):
             parse_pr_url("https://github.com/")
@@ -59,6 +64,135 @@ class TestParsePrUrl:
     def test_rejects_url_too_short(self) -> None:
         with pytest.raises(ValueError, match="Invalid GitHub PR URL"):
             parse_pr_url("https://github.com/owner/repo")
+
+
+def _make_client(fake_gh: FakePyGithub, token: str = "test-token") -> GitHubClient:
+    with fake_gh.patch_github():
+        return GitHubClient(token=token)
+
+
+class TestGitHubClientGetPrDiff:
+    def test_returns_reconstructed_diff(self) -> None:
+        fake_gh = FakePyGithub()
+        fake_gh.add_pull(
+            "owner/repo",
+            1,
+            files=[
+                FakeGithubFile("src/foo.py", "@@ -1 +1,2 @@\n+import sys"),
+            ],
+        )
+        client = _make_client(fake_gh)
+
+        diff = client.get_pr_diff("owner", "repo", 1)
+
+        assert "--- a/src/foo.py" in diff
+        assert "+++ b/src/foo.py" in diff
+        assert "@@ -1 +1,2 @@\n+import sys" in diff
+
+    def test_multiple_files(self) -> None:
+        fake_gh = FakePyGithub()
+        fake_gh.add_pull(
+            "owner/repo",
+            1,
+            files=[
+                FakeGithubFile("a.py", "@@ -1 +1 @@\n+a"),
+                FakeGithubFile("b.py", "@@ -1 +1 @@\n+b"),
+            ],
+        )
+        client = _make_client(fake_gh)
+
+        diff = client.get_pr_diff("owner", "repo", 1)
+
+        assert "--- a/a.py" in diff
+        assert "--- a/b.py" in diff
+
+    def test_skips_files_with_no_patch(self) -> None:
+        fake_gh = FakePyGithub()
+        fake_gh.add_pull(
+            "owner/repo",
+            1,
+            files=[
+                FakeGithubFile("binary.png", None),
+                FakeGithubFile("text.py", "@@ -1 +1 @@\n+ok"),
+            ],
+        )
+        client = _make_client(fake_gh)
+
+        diff = client.get_pr_diff("owner", "repo", 1)
+
+        assert "binary.png" not in diff
+        assert "text.py" in diff
+
+    def test_no_files_returns_empty_string(self) -> None:
+        fake_gh = FakePyGithub()
+        fake_gh.add_pull("owner/repo", 1, files=[])
+        client = _make_client(fake_gh)
+
+        diff = client.get_pr_diff("owner", "repo", 1)
+
+        assert diff == ""
+
+    def test_records_token(self) -> None:
+        fake_gh = FakePyGithub()
+        fake_gh.add_pull("owner/repo", 1)
+        _make_client(fake_gh, token="my-secret-token")
+
+        assert fake_gh.token == "my-secret-token"
+
+
+class TestGitHubClientGetPrDescription:
+    def test_returns_body(self) -> None:
+        fake_gh = FakePyGithub()
+        fake_gh.add_pull("owner/repo", 1, body="Fix the bug")
+        client = _make_client(fake_gh)
+
+        desc = client.get_pr_description("owner", "repo", 1)
+
+        assert desc == "Fix the bug"
+
+    def test_returns_none_for_none_body(self) -> None:
+        fake_gh = FakePyGithub()
+        fake_gh.add_pull("owner/repo", 1, body=None)
+        client = _make_client(fake_gh)
+
+        desc = client.get_pr_description("owner", "repo", 1)
+
+        assert desc is None
+
+    def test_returns_none_for_empty_body(self) -> None:
+        fake_gh = FakePyGithub()
+        fake_gh.add_pull("owner/repo", 1, body="")
+        client = _make_client(fake_gh)
+
+        desc = client.get_pr_description("owner", "repo", 1)
+
+        assert desc is None
+
+
+class TestGitHubClientPostReview:
+    def test_posts_review_with_correct_args(self) -> None:
+        fake_gh = FakePyGithub()
+        pr = fake_gh.add_pull("owner/repo", 1)
+        client = _make_client(fake_gh)
+
+        client.post_review("owner", "repo", 1, body="Looks good.", comments=[])
+
+        assert len(pr.posted_reviews) == 1
+        assert pr.posted_reviews[0]["body"] == "Looks good."
+        assert pr.posted_reviews[0]["event"] == "COMMENT"
+        assert pr.posted_reviews[0]["comments"] == []
+
+    def test_posts_inline_comments(self) -> None:
+        fake_gh = FakePyGithub()
+        pr = fake_gh.add_pull("owner/repo", 1)
+        client = _make_client(fake_gh)
+        inline = [{"path": "src/foo.py", "line": 10, "body": "Nit."}]
+
+        client.post_review("owner", "repo", 1, body="See inline.", comments=inline)
+
+        posted = pr.posted_reviews[0]["comments"]
+        assert len(posted) == 1
+        assert posted[0] == {"path": "src/foo.py", "line": 10, "body": "Nit."}
 
 
 class TestFakeGitHubClientGetPrDiff:

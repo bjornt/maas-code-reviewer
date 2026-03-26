@@ -185,6 +185,16 @@ class TestParseDiffFilesAndLines:
         result = parse_diff_files_and_lines(diff)
         assert "plain.py" in result
 
+    def test_malformed_hunk_header_sets_line_to_zero(self) -> None:
+        # If the hunk header has a non-integer new-file start, the parser
+        # falls back to current_line = 0 and still processes subsequent lines.
+        diff = "--- a/f.py\n+++ b/f.py\n@@ -1 +abc @@\n+added\n"
+        result = parse_diff_files_and_lines(diff)
+        assert "f.py" in result
+        # current_line was set to 0 after ValueError, then the "+added"
+        # line records line 0 and advances to 1.
+        assert 0 in result["f.py"]
+
 
 # ---------------------------------------------------------------------------
 # TestValidateReviewJson

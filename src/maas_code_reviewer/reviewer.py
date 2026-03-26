@@ -115,29 +115,33 @@ def review_diff_structured(
     prompt = _build_structured_prompt(truncated_diff, description)
 
     def validate_review(json_text: str) -> str:
-        """Validate the review JSON against the schema and the diff.
-
-        Returns an empty string if valid, or a newline-separated list of
-        errors if invalid.
-        """
-        print(
-            f"Tool call: validate_review(json_text=<{len(json_text)} chars>)",
-            file=sys.stderr,
-        )
-        try:
-            data = json.loads(json_text)
-        except json.JSONDecodeError as exc:
-            return f"Invalid JSON: {exc}"
-        errors = validate_review_json(data, truncated_diff)
-        if errors:
-            return "\n".join(errors)
-        return ""
+        return _validate_review(json_text, truncated_diff)
 
     tools: list[Callable[..., str]] = [validate_review, read_file, list_directory]
     raw_text = llm.review(prompt, tools)
 
     cleaned = _extract_json(raw_text)
     return json.loads(cleaned)
+
+
+def _validate_review(json_text: str, diff_text: str) -> str:
+    """Validate the review JSON against the schema and the diff.
+
+    Returns an empty string if valid, or a newline-separated list of
+    errors if invalid.
+    """
+    print(
+        f"Tool call: validate_review(json_text=<{len(json_text)} chars>)",
+        file=sys.stderr,
+    )
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        return f"Invalid JSON: {exc}"
+    errors = validate_review_json(data, diff_text)
+    if errors:
+        return "\n".join(errors)
+    return ""
 
 
 def review_diff(
