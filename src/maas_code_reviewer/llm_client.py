@@ -3,6 +3,7 @@
 
 import sys
 from collections.abc import Callable
+from typing import Any, cast
 
 from google import genai
 from google.genai import types
@@ -29,10 +30,12 @@ class GeminiClient:
             self._client = genai.Client(api_key=api_key)  # pragma: no cover
         self._model = model
 
-    def review(self, prompt: str, tools: list[Callable[..., str]]) -> str:
+    def review(self, prompt: str, tools: list[Callable[..., Any]]) -> str:
         config = types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(include_thoughts=True),
-            tools=tools if tools else None,  # type: ignore[arg-type]
+            tools=cast(
+                list[types.Tool | Callable[..., Any]] | None, tools if tools else None
+            ),
         )
 
         chat = self._client.chats.create(model=self._model, config=config)

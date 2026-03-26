@@ -3,6 +3,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,7 @@ class MergeProposal:
     status: str
     commit_message: str | None
     description: str | None
-    _lp_object: object = field(compare=False, hash=False, repr=False)
+    _lp_object: Any = field(compare=False, hash=False, repr=False)
 
 
 @dataclass(frozen=True)
