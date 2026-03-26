@@ -18,6 +18,7 @@ from maas_code_reviewer.models import Comment, MergeProposal
 from maas_code_reviewer.repo_tools import RepoTools
 from maas_code_reviewer.reviewer import (
     REVIEW_MARKER,
+    REVIEW_PREAMBLE,
     review_diff,
     review_diff_structured,
 )
@@ -203,7 +204,7 @@ def handle_review_pr(args: argparse.Namespace) -> None:
         print(json.dumps(result_dict, indent=2))
         return
 
-    general_comment = result_dict.get("general_comment", "")
+    general_comment = f"{REVIEW_PREAMBLE}\n\n{result_dict.get('general_comment', '')}"
     inline_comments = result_dict.get("inline_comments", {})
 
     comments = [

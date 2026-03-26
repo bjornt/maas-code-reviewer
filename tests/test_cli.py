@@ -11,6 +11,7 @@ import pytest
 
 from maas_code_reviewer.cli import (
     REVIEW_MARKER,
+    REVIEW_PREAMBLE,
     MergeProposalSummary,
     _build_parser,
     _lp_repo_url,
@@ -1028,7 +1029,10 @@ class TestReviewMergeProposal:
 
         result = review_merge_proposal(lp, git, llm, mp.url)
 
-        assert result == "[maas-code-reviewer review]\n\nReview body here."
+        assert (
+            result
+            == f"[maas-code-reviewer review]\n\n{REVIEW_PREAMBLE}\n\nReview body here."
+        )
 
 
 class TestBuildParserReviewDiff:
@@ -1739,7 +1743,7 @@ class TestHandleReviewPr:
 
         reviews = github_client.get_posted_reviews("owner", "repo", 42)
         assert len(reviews) == 1
-        assert reviews[0]["body"] == "Looks good overall."
+        assert reviews[0]["body"] == f"{REVIEW_PREAMBLE}\n\nLooks good overall."
 
     def test_inline_comments_are_posted(self, tmp_path: Path) -> None:
         """Inline comments from the LLM response are included in the posted review."""
