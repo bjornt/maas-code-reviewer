@@ -2,6 +2,7 @@
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
 from datetime import datetime
+from typing import Any
 
 from launchpadlib.launchpad import Launchpad
 
@@ -44,10 +45,10 @@ class LaunchpadClient:
         return [_to_merge_proposal(lp_mp) for lp_mp in lp_proposals]
 
     def get_comments(self, mp: MergeProposal) -> list[Comment]:
-        return [_to_comment(lp_comment) for lp_comment in mp._lp_object.all_comments]  # type: ignore[attr-defined]
+        return [_to_comment(lp_comment) for lp_comment in mp._lp_object.all_comments]
 
     def post_comment(self, mp: MergeProposal, content: str, subject: str) -> None:
-        mp._lp_object.createComment(subject=subject, content=content)  # type: ignore[attr-defined]
+        mp._lp_object.createComment(subject=subject, content=content)
 
     def get_bot_username(self) -> str:
         return self._lp.me.name
@@ -79,25 +80,25 @@ def _get_person_name_from_link(person_link: str) -> str:
     return name[1:]
 
 
-def _to_merge_proposal(lp_mp: object) -> MergeProposal:
+def _to_merge_proposal(lp_mp: Any) -> MergeProposal:
     return MergeProposal(
-        url=lp_mp.web_link,  # type: ignore[attr-defined]
-        api_url=lp_mp.self_link,  # type: ignore[attr-defined]
-        source_git_repository=_get_git_unique_name(lp_mp.source_git_repository_link),  # type: ignore[attr-defined]
-        source_git_path=lp_mp.source_git_path,  # type: ignore[attr-defined]
-        target_git_repository=_get_git_unique_name(lp_mp.target_git_repository_link),  # type: ignore[attr-defined]
-        target_git_path=lp_mp.target_git_path,  # type: ignore[attr-defined]
-        status=lp_mp.queue_status,  # type: ignore[attr-defined]
-        commit_message=lp_mp.commit_message or None,  # type: ignore[attr-defined]
-        description=lp_mp.description or None,  # type: ignore[attr-defined]
+        url=lp_mp.web_link,
+        api_url=lp_mp.self_link,
+        source_git_repository=_get_git_unique_name(lp_mp.source_git_repository_link),
+        source_git_path=lp_mp.source_git_path,
+        target_git_repository=_get_git_unique_name(lp_mp.target_git_repository_link),
+        target_git_path=lp_mp.target_git_path,
+        status=lp_mp.queue_status,
+        commit_message=lp_mp.commit_message or None,
+        description=lp_mp.description or None,
         _lp_object=lp_mp,
     )
 
 
-def _to_comment(lp_comment: object) -> Comment:
-    date_created: datetime = lp_comment.date_created  # type: ignore[attr-defined]
+def _to_comment(lp_comment: Any) -> Comment:
+    date_created: datetime = lp_comment.date_created
     return Comment(
-        author=_get_person_name_from_link(lp_comment.author_link),  # type: ignore[attr-defined]
-        body=lp_comment.message_body,  # type: ignore[attr-defined]
+        author=_get_person_name_from_link(lp_comment.author_link),
+        body=lp_comment.message_body,
         date=date_created,
     )
