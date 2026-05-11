@@ -43,8 +43,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          METRICS_FILE: ${{ runner.temp }}/review-metrics-pr-${{ github.event.pull_request.number }}.json
         run: |
           maas-code-reviewer review-pr \
             --model "$MODEL" \
             --repo-dir "$GITHUB_WORKSPACE" \
+            --metrics "$METRICS_FILE" \
             "https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+
+      - name: Upload review metrics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: review-metrics-pr-${{ github.event.pull_request.number }}
+          path: ${{ runner.temp }}/review-metrics-pr-${{ github.event.pull_request.number }}.json
+          if-no-files-found: warn
+          retention-days: 30
