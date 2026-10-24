@@ -230,8 +230,6 @@ def test_shim_does_not_discover_missing_explicit_harness(
 
 def test_shim_reports_only_explicit_test_identity(local_job, capsys) -> None:
     project, paths, omp, observation = local_job
-    assert workshop_shim.main(["-p", str(project), "--version"]) == 0
-    assert capsys.readouterr().out.strip() == "workshop-shim/1"
     assert workshop_shim.main(["-p", str(project), "info", "review"]) == 0
     assert "stopped" in capsys.readouterr().out
     assert (

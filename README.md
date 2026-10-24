@@ -15,16 +15,15 @@ retry, or automatic local fallback.
 **Verification boundary:** the explicitly selected Workshop CLI shim runs the
 real installed omp inside an already isolated development environment. It is not
 a filesystem, mount, credential, or network sandbox. Real Workshop execution,
-mount isolation, SDK/interface pins, and deployment-host lifecycle verification
+mount isolation, interface inventory, and deployment-host lifecycle verification
 remain operator gates; see [PLAN.md](PLAN.md). Do not deploy the shim for
 untrusted reviews on an ordinary host.
 
 ## Installation
 
-Requires Python 3.12 or newer, uv, and git. Production review execution additionally
-requires a supported host installation of Workshop, its daemon, LXD, and an
-operator-owned runtime profile. `workshopctl` inside a development Workshop is
-not a host launcher.
+Requires Python 3.12 or newer, uv, and git. Production review execution
+additionally requires a supported host installation of Workshop, its daemon, and
+LXD. `workshopctl` inside a development Workshop is not a host launcher.
 The trusted Workshop base/SDKs must provide `/usr/bin/python3` and standard
 `cp`, `chown`, `mount`, `umount`, and `mountpoint` utilities for bootstrap/isolation
 checks; SDK/interface availability is verified before agent execution.
@@ -37,30 +36,93 @@ uv run maas-code-reviewer --help
 make check
 ```
 
-To install a built wheel as a normal host tool:
+### Local wheel
+
+Build the distribution artifacts from a trusted checkout and run them without
+installing anything:
 
 ```sh
-uv build
-uv tool install --force dist/maas_code_reviewer-0.2.0-py3-none-any.whl
+uv build --wheel
+uvx --from dist/maas_code_reviewer-0.2.0-py3-none-any.whl maas-code-reviewer --help
 ```
 
-Prompts, bootstrap/cleanup resources, and the trusted example harness policy are
-packaged with the application. A reviewed checkout is never an installation or
-runtime-policy source. Strict Snap execution is unsupported: its former release
+`uvx` resolves dependencies from PyPI around the local file and caches that file
+by path metadata, so rebuilding the same version after a source change takes
+effect without `--refresh`. The wheel is `py3-none-any`: the same file runs on
+any host that meets the prerequisites above, including one copied to another
+machine.
+
+To install it as a persistent host command instead:
+
+```sh
+uv tool install --force --python 3.12 dist/maas_code_reviewer-0.2.0-py3-none-any.whl
+```
+
+That creates a private per-user environment under `uv tool dir`
+(`~/.local/share/uv/tools/maas-code-reviewer/`) and a `maas-code-reviewer`
+symlink in `uv tool dir --bin` (`~/.local/bin`, which must be on `PATH`; see
+`uv tool update-shell`). No system interpreter, project environment, or root
+location is touched. `--force` is required to reinstall an identical version,
+and `--python` pins the tested interpreter instead of the newest one uv finds.
+`uv tool uninstall maas-code-reviewer` removes the environment and the symlink.
+
+Prompts, bootstrap/cleanup resources, the generated Workshop definition, and the
+trusted harness policy are packaged with the application. A reviewed checkout is
+never an installation or runtime-policy source. Strict Snap execution is
+unsupported: its former release
 workflow and packaging definition have been retired, not changed to classic
 confinement. The wheel workflow produces Python distribution artifacts.
+
+### Nightly builds
+
+Every night the CI builds the current `main` (after `make check` passes) into a
+dated development version such as `0.3.0.dev202610240900`, publishes it as a
+GitHub prerelease, and regenerates a static [PEP 503][pep503] index. Nothing is
+published when `main` has not moved; the fourteen most recent nightlies are
+retained.
+
+Run the latest nightly without installing it:
+
+```sh
+uvx --index https://canonical.github.io/maas-code-reviewer/simple/ \
+  --prerelease allow --from maas-code-reviewer maas-code-reviewer --help
+```
+
+Install it as a host tool, or pin one exact nightly:
+
+```sh
+uv tool install --index https://canonical.github.io/maas-code-reviewer/simple/ \
+  --prerelease allow maas-code-reviewer
+
+uvx --index https://canonical.github.io/maas-code-reviewer/simple/ \
+  --prerelease allow --from 'maas-code-reviewer==0.3.0.dev202610240900' \
+  maas-code-reviewer --help
+```
+
+The index lists only this project; dependencies still resolve from PyPI. Each
+link carries the release asset's `sha256` digest when GitHub reports one.
+Nightlies are untested-in-production artifacts for evaluation, carry no support
+promise, and change the application only: the Workshop, LXD, inference, and
+trusted-profile requirements above are unchanged, as is the verification
+boundary. Publishing requires the repository's Pages source to be set to GitHub
+Actions once; the workflow deploys the index, not a branch.
+
+[pep503]: https://peps.python.org/pep-0503/
 
 ## Commands
 
 ### Local diffs
 
 ```sh
-maas-code-reviewer review-diff --runtime-config /etc/maas-code-reviewer/runtime.toml \
-  --repo-dir /path/to/checkout changes.diff
+maas-code-reviewer review-diff --repo-dir /path/to/checkout changes.diff
 
 # stdin; structured output is written to a file, not review stdout
+maas-code-reviewer review-diff --repo-dir /path/to/checkout \
+  --json-output review.json --metrics metrics.json -
+
+# with an operator profile overriding the built-in runtime defaults
 maas-code-reviewer review-diff --runtime-config /etc/maas-code-reviewer/runtime.toml \
-  --repo-dir /path/to/checkout --json-output review.json --metrics metrics.json -
+  --repo-dir /path/to/checkout changes.diff
 ```
 
 Without `--json-output`, stdout contains the validated general comment and every
@@ -85,7 +147,7 @@ directories named `b` or `w`.
 ### GitHub pull requests
 
 ```sh
-maas-code-reviewer review-pr --runtime-config /etc/maas-code-reviewer/runtime.toml \
+maas-code-reviewer review-pr \
   --repo-dir /path/to/pr-checkout --dry-run \
   https://github.com/canonical/maas/pull/42
 ```
@@ -102,7 +164,7 @@ prints the same host-validated JSON without posting.
 
 ```sh
 maas-code-reviewer list-lp-mps --status 'Needs review' maas
-maas-code-reviewer review-mp --runtime-config /etc/maas-code-reviewer/runtime.toml \
+maas-code-reviewer review-mp \
   --launchpad-credentials /path/to/launchpad.credentials --dry-run \
   https://code.launchpad.net/~user/project/+git/repo/+merge/123
 ```
@@ -119,7 +181,7 @@ mode posts a host-validated comment.
 
 | Option | Behavior |
 | --- | --- |
-| `--runtime-config FILE` | Explicit trusted operator TOML; required only when a nonempty, non-skipped review starts an agent. No repository/home/environment discovery. |
+| `--runtime-config FILE` | Optional explicit operator TOML overriding individual built-in runtime defaults. No repository/home/environment discovery. |
 | `--model ID` | Exact identity authorized by the profile and verified against advertised harness support/current selection. An unsupported explicit override fails instead of fuzzy matching or falling back. |
 | `--review-timeout SECONDS` | Positive finite total startup/agent deadline; defaults to the profile. Cleanup has a separate bounded grace period. |
 | `--max-diff-chars N` | Bounds initial diff context; default 200000. Full-diff validation remains authoritative. |
@@ -131,62 +193,77 @@ reviews retain their unmarked response; plain text retains the host review
 marker/preamble. Empty-review usage is known zero. Runtime/result failures are
 nonzero, use stderr, and do not publish or emit review/metrics artifacts.
 
-## Trusted runtime configuration
+## Review runtime configuration
 
-Callers choose one explicit TOML path. Relative host resources resolve against
-the resolved configuration file's directory, not the reviewed checkout or cwd.
-Unknown keys, malformed commands/paths, missing executables/templates, unauthorized
-models, and invalid deadlines fail before launching a job. Commands are argv
-arrays, never shell-interpolated strings.
+Reviews run on built-in defaults owned by this package: no operator file is
+required. The defaults select the host `workshop` executable found on `PATH`,
+generate the Workshop definition, request the `omp` SDK, declare one inference
+tunnel, and use the packaged harness profile, container layout, argv, and a
+300-second deadline.
 
-The profile describes:
+`--runtime-config FILE` overrides individual values. Relative host resources
+resolve against the resolved configuration file's directory, not the reviewed
+checkout or cwd. Unknown keys, malformed commands/paths, missing executables,
+unauthorized models, and invalid deadlines fail before launching a job. Commands
+are argv arrays, never shell-interpolated strings. Every setting is optional:
 
-- `[workshop]`: executable and trusted project-template directory containing
-  `workshop.yaml`; optional absolute host `socket` selects the management Unix
-  socket (upstream default `/var/lib/workshop/workshop.socket`). Snap or custom
-  hosts must supply their actual socket. The CLI and host change-control API use
-  the same endpoint; the agent never receives the socket or its environment key.
-  The canonical Workshop Snap declares the socket at
+- `[workshop]`: `executable` (default: the `workshop` on `PATH`), `base`
+  (default `ubuntu@26.04`), and absolute host `socket` selecting the management
+  Unix socket (upstream default `/var/lib/workshop/workshop.socket`). Snap or
+  custom hosts must supply their actual socket. The CLI and host change-control
+  API use the same endpoint; the agent never receives the socket or its
+  environment key. The canonical Workshop Snap declares the socket at
   `/var/snap/workshop/common/workshop/workshop.socket`. Its launcher fixes that
   environment value; for an explicitly different endpoint use the underlying
   `/snap/workshop/current/bin/workshop` binary, not the Snap dispatcher alias.
   Workshop's own Snap is classic-confined; this does not restore the retired
   strict-confined `maas-code-reviewer` package.
+- `[omp]`: `channel` for the harness SDK. Omitted by default, which keeps
+  Workshop's own channel resolution. Workshop's definition format has no
+  revision field, so a channel is the only reproducibility control available;
+  this application does not pretend otherwise by pinning observed versions.
 - `[harness]`: container-local argv. Trusted placeholders supply the selected
   model, system instruction, protected paths/profile directory, and remaining
   deadline; replacement is per argument, not shell expansion.
 - `[paths]`: absolute normalized repository, full-diff, system-instruction,
-  session cwd, and agent-state paths. They must be distinct and nonoverlapping;
-  the session cwd is outside repository data.
-- `[model]`: `default` and exact `allowed` identities. Registry advertisement and
-  resolved model identity must agree with the requested identity before a turn.
-- `[authentication]`: required inference `SDK:plug`, not provider/publication
-  credentials or broker authority. After readiness/artifact checks, each job runs
-  `workshop connect JOB/SDK:plug` before validating the interface allowlist. Declare
-  the same-named `system:plug` host tunnel slot in the trusted Workshop template;
-  configuring the allowlist alone does not establish a connection. Connection
+  session cwd, and agent-state paths. Overrides merge with the default layout
+  and the whole result must stay distinct and nonoverlapping; the session cwd is
+  outside repository data.
+- `[model]`: `default` identity, and an optional exact `allowed` list. Without
+  `allowed`, `--model` selects any identity the gateway serves; with it, both
+  `default` and `--model` must appear in it. Registry advertisement and resolved
+  model identity must agree with the requested identity before a turn.
+- `[authentication]`: inference `plug` name (default `review-inference`) and
+  tunnel `endpoint` (default `localhost:4000`). The SDK is always `omp` because
+  this application writes the definition that declares the plug and its
+  same-named `system` slot. Each job runs `workshop connect JOB/omp:PLUG` after
+  readiness, then verifies that exactly that one tunnel is connected. Connection
   failure or timeout aborts startup and follows normal job cleanup.
-- `[interfaces]`: complete approved connected plugs and host-backed mounts. Every
-  host-backed SDK state mount must be inventoried and remapped to fresh job state.
-  Each replacement source directory is created before invoking `workshop remount`;
-  Workshop does not create it on the stopped cross-filesystem path when the old
-  source exists.
-  Jobs with approved mounts are stopped before remapping and restarted before
-  bootstrap: Workshop cannot safely perform every live remount across host
-  filesystems (for example, SDK storage to a job directory under `/tmp`). Failure
-  to stop, remap, or restart aborts startup and follows normal job cleanup.
-  Raw lifecycle stderr is intentionally not echoed because it may contain secrets.
-  If remount still fails, obtain the underlying diagnostic by running it directly
-  against a disposable probe Workshop, never a development or production job.
-- `[artifacts]`: exact Workshop version, observed SDK revisions, and trusted
-  harness-profile directory. A moving SDK Store channel alone is not a pin;
-  drift must fail before agent execution.
+- `[profile]`: `directory` holding the trusted harness policy; defaults to the
+  packaged profile.
 
-There is no bundled verified production Workshop artifact combination. On the
-real host, an operator must provision a trusted Store SDK definition, capture its
-actual CLI/SDK versions and interface/mount inventory, configure inference access,
-and complete the deployment gates below. The packaged empty-SDK Workshop template
-is explicitly for the local shim, not a production sandbox definition.
+The generated definition is written into a fresh disposable project directory
+and re-read immediately before `workshop launch`; any edit between preparation
+and launch aborts the review. A `workshop.yaml` inside the reviewed checkout is
+ordinary snapshot data and is never loaded.
+
+Every host-backed SDK state mount Workshop reports is inventoried and remapped
+to fresh job state automatically; no declaration is required and an unremappable
+mount blocks the agent. Each replacement source directory is created before
+invoking `workshop remount`; Workshop does not create it on the stopped
+cross-filesystem path when the old source exists. Jobs with mounts are stopped
+before remapping and restarted before bootstrap: Workshop cannot safely perform
+every live remount across host filesystems (for example, SDK storage to a job
+directory under `/tmp`). Failure to stop, remap, or restart aborts startup and
+follows normal job cleanup. Raw lifecycle stderr is intentionally not echoed
+because it may contain secrets. If remount still fails, obtain the underlying
+diagnostic by running it directly against a disposable probe Workshop, never a
+development or production job. Credential, device, and other non-tunnel
+interfaces are rejected outright.
+
+There is no verified production Workshop artifact combination. On the real host,
+an operator must provision Workshop and LXD, configure inference access, and
+complete the deployment gates below.
 
 ### Local Workshop shim with this container's omp
 
@@ -220,10 +297,11 @@ PY
 
 Run this setup from a trusted coordinator checkout, not PR input. It copies the
 standalone test shim outside the reviewed tree alongside the protected profile.
-Runtime preflight rejects control files, definitions, profiles, or executables
-inside the reviewed checkout, even when reached through symlinks. The example
-targets this development container's installed omp; change both omp executable
-references if its installed location differs. The complete schema/example is
+Runtime preflight rejects control files, profiles, or executables inside the
+reviewed checkout, even when reached through symlinks. The example targets this
+development container's installed omp; change both omp executable references if
+its installed location differs. The example overrides only the Workshop
+executable and the test-shim block and relies on defaults for everything else:
 [`runtime/shim.example.toml`](src/maas_code_reviewer/runtime/shim.example.toml).
 Use the printed configuration path with `review-diff --runtime-config FILE`.
 
@@ -241,8 +319,8 @@ environment variable. Do not print it, put it in argv/TOML values, copy a persis
 omp auth profile, query credential-export endpoints, or use a publication token.
 A fresh generated model configuration references the private environment value
 by variable name. `[test_shim]` is an explicit development opt-in, not automatic
-fallback when Workshop is unavailable. Remove this section and use a real trusted
-Workshop executable/template/artifact policy for deployment.
+fallback when Workshop is unavailable. Remove this section and use a real
+trusted Workshop executable and policy for deployment.
 
 The trusted omp policy requests only `read,grep,glob,web_search`, disables ambient
 extensions/skills/rules/LSP/PTY and skill-learning companions, sets unattended
@@ -268,8 +346,9 @@ descriptions are untrusted task context, not instructions that can select
 Workshop definitions, SDKs, hooks, MCP commands, dotenv, plugins, or model policy.
 Host convention loading remains path-contained.
 
-The real Workshop job uses fresh identity/state and verifies its expected version,
-SDK revisions, interfaces, and remapped mounts before the agent starts. Trusted
+The real Workshop job uses fresh identity/state, re-reads its own generated
+definition before launch, and verifies readiness, connected interfaces, and
+remapped mounts before the agent starts. Trusted
 bootstrap copies staged data into container-private locations and removes the
 host-backed `/project` view before any agent execution. It then read-only bind
 mounts the copied repository, full diff, and system-instruction file; it does

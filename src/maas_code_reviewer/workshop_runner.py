@@ -54,11 +54,8 @@ class ConfiguredAgentRunner:
         self.timeout_seconds = timeout_seconds
 
     def run(self, request: ReviewRequest) -> AgentRunResult:
-        if self.config_path is None:
-            raise RunnerConfigurationError(
-                "A nonempty review requires --runtime-config"
-            )
-        _require_external_policy(self.config_path, request.repository_path)
+        if self.config_path is not None:
+            _require_external_policy(self.config_path, request.repository_path)
         config = load_runtime_config(self.config_path)
         request = replace(
             request,
@@ -76,16 +73,11 @@ class WorkshopRunner:
 
     def run(self, request: ReviewRequest) -> AgentRunResult:
         resources = [
-            self.config.project_template,
-            self.config.project_template / "workshop.yaml",
             self.config.workshop_executable,
+            self.config.profile_directory,
         ]
         if self.config.configuration_path is not None:
             resources.append(self.config.configuration_path)
-        resources.append(
-            self.config.profile_directory
-            or Path(__file__).parent / "runtime" / "profile"
-        )
         if self.config.test_shim is not None:
             resources.append(self.config.test_shim.omp_executable)
         else:
@@ -148,6 +140,7 @@ class _Job:
             "USER": "review",
             "LOGNAME": "review",
         }
+        self.definition = yaml.safe_dump(config.workshop_definition(self.name))
         self.paths: dict[str, str] = {}
         self.lease: int | None = None
         self.guardian: subprocess.Popen | None = None
@@ -214,30 +207,7 @@ class _Job:
         for directory in (self.project, self.host_cwd, Path(self.environment["HOME"])):
             directory.mkdir()
         config = self.config
-        try:
-            definition = yaml.safe_load(
-                (config.project_template / "workshop.yaml").read_text()
-            )
-        except (yaml.YAMLError, UnicodeDecodeError) as exc:
-            raise RunnerConfigurationError(
-                "Invalid trusted Workshop definition"
-            ) from exc
-        if not isinstance(definition, dict):
-            raise RunnerConfigurationError(
-                "Trusted Workshop definition must be a mapping"
-            )
-        definition["name"] = self.name
-        sdks = definition.get("sdks", [])
-        if not isinstance(sdks, list) or any(
-            not isinstance(sdk, dict)
-            or not isinstance(sdk.get("name"), str)
-            or sdk["name"].startswith(("project-", "try-"))
-            for sdk in sdks
-        ):
-            raise RunnerConfigurationError(
-                "Use pinned Store SDKs, not project or try SDKs"
-            )
-        (self.project / "workshop.yaml").write_text(yaml.safe_dump(definition))
+        (self.project / "workshop.yaml").write_text(self.definition)
         payload = self.project / "payload"
         payload.mkdir()
         _snapshot(request.repository_path, payload / "repository", self.deadline)
@@ -246,10 +216,7 @@ class _Job:
             request.system_instruction, encoding="utf-8"
         )
         profile = payload / "profile"
-        profile_source = (
-            config.profile_directory or Path(__file__).parent / "runtime" / "profile"
-        )
-        _snapshot(profile_source, profile, self.deadline)
+        _snapshot(config.profile_directory, profile, self.deadline)
         for name in (
             "repository",
             "full_diff",
@@ -349,18 +316,12 @@ class _Job:
 
     def start(self) -> None:
         config = self.config
-        if config.test_shim is None and (
-            not config.workshop_version or not config.sdk_revisions
-        ):
+        # The definition is this application's own output; nothing may edit the
+        # staged copy between preparation and the job Workshop actually builds.
+        if (self.project / "workshop.yaml").read_text() != self.definition:
             raise RunnerConfigurationError(
-                "Production profile requires exact Workshop and SDK artifact pins"
+                "Staged Workshop definition changed after preparation"
             )
-        if config.workshop_version:
-            version = self.command("--version").strip()
-            if version != config.workshop_version:
-                raise RunnerConfigurationError(
-                    "Workshop executable version does not match the trusted pin"
-                )
         self.attempted_launch = True
         runtime_guard.update_control(self.root, launch_attempted=True)
         output = self.command("launch", "--no-wait", self.name)
@@ -399,21 +360,6 @@ class _Job:
             raise RunnerStartupError(
                 "Workshop did not reach the documented ready state"
             )
-        installed = details.get("sdks", {})
-        if not isinstance(installed, dict):
-            raise RunnerStartupError("Workshop did not report installed SDKs")
-        if set(installed) != set(config.sdk_revisions):
-            raise RunnerStartupError(
-                "Installed SDK set differs from the explicit artifact pins"
-            )
-        for name, revision in config.sdk_revisions.items():
-            sdk = installed.get(name)
-            if not isinstance(sdk, dict) or not str(sdk.get("installed", "")).endswith(
-                f"({revision})"
-            ):
-                raise RunnerStartupError(
-                    "Workshop SDK artifact revision does not match trusted pin"
-                )
         self.command("connect", f"{self.name}/{config.authentication_interface}")
         connections = self.command("connections", "--no-headers", self.name)
         connected: set[str] = set()
@@ -432,7 +378,7 @@ class _Job:
             if interface == "mount":
                 if slot != prefix + "system:mount":
                     raise RunnerStartupError(
-                        "Only explicitly remapped host mount interfaces are supported"
+                        "Only remapped host mount interfaces are supported"
                     )
                 mounts.add(plug)
             elif interface == "tunnel":
@@ -441,16 +387,11 @@ class _Job:
                 raise RunnerStartupError(
                     "Credential, device, and non-tunnel interfaces are forbidden"
                 )
-        if (
-            connected != set(config.allowed_interfaces)
-            or config.authentication_interface not in connected
-        ):
+        # The generated definition declares exactly one tunnel, so anything else
+        # connected is authority this application did not ask for.
+        if connected != {config.authentication_interface}:
             raise RunnerStartupError(
-                "Connected interfaces differ from the explicit least-authority policy"
-            )
-        if mounts != set(config.mount_interfaces):
-            raise RunnerStartupError(
-                "Host-backed mounts differ from the explicit disposable-mount policy"
+                "Connected interfaces differ from the generated definition"
             )
         if mounts:
             # Moving SDK state across host filesystems requires a stopped job.
@@ -680,7 +621,7 @@ def _require_external_policy(resource: Path, repository: Path) -> None:
         checkout = repository.resolve()
     except (OSError, RuntimeError) as exc:
         raise RunnerConfigurationError(
-            "Cannot resolve trusted policy resource"
+            f"Cannot resolve trusted policy resource: {resource}"
         ) from exc
     if selected.is_relative_to(checkout) or resource.absolute().is_relative_to(
         repository.absolute()

@@ -182,11 +182,6 @@ def review_request(tmp_path: Path) -> ReviewRequest:
 
 @pytest.fixture
 def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RuntimeConfig:
-    template = tmp_path / "template"
-    template.mkdir()
-    (template / "workshop.yaml").write_text(
-        "name: trusted\nbase: ubuntu@26.04\nsdks: []\n"
-    )
     executable = tmp_path / "workshop"
     executable.write_text("#!/bin/sh\nexit 1\n")
     executable.chmod(0o700)
@@ -194,16 +189,15 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RuntimeConfig:
     daemon_socket.touch()
     monkeypatch.setenv("TEST_REVIEW_BEARER", "test-secret-not-for-files")
     return RuntimeConfig(
-        executable,
-        template,
-        (
+        workshop_executable=executable,
+        harness_argv=(
             "/opt/omp",
             "acp",
             "--model={model}",
             "--append-system-prompt={system_instruction_text}",
             "--max-time={timeout_seconds}s",
         ),
-        ContainerPaths(
+        paths=ContainerPaths(
             *map(
                 PurePosixPath,
                 (
@@ -215,12 +209,9 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RuntimeConfig:
                 ),
             )
         ),
-        "provider/model",
-        ("provider/model", "provider/other"),
-        30,
-        "omp:review-inference",
-        workshop_version="workshop-shim/1",
-        allowed_interfaces=("omp:review-inference",),
+        default_model="provider/model",
+        allowed_models=("provider/model", "provider/other"),
+        review_timeout_seconds=30,
         test_shim=ShimConfig(executable, "http://localhost:4000", "TEST_REVIEW_BEARER"),
         workshop_socket=daemon_socket,
     )
@@ -616,11 +607,9 @@ def test_startup_timeout_is_one_total_deadline_and_still_disposes(
         "[malformed",
         "[]",
         "status: waiting",
-        "status: ready\nsdks: []",
-        "status: ready\nsdks: {unexpected: {installed: '1 (2)'}}",
     ],
 )
-def test_nonready_or_unpinned_jobs_never_start_agent(
+def test_nonready_jobs_never_start_agent(
     config: RuntimeConfig,
     review_request: ReviewRequest,
     service: WorkshopService,
@@ -664,19 +653,22 @@ def test_mounts_are_owned_remapped_and_deleted(
 ) -> None:
     service.connection = (
         "tunnel JOB/omp:review-inference JOB/system:tunnel -\n"
-        "mount JOB/omp:home JOB/system:mount -"
+        "mount JOB/omp:home JOB/system:mount -\n"
+        "mount JOB/omp:undeclared JOB/system:mount -"
     )
 
     async def agent(process, task, *, deadline):
         job = service.jobs[process.cwd.parent / "project"]
-        destination = job["mounts"]["omp:home"]
         assert job["running"]
-        assert destination.is_dir() and destination.is_relative_to(process.cwd.parent)
-        (destination / "session.json").write_text("disposable session")
+        assert set(job["mounts"]) == {"omp:home", "omp:undeclared"}
+        for destination in job["mounts"].values():
+            assert destination.is_dir()
+            assert destination.is_relative_to(process.cwd.parent)
+            (destination / "session.json").write_text("disposable session")
         return completed()
 
     monkeypatch.setattr(workshop_runner.acp_client, "run_acp", agent)
-    WorkshopRunner(replace(config, mount_interfaces=("omp:home",))).run(review_request)
+    WorkshopRunner(config).run(review_request)
     assert all(not job["running"] for job in service.jobs.values())
     assert all(not project.parent.exists() for project in service.jobs)
 
@@ -701,31 +693,29 @@ def test_mount_transition_failure_blocks_agent_and_disposes_job(
 
     expected = RunnerTimeoutError if timeout else RunnerStartupError
     with pytest.raises(expected):
-        WorkshopRunner(replace(config, mount_interfaces=("omp:home",))).run(
-            review_request
-        )
+        WorkshopRunner(config).run(review_request)
 
     assert "exec" not in [item for _, item in service.actions]
     assert all(not job["running"] for job in service.jobs.values())
     assert all(not project.parent.exists() for project in service.jobs)
 
 
-def test_sdk_revision_pin_and_workshop_version_are_enforced(
+def test_staged_definition_edits_never_reach_workshop(
     config: RuntimeConfig,
     review_request: ReviewRequest,
     service: WorkshopService,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with pytest.raises(RunnerConfigurationError, match="version"):
-        WorkshopRunner(replace(config, workshop_version="other")).run(review_request)
-    service.info = "status: ready\nsdks: {omp: {installed: '18.12.2 (wrong)'}}"
-    with pytest.raises(RunnerStartupError, match="revision"):
-        WorkshopRunner(replace(config, sdk_revisions={"omp": "250"})).run(
-            review_request
-        )
-    with pytest.raises(RunnerConfigurationError, match="pins"):
-        WorkshopRunner(replace(config, test_shim=None, workshop_version=None)).run(
-            review_request
-        )
+    original = workshop_runner._Job.prepare
+
+    def tampered(self, request):
+        original(self, request)
+        (self.project / "workshop.yaml").write_text("name: attacker\nsdks: []\n")
+
+    monkeypatch.setattr(workshop_runner._Job, "prepare", tampered)
+    with pytest.raises(RunnerConfigurationError, match="definition changed"):
+        WorkshopRunner(config).run(review_request)
+    assert not service.jobs
 
 
 @pytest.mark.parametrize(
@@ -888,20 +878,47 @@ def test_teardown_failure_preserves_primary_and_never_returns_success(
         assert state["removed"] is False
 
 
-@pytest.mark.parametrize(
-    "definition",
-    ["[broken", "[]", "sdks: [project-malicious]", "sdks: [{name: project-malicious}]"],
-)
-def test_untrusted_or_malformed_runtime_definition_never_launches(
+def test_generated_definition_ignores_any_repository_definition(
     config: RuntimeConfig,
     review_request: ReviewRequest,
     service: WorkshopService,
-    definition: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (config.project_template / "workshop.yaml").write_text(definition)
-    with pytest.raises(RunnerConfigurationError):
-        WorkshopRunner(config).run(review_request)
-    assert not service.jobs
+    staged: list[dict] = []
+
+    async def agent(process, task, *, deadline):
+        project = process.cwd.parent / "project"
+        staged.append(yaml.safe_load((project / "workshop.yaml").read_text()))
+        return completed()
+
+    monkeypatch.setattr(workshop_runner.acp_client, "run_acp", agent)
+    WorkshopRunner(replace(config, omp_channel="18/stable")).run(review_request)
+
+    definition = staged[0]
+    assert definition["name"].startswith("review-")
+    assert definition["base"] == "ubuntu@26.04"
+    assert "actions" not in definition
+    assert definition["sdks"] == [
+        {
+            "name": "omp",
+            "channel": "18/stable",
+            "plugs": {
+                "review-inference": {
+                    "interface": "tunnel",
+                    "endpoint": "localhost:4000",
+                }
+            },
+        },
+        {
+            "name": "system",
+            "slots": {
+                "review-inference": {
+                    "interface": "tunnel",
+                    "endpoint": "localhost:4000",
+                }
+            },
+        },
+    ]
 
 
 def test_container_path_cannot_overlap_mounted_host_control(
@@ -947,12 +964,7 @@ def test_host_io_failure_is_typed_and_removes_disposable_state(
 
 @pytest.mark.parametrize(
     "resource",
-    [
-        "configuration_path",
-        "project_template",
-        "profile_directory",
-        "workshop_executable",
-    ],
+    ["configuration_path", "profile_directory", "workshop_executable"],
 )
 def test_reviewed_checkout_cannot_supply_executable_runtime_policy(
     config: RuntimeConfig,
@@ -962,7 +974,7 @@ def test_reviewed_checkout_cannot_supply_executable_runtime_policy(
 ) -> None:
     selected = (
         review_request.repository_path
-        if resource.endswith("directory") or resource == "project_template"
+        if resource.endswith("directory")
         else review_request.repository_path / "workshop.yaml"
     )
     with pytest.raises(RunnerConfigurationError, match="outside the reviewed"):
@@ -980,17 +992,6 @@ def test_explicit_config_and_symlink_targets_inside_review_are_rejected_before_l
     link.symlink_to(malicious)
     with pytest.raises(RunnerConfigurationError, match="outside the reviewed"):
         ConfiguredAgentRunner(link).run(review_request)
-
-
-def test_definition_symlink_into_review_is_not_trusted(
-    config: RuntimeConfig,
-    review_request: ReviewRequest,
-) -> None:
-    definition = config.project_template / "workshop.yaml"
-    definition.unlink()
-    definition.symlink_to(review_request.repository_path / "workshop.yaml")
-    with pytest.raises(RunnerConfigurationError, match="outside the reviewed"):
-        WorkshopRunner(config).run(review_request)
 
 
 def test_policy_symlink_loop_is_a_configuration_error(
@@ -1061,12 +1062,7 @@ def test_pinned_production_profile_does_not_inherit_test_or_publication_bearers(
         config,
         paths=paths,
         test_shim=None,
-        sdk_revisions={"system": "2", "omp": "250"},
         workshop_socket=unix_daemon[0],
-    )
-    service.info = (
-        "status: ready\nsdks: {system: {installed: '(2)'}, "
-        "omp: {installed: '18.12.2 (250)'}}"
     )
 
     async def agent(process, task, *, deadline):
@@ -1085,7 +1081,7 @@ def test_pinned_production_profile_does_not_inherit_test_or_publication_bearers(
     assert WorkshopRunner(config).run(review_request) == completed()
 
 
-def test_cli_exec_spawn_failure_is_typed_and_cleanup_runs(
+def test_cli_exec_spawn_failure_is_typed_and_retains_recovery_state(
     config: RuntimeConfig,
     review_request: ReviewRequest,
     monkeypatch: pytest.MonkeyPatch,
@@ -1094,8 +1090,21 @@ def test_cli_exec_spawn_failure_is_typed_and_cleanup_runs(
         raise OSError("unavailable")
 
     monkeypatch.setattr(runtime_guard, "run_command", unavailable)
-    with pytest.raises(RunnerStartupError, match="configured Workshop CLI"):
+    with pytest.raises(RunnerStartupError, match="configured Workshop CLI") as failure:
         WorkshopRunner(config).run(review_request)
+
+    # Launch is the first CLI call, so its outcome is unknown and host recovery
+    # control must survive rather than be deleted as if disposal were confirmed.
+    retained = {
+        Path(part.rpartition(" at ")[2])
+        for note in failure.value.__notes__
+        for part in note.split("; ")
+        if "recovery state retained" in part
+    }
+    assert len(retained) == 1
+    control = retained.pop()
+    assert control.is_file()
+    shutil.rmtree(control.parent)
 
 
 def test_packaged_launcher_and_guardian_entrypoints(
@@ -1597,7 +1606,6 @@ def test_configured_override_changes_actual_harness_model_and_deadline(
 review_timeout_seconds = 30
 [workshop]
 executable = {json.dumps(str(config.workshop_executable))}
-project_template = {json.dumps(str(config.project_template))}
 [harness]
 argv = {json.dumps(list(config.harness_argv))}
 [paths]
@@ -1609,11 +1617,6 @@ agent_dir = "/review/state"
 [model]
 default = "provider/model"
 allowed = ["provider/model", "provider/other"]
-[authentication]
-interface = "omp:review-inference"
-[interfaces]
-allowed = ["omp:review-inference"]
-mounts = []
 [test_shim]
 omp_executable = {json.dumps(str(config.workshop_executable))}
 gateway_url = "http://localhost:4000"
@@ -2085,26 +2088,6 @@ def test_cleanup_failure_cannot_escape_an_unrelated_exception_handler(
     except ValueError:
         with pytest.raises(RunnerStartupError):
             WorkshopRunner(config).run(review_request)
-
-
-def test_unapproved_host_mount_blocks_agent_execution(
-    config: RuntimeConfig,
-    review_request: ReviewRequest,
-    service: WorkshopService,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service.connection = (
-        "tunnel JOB/omp:review-inference JOB/system:tunnel -\n"
-        "mount JOB/omp:unexpected JOB/system:mount -"
-    )
-
-    async def forbidden_agent(process, task, *, deadline):
-        pytest.fail("An agent started with an unapproved host mount")
-
-    monkeypatch.setattr(workshop_runner.acp_client, "run_acp", forbidden_agent)
-    with pytest.raises(RunnerStartupError):
-        WorkshopRunner(config).run(review_request)
-    assert all(not state["running"] for state in service.jobs.values())
 
 
 def test_default_packaged_policy_cannot_belong_to_reviewed_tree(

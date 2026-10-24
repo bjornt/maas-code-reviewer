@@ -14,8 +14,8 @@
   - `github_client.py` — `GitHubClient` class and `parse_pr_url()` free function
   - `agent_runner.py` — synchronous, vendor-neutral request/result/usage contract and failures
   - `acp_client.py` — Python ACP SDK transport, permissions, message selection, usage, cancellation
-  - `workshop_runner.py` — trusted configuration, isolated job lifecycle, snapshot staging, teardown
-  - `runtime_config.py` — explicitly selected operator TOML, preflight validation, exact model policy
+  - `workshop_runner.py` — generated job definition, isolated job lifecycle, snapshot staging, teardown
+  - `runtime_config.py` — built-in runtime defaults, optional operator TOML overrides, preflight validation
   - `models.py` — `MergeProposal` and `Comment` dataclasses
   - `repo_tools.py` — host-only top-level convention loading with repository path containment
   - `review_schema.py` — JSON review schema, `validate_review_json()`, `parse_diff_files_and_lines()`

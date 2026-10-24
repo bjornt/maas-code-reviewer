@@ -192,13 +192,13 @@ def _add_review_options(parser: argparse.ArgumentParser) -> None:
         type=Path,
         metavar="FILE",
         help=(
-            "Explicit trusted runtime configuration. Required when a nonempty, "
-            "non-skipped review starts an agent."
+            "Explicit trusted runtime configuration overriding individual "
+            "built-in review runtime defaults."
         ),
     )
     parser.add_argument(
         "--model",
-        help="Exact model identity allowed by the runtime profile (default: profile).",
+        help="Exact model identity to review with (default: runtime policy).",
     )
     parser.add_argument(
         "--review-timeout",

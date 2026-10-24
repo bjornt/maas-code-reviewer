@@ -2,7 +2,7 @@
 # Copyright 2026 Canonical Ltd. This software is licensed under the
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
-"""Explicit Workshop CLI test double, backed by installed omp 18.12.2.
+"""Explicit Workshop CLI test double, backed by the installed omp SDK build.
 
 NOT a sandbox: no mount, filesystem, service, network, or credential isolation
 is provided. This implements lifecycle commands, never ACP framing or replies.
@@ -20,22 +20,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "workshop-shim/1"
-OMP_VERSION = "omp/18.12.2"
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-p", type=Path, required=True)
-    parser.add_argument("--version", action="store_true")
     parser.add_argument("--review-change", choices=("wait", "abort"))
     parser.add_argument("--timeout")
     parser.add_argument("command", nargs="?")
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
-    if args.version:
-        print(VERSION)
-        return 0
     project = args.p.resolve(strict=True)
     try:
         if args.review_change:
@@ -189,17 +182,6 @@ def _exec(project: Path, arguments: list[str]) -> int:
     specification = json.loads(Path(command[-1]).read_text())
     if Path(specification["argv"][0]).resolve() != Path(omp).resolve():
         raise RuntimeError("Test shim harness differs from the explicitly selected omp")
-    version = subprocess.run(
-        [omp, "--version"],
-        cwd=args.cwd,
-        env=specification["environment"],
-        capture_output=True,
-        text=True,
-        timeout=min(timeout, 10),
-        check=True,
-    )
-    if version.stdout.strip() != OMP_VERSION:
-        raise RuntimeError("Test shim requires installed omp 18.12.2")
     process = subprocess.Popen(
         command, cwd=args.cwd, env=environment, start_new_session=True
     )

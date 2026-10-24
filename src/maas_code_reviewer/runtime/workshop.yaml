@@ -1,5 +1,0 @@
-# Local CLI-shim template ONLY. A real deployment must supply its own trusted
-# Store SDK definition plus exact observed Workshop/system/harness SDK pins.
-name: review-template
-base: ubuntu@26.04
-sdks: []

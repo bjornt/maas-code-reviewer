@@ -13,20 +13,33 @@ from maas_code_reviewer.runtime_config import load_runtime_config
 
 
 @pytest.fixture
+def installed_workshop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Put a host Workshop CLI on PATH without making it runnable by accident."""
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    executable = directory / "workshop"
+    executable.write_text('#!/bin/sh\ntouch "$(dirname "$0")/launched"\nexit 33\n')
+    executable.chmod(0o700)
+    monkeypatch.setenv("PATH", str(directory))
+    return executable
+
+
+@pytest.fixture
 def runtime_file(tmp_path: Path) -> Path:
     executable = tmp_path / "workshop"
     executable.write_text('#!/bin/sh\ntouch "$(dirname "$0")/launched"\nexit 33\n')
     executable.chmod(0o700)
-    template = tmp_path / "template"
-    template.mkdir()
-    (template / "workshop.yaml").write_text("name: test\n")
+    (tmp_path / "profile").mkdir()
     config = tmp_path / "runtime.toml"
     config.write_text("""\
 review_timeout_seconds = 127.5
 
 [workshop]
 executable = "./workshop"
-project_template = "./template"
+base = "ubuntu@24.04"
+
+[omp]
+channel = "18/stable"
 
 [harness]
 argv = ["/opt/agent", "acp"]
@@ -43,9 +56,84 @@ default = "provider/selected"
 allowed = ["provider/selected", "another/model"]
 
 [authentication]
-interface = "agent:review-inference"
+plug = "gateway"
+endpoint = "localhost:4100"
+
+[profile]
+directory = "./profile"
 """)
     return config
+
+
+def test_review_runs_without_any_operator_file(
+    installed_workshop: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "runtime.toml").write_text("review_timeout_seconds = 1\n")
+    monkeypatch.chdir(checkout)
+
+    config = load_runtime_config()
+
+    assert config.configuration_path is None
+    assert config.workshop_executable == installed_workshop
+    assert config.paths.repository == PurePosixPath("/review/repository")
+    assert config.authentication_interface == "omp:review-inference"
+    assert config.workshop_socket == Path("/var/lib/workshop/workshop.socket")
+    assert (config.profile_directory / "policy.yml").is_file()
+    assert "--tools=read,grep,glob,web_search" in config.harness_argv
+    assert config.resolve_timeout() == 300
+    assert not (tmp_path / "bin" / "launched").exists()
+
+
+def test_default_model_policy_accepts_an_explicit_cli_identity(
+    installed_workshop: Path,
+) -> None:
+    config = load_runtime_config()
+
+    assert config.resolve_model() == config.default_model
+    assert config.resolve_model("other/model") == "other/model"
+
+
+def test_missing_host_workshop_is_reported_before_any_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    with pytest.raises(RunnerConfigurationError, match="No workshop executable"):
+        load_runtime_config()
+
+
+def test_generated_definition_declares_only_the_inference_tunnel(
+    installed_workshop: Path,
+) -> None:
+    config = load_runtime_config()
+
+    assert config.workshop_definition("review-abc") == {
+        "name": "review-abc",
+        "base": "ubuntu@26.04",
+        "sdks": [
+            {
+                "name": "omp",
+                "plugs": {
+                    "review-inference": {
+                        "interface": "tunnel",
+                        "endpoint": "localhost:4000",
+                    }
+                },
+            },
+            {
+                "name": "system",
+                "slots": {
+                    "review-inference": {
+                        "interface": "tunnel",
+                        "endpoint": "localhost:4000",
+                    }
+                },
+            },
+        ],
+    }
 
 
 def test_explicit_policy_and_host_paths_do_not_follow_checkout_cwd(
@@ -58,13 +146,34 @@ def test_explicit_policy_and_host_paths_do_not_follow_checkout_cwd(
 
     config = load_runtime_config(runtime_file)
 
+    assert config.configuration_path == runtime_file
     assert config.workshop_executable == tmp_path / "workshop"
-    assert config.project_template == tmp_path / "template"
-    assert config.paths.repository == PurePosixPath("/review/repository")
+    assert config.profile_directory == tmp_path / "profile"
+    assert config.harness_argv == ("/opt/agent", "acp")
+    assert config.paths.system_instruction == PurePosixPath("/review/control/system.md")
     assert config.resolve_model() == "provider/selected"
     assert config.resolve_model("another/model") == "another/model"
     assert config.resolve_timeout() == 127.5
     assert config.resolve_timeout(9.25) == 9.25
+    assert config.workshop_definition("review-abc") == {
+        "name": "review-abc",
+        "base": "ubuntu@24.04",
+        "sdks": [
+            {
+                "name": "omp",
+                "channel": "18/stable",
+                "plugs": {
+                    "gateway": {"interface": "tunnel", "endpoint": "localhost:4100"}
+                },
+            },
+            {
+                "name": "system",
+                "slots": {
+                    "gateway": {"interface": "tunnel", "endpoint": "localhost:4100"}
+                },
+            },
+        ],
+    }
     assert not (tmp_path / "launched").exists()
 
 
@@ -98,13 +207,6 @@ def test_config_symlink_loop_fails_before_any_job(runtime_file: Path) -> None:
         load_runtime_config(runtime_file)
 
 
-def test_missing_authentication_policy_is_not_defaulted(runtime_file: Path) -> None:
-    text = runtime_file.read_text().partition("[authentication]")[0]
-    runtime_file.write_text(text)
-    with pytest.raises(RunnerConfigurationError, match="missing.*authentication"):
-        load_runtime_config(runtime_file)
-
-
 @pytest.mark.parametrize("section", ["root", "harness", "authentication"])
 def test_unknown_policy_keys_cannot_silently_disable_controls(
     runtime_file: Path, section: str
@@ -126,13 +228,6 @@ def test_section_requires_a_table(runtime_file: Path) -> None:
     )
     runtime_file.write_text('harness = "agent acp"\n' + text)
     with pytest.raises(RunnerConfigurationError, match="harness must be a TOML table"):
-        load_runtime_config(runtime_file)
-
-
-def test_missing_harness_command_is_not_defaulted(runtime_file: Path) -> None:
-    text = runtime_file.read_text().replace('argv = ["/opt/agent", "acp"]\n', "")
-    runtime_file.write_text(text)
-    with pytest.raises(RunnerConfigurationError, match="harness is missing.*argv"):
         load_runtime_config(runtime_file)
 
 
@@ -193,9 +288,26 @@ def test_repository_state_and_control_paths_must_not_overlap(
         load_runtime_config(runtime_file)
 
 
+def test_partial_path_override_merges_with_the_default_layout(
+    installed_workshop: Path, tmp_path: Path
+) -> None:
+    overlapping = tmp_path / "overlapping.toml"
+    overlapping.write_text('[paths]\ncwd = "/review/repository/run"\n')
+    with pytest.raises(RunnerConfigurationError, match="overlaps"):
+        load_runtime_config(overlapping)
+
+    separate = tmp_path / "separate.toml"
+    separate.write_text('[paths]\ncwd = "/elsewhere/run"\n')
+
+    config = load_runtime_config(separate)
+
+    assert config.paths.cwd == PurePosixPath("/elsewhere/run")
+    assert config.paths.repository == PurePosixPath("/review/repository")
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
-    [("repository", "7"), ("interface", '" "'), ("default", '"\\u0000"')],
+    [("repository", "7"), ("base", '" "'), ("default", '"\\u0000"')],
 )
 def test_required_policy_strings_reject_wrong_types_blanks_and_nul(
     runtime_file: Path, key: str, value: str
@@ -257,29 +369,46 @@ def test_model_override_never_fuzzy_matches_or_falls_back(
 
 
 @pytest.mark.parametrize(
-    "value", ["agent", "agent:", ":plug", "agent:plug:other", "agent:plug with space"]
+    "value", ["omp:gateway", "Gateway", "gateway plug", "-gateway", "gateway--plug"]
 )
-def test_authentication_requires_an_explicit_sdk_plug(
+def test_inference_plug_must_be_a_plain_workshop_name(
     runtime_file: Path, value: str
 ) -> None:
-    _set_value(runtime_file, "interface", json.dumps(value))
-    with pytest.raises(RunnerConfigurationError, match="SDK:plug"):
+    _set_value(runtime_file, "plug", json.dumps(value))
+    with pytest.raises(RunnerConfigurationError, match="authentication.plug"):
         load_runtime_config(runtime_file)
 
 
-@pytest.mark.parametrize("key", ["executable", "project_template"])
-def test_missing_host_resources_fail_before_launch(
-    runtime_file: Path, key: str
+@pytest.mark.parametrize("value", ["Latest/stable", "latest stable", "latest/"])
+def test_sdk_channel_must_be_a_plain_store_channel(
+    runtime_file: Path, value: str
 ) -> None:
-    _set_value(runtime_file, key, '"./does-not-exist"')
+    _set_value(runtime_file, "channel", json.dumps(value))
+    with pytest.raises(RunnerConfigurationError, match="omp.channel"):
+        load_runtime_config(runtime_file)
+
+
+@pytest.mark.parametrize(
+    "value", ["localhost", ":4000", "localhost:gateway", "local host:4000"]
+)
+def test_inference_endpoint_must_name_a_host_and_port(
+    runtime_file: Path, value: str
+) -> None:
+    _set_value(runtime_file, "endpoint", json.dumps(value))
+    with pytest.raises(RunnerConfigurationError, match="HOST:PORT"):
+        load_runtime_config(runtime_file)
+
+
+def test_missing_host_resources_fail_before_launch(runtime_file: Path) -> None:
+    _set_value(runtime_file, "executable", '"./does-not-exist"')
     with pytest.raises(
-        RunnerConfigurationError, match=f"Cannot resolve workshop.{key}"
+        RunnerConfigurationError, match="Cannot resolve workshop.executable"
     ):
         load_runtime_config(runtime_file)
 
 
 def test_executable_must_be_a_file(runtime_file: Path) -> None:
-    _set_value(runtime_file, "executable", '"./template"')
+    _set_value(runtime_file, "executable", '"./profile"')
     with pytest.raises(RunnerConfigurationError, match="must be a file"):
         load_runtime_config(runtime_file)
 
@@ -290,17 +419,9 @@ def test_executable_must_be_runnable(runtime_file: Path, tmp_path: Path) -> None
         load_runtime_config(runtime_file)
 
 
-def test_project_template_must_be_a_directory(runtime_file: Path) -> None:
-    _set_value(runtime_file, "project_template", '"./runtime.toml"')
+def test_harness_profile_must_be_a_directory(runtime_file: Path) -> None:
+    _set_value(runtime_file, "directory", '"./runtime.toml"')
     with pytest.raises(RunnerConfigurationError, match="must be a directory"):
-        load_runtime_config(runtime_file)
-
-
-def test_project_template_requires_its_own_definition(
-    runtime_file: Path, tmp_path: Path
-) -> None:
-    (tmp_path / "template" / "workshop.yaml").unlink()
-    with pytest.raises(RunnerConfigurationError, match="must contain workshop.yaml"):
         load_runtime_config(runtime_file)
 
 
@@ -315,33 +436,20 @@ def test_relative_resources_follow_resolved_config_file(
     config = load_runtime_config(link)
 
     assert config.workshop_executable == tmp_path / "workshop"
-    assert config.project_template == tmp_path / "template"
+    assert config.profile_directory == tmp_path / "profile"
 
 
-def test_artifact_and_interface_policy_is_explicit_and_secret_free(
-    runtime_file: Path,
-    tmp_path: Path,
+def test_explicit_test_shim_is_selected_without_storing_a_secret(
+    runtime_file: Path, tmp_path: Path
 ) -> None:
     with runtime_file.open("a") as stream:
         stream.write("""
-[artifacts]
-workshop_version = "1.2.3"
-sdk_revisions = {system = "2", omp = "250"}
-profile_directory = "./template"
-[interfaces]
-allowed = ["omp:review-inference"]
-mounts = ["omp:home"]
 [test_shim]
 omp_executable = "./workshop"
 gateway_url = "http://localhost:4000"
 token_env = "SCOPED_INFERENCE_BEARER"
 """)
     config = load_runtime_config(runtime_file)
-    assert config.workshop_version == "1.2.3"
-    assert config.sdk_revisions == {"system": "2", "omp": "250"}
-    assert config.allowed_interfaces == ("omp:review-inference",)
-    assert config.mount_interfaces == ("omp:home",)
-    assert config.profile_directory == tmp_path / "template"
     assert config.test_shim is not None
     assert config.test_shim.token_env == "SCOPED_INFERENCE_BEARER"
     assert config.test_shim.omp_executable == tmp_path / "workshop"
@@ -351,19 +459,14 @@ token_env = "SCOPED_INFERENCE_BEARER"
 @pytest.mark.parametrize(
     "section",
     [
-        'artifacts = "bad"\n',
-        "interfaces = []\n",
-        '[artifacts]\nworkshop_version = "1"\nsdk_revisions = []\n'
-        'profile_directory = "./template"\n',
-        '[artifacts]\nworkshop_version = "1"\nsdk_revisions = {omp=1}\n'
-        'profile_directory = "./template"\n',
-        '[interfaces]\nallowed = "omp:gateway"\nmounts = []\n',
-        "[interfaces]\nallowed = [1]\nmounts = []\n",
+        'omp = "latest"\n',
+        '[test_shim]\ngateway_url = "http://localhost:4000"\ntoken_env = "TOKEN"\n',
+        '[test_shim]\nomp_executable = "./workshop"\n'
+        'gateway_url = "http://localhost:4000"\ntoken_env = "TOKEN"\nextra = 1\n',
     ],
 )
-def test_invalid_artifact_and_interface_extensions_fail_closed(
-    runtime_file: Path,
-    section: str,
+def test_invalid_optional_sections_fail_closed(
+    runtime_file: Path, section: str
 ) -> None:
     text = runtime_file.read_text()
     runtime_file.write_text(
@@ -375,8 +478,7 @@ def test_invalid_artifact_and_interface_extensions_fail_closed(
 
 @pytest.mark.parametrize("token_env", ["not a variable", "5TOKEN", "éTOKEN"])
 def test_test_shim_bearer_is_an_explicit_environment_name(
-    runtime_file: Path,
-    token_env: str,
+    runtime_file: Path, token_env: str
 ) -> None:
     with runtime_file.open("a") as stream:
         stream.write(
@@ -400,8 +502,7 @@ def test_test_shim_bearer_is_an_explicit_environment_name(
     ],
 )
 def test_test_shim_gateway_url_cannot_store_credentials(
-    runtime_file: Path,
-    url: str,
+    runtime_file: Path, url: str
 ) -> None:
     with runtime_file.open("a") as stream:
         stream.write(
@@ -416,8 +517,7 @@ def test_test_shim_gateway_url_cannot_store_credentials(
     "value", ['"relative/workshop.socket"', '" "', "3", '"/run/\\u0000socket"']
 )
 def test_management_socket_requires_an_explicit_absolute_host_path(
-    runtime_file: Path,
-    value: str,
+    runtime_file: Path, value: str
 ) -> None:
     text = runtime_file.read_text().replace(
         "[workshop]\n",
@@ -428,9 +528,19 @@ def test_management_socket_requires_an_explicit_absolute_host_path(
         load_runtime_config(runtime_file)
 
 
+def test_configured_socket_replaces_the_upstream_default(runtime_file: Path) -> None:
+    text = runtime_file.read_text().replace(
+        "[workshop]\n", '[workshop]\nsocket = "/var/snap/workshop/common/w.socket"\n'
+    )
+    runtime_file.write_text(text)
+
+    config = load_runtime_config(runtime_file)
+
+    assert config.workshop_socket == Path("/var/snap/workshop/common/w.socket")
+
+
 def test_executable_validation_preserves_its_virtual_environment(
-    runtime_file: Path,
-    tmp_path: Path,
+    runtime_file: Path, tmp_path: Path
 ) -> None:
     environment = tmp_path / "host-tool"
     venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
