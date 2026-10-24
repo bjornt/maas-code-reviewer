@@ -1,18 +1,6 @@
 name: Manual PR Review
 
-# Manually dispatched re-review of a pull request in this repository.
-#
-# Unlike review-pr.yml (which fires automatically when a PR is opened and, by
-# design, only reviews once), this workflow can be triggered on demand from the
-# Actions tab so a fresh review can be posted after substantial follow-up
-# changes.  It takes a PR *number* (not a URL): the PR always belongs to the
-# current repository, which is the scope that the default GITHUB_TOKEN can read
-# and post to, so cross-repository review is not supported (and a 403 is not
-# possible).
-#
-# Untrusted inputs are never interpolated directly into run blocks; they are
-# passed through environment variables and read as shell variables to avoid
-# command injection.
+# Dispatch only trusted repository revisions. PR contents are input, not tooling.
 on:
   workflow_dispatch:
     inputs:
@@ -21,27 +9,21 @@ on:
         required: true
         type: number
       model:
-        description: "Gemini model name (e.g. gemini-3.1-pro-preview, gemini-2.5-flash)"
+        description: "Exact model identity allowed by the operator runtime profile (blank uses its default)"
         required: false
         type: string
-        default: gemini-3.1-pro-preview
-      max_tool_calls:
-        description: "Maximum automatic tool calls the LLM may make during a review"
+      review_timeout:
+        description: "Total review startup and agent deadline in seconds"
         required: false
         type: number
-        default: 30
+        default: 600
       max_diff_chars:
-        description: "Maximum diff size in characters before truncation"
+        description: "Maximum initial diff context in characters before file-boundary truncation"
         required: false
         type: number
         default: 200000
-      snap_channel:
-        description: "Snap channel from which to install maas-code-reviewer"
-        required: false
-        type: string
-        default: edge
       dry_run:
-        description: "Print the review JSON to the workflow log instead of posting it to the PR"
+        description: "Print validated review JSON instead of publishing"
         required: false
         type: boolean
         default: false
@@ -50,17 +32,11 @@ permissions:
   contents: read
   pull-requests: write
 
-env:
-  SNAP_CHANNEL: ${{ inputs.snap_channel }}
-
 jobs:
   review:
-    runs-on: ubuntu-latest
-
+    runs-on: [self-hosted, linux, x64, maas-review-workshop]
+    timeout-minutes: 30
     steps:
-      # Resolve the PR ref and full URL from the validated PR number and the
-      # current repository.  pr_number is a numeric input (GitHub validates it
-      # before the job starts), so it needs no further sanitising.
       - name: Resolve PR ref
         id: pr
         env:
@@ -71,41 +47,58 @@ jobs:
           echo "head_ref=refs/pull/$PR_NUMBER/head" >> "$GITHUB_OUTPUT"
           echo "url=https://github.com/$REPOSITORY/pull/$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
-      - name: Check out PR head (for file context)
+      - name: Check out trusted coordinator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Check out the PR repo so that maas-code-reviewer can read it for more context. We
-          # only ever read the files. Nothing is built or executed.
+          ref: ${{ github.workflow_sha }}
+          path: _coordinator
+          persist-credentials: false
+
+      - name: Check out PR head for isolated input snapshot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
           ref: ${{ steps.pr.outputs.head_ref }}
+          path: _review
           persist-credentials: false
           allow-unsafe-pr-checkout: true
 
-      - name: Install maas-code-reviewer
+      - name: Verify host prerequisites and install trusted coordinator
+        working-directory: ${{ runner.temp }}
         env:
-          SNAP_CHANNEL: ${{ inputs.snap_channel }}
-        run: sudo snap install maas-code-reviewer --channel "$SNAP_CHANNEL"
+          RUNTIME_CONFIG: ${{ vars.MAAS_REVIEW_RUNTIME_CONFIG || '/etc/maas-code-reviewer/runtime.toml' }}
+        run: |
+          command -v workshop
+          workshop --version
+          command -v uv
+          test -r "$RUNTIME_CONFIG"
+          UV_PROJECT_ENVIRONMENT="$GITHUB_WORKSPACE/_coordinator/.venv" \
+            uv sync --project "$GITHUB_WORKSPACE/_coordinator" --frozen --no-dev
 
-      - name: Run maas-code-reviewer
+      - name: Review and optionally publish validated findings
+        working-directory: ${{ runner.temp }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RUNTIME_CONFIG: ${{ vars.MAAS_REVIEW_RUNTIME_CONFIG || '/etc/maas-code-reviewer/runtime.toml' }}
           PR_URL: ${{ steps.pr.outputs.url }}
           MODEL: ${{ inputs.model }}
-          MAX_TOOL_CALLS: ${{ inputs.max_tool_calls }}
+          REVIEW_TIMEOUT: ${{ inputs.review_timeout }}
           MAX_DIFF_CHARS: ${{ inputs.max_diff_chars }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           args=(
-            --model "$MODEL"
-            --max-tool-calls "$MAX_TOOL_CALLS"
+            --runtime-config "$RUNTIME_CONFIG"
+            --review-timeout "$REVIEW_TIMEOUT"
             --max-diff-chars "$MAX_DIFF_CHARS"
-            --repo-dir "$GITHUB_WORKSPACE"
+            --repo-dir "$GITHUB_WORKSPACE/_review"
             --metrics "$RUNNER_TEMP/metrics.json"
           )
+          if [ -n "$MODEL" ]; then
+            args+=(--model "$MODEL")
+          fi
           if [ "$DRY_RUN" = "true" ]; then
             args+=(--dry-run)
           fi
-          maas-code-reviewer review-pr "${args[@]}" "$PR_URL"
+          "$GITHUB_WORKSPACE/_coordinator/.venv/bin/maas-code-reviewer" review-pr "${args[@]}" "$PR_URL"
 
       - name: Upload metrics
         if: always()

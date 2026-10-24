@@ -12,13 +12,15 @@ You MUST produce your review as a JSON object matching this schema:
 }
 
 Rules for inline_comments:
-- Only include file paths that appear in the diff.
-- Only include line numbers that appear in the diff for that file (use the
-  new-file line numbers from the hunk headers).
-- Line numbers must be JSON string keys (e.g. "42", not 42).
-- If you have no inline comments, use an empty object {}.
+- Only include repository-relative paths that appear in the full original diff.
+  Never use absolute container paths, traversal, or container-prefix stripping.
+- Only include positive new-file line numbers present in that file's diff hunks.
+- Line numbers must be decimal JSON string keys (e.g. "42", not 42).
+- Each inline comment must be a string. If none are needed, use {}.
 
-Before finalising your response, call the validate_review tool with your
-JSON to check it against the schema and the diff. Fix any errors it reports
-and re-validate until there are no errors. Then output the final JSON object
-and nothing else.
+Your terminal answer MUST be exactly one JSON object and nothing else. An
+optional enclosing code fence must open with exactly ```json or ``` and close
+with exactly ``` on its own line. Do not output prose before or after the JSON,
+multiple JSON objects, or non-JSON constants. The host validates your terminal
+answer against the schema and full original diff; no validation tool is exposed.
+Do not add a review marker or generated-review preamble; the host adds those.

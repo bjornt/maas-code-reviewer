@@ -1,8 +1,6 @@
 name: LLM Code Review
 
-# Use pull_request_target so the workflow always runs from the main branch.
-# This gives it access to repository secrets while still being triggered by
-# PRs from forks or feature branches.
+# Run trusted workflow/coordinator code, never Python code from the PR checkout.
 on:
   pull_request_target:
     types: [opened]
@@ -11,47 +9,58 @@ permissions:
   contents: read
   pull-requests: write
 
-env:
-  # Model can be any Gemini model name that your GEMINI_API_KEY has access to.
-  # For example:
-  #  - gemini-3.1-pro-preview
-  #  - gemini-3.1-pro-preview-customtools
-  #  - gemini-3-flash-preview
-  #  - gemini-3-flash-lite-preview
-  #  - gemini-2.5-pro
-  #  - gemini-2.5-flash
-  MODEL: gemini-3.1-pro-preview
-  # Snap channel should normally be stable. We use edge here for dogfooding.
-  SNAP_CHANNEL: edge
-
 jobs:
   review:
-    runs-on: ubuntu-latest
-
+    # Operator-provisioned, dedicated ephemeral runner with Workshop/LXD and uv.
+    runs-on: [self-hosted, linux, x64, maas-review-workshop]
+    timeout-minutes: 30
     steps:
-      # 1. Check out the PR HEAD so the LLM can read the actual files being
-      #    reviewed via --repo-dir.  We do NOT run any code from this checkout.
-      #    It's only needed so that the LLM can read the files to get more context.
-      - name: Check out PR head (for file context)
+      - name: Check out trusted coordinator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: _coordinator
+          persist-credentials: false
+
+      - name: Check out PR head for isolated input snapshot
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          path: _review
           persist-credentials: false
           allow-unsafe-pr-checkout: true
 
-      - name: Install maas-code-reviewer
-        run: sudo snap install maas-code-reviewer --channel "$SNAP_CHANNEL"
+      - name: Verify host prerequisites and install trusted coordinator
+        working-directory: ${{ runner.temp }}
+        env:
+          RUNTIME_CONFIG: ${{ vars.MAAS_REVIEW_RUNTIME_CONFIG || '/etc/maas-code-reviewer/runtime.toml' }}
+        run: |
+          command -v workshop
+          workshop --version
+          command -v uv
+          test -r "$RUNTIME_CONFIG"
+          UV_PROJECT_ENVIRONMENT="$GITHUB_WORKSPACE/_coordinator/.venv" \
+            uv sync --project "$GITHUB_WORKSPACE/_coordinator" --frozen --no-dev
 
-      - name: Run maas-code-reviewer
+      - name: Review and publish validated findings
+        working-directory: ${{ runner.temp }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RUNTIME_CONFIG: ${{ vars.MAAS_REVIEW_RUNTIME_CONFIG || '/etc/maas-code-reviewer/runtime.toml' }}
+          MODEL: ${{ vars.MAAS_REVIEW_MODEL }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          maas-code-reviewer review-pr \
-            --model "$MODEL" \
-            --repo-dir "$GITHUB_WORKSPACE" \
-            --metrics "$RUNNER_TEMP/metrics.json" \
-            "https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          args=(
+            --runtime-config "$RUNTIME_CONFIG"
+            --repo-dir "$GITHUB_WORKSPACE/_review"
+            --metrics "$RUNNER_TEMP/metrics.json"
+          )
+          if [ -n "$MODEL" ]; then
+            args+=(--model "$MODEL")
+          fi
+          "$GITHUB_WORKSPACE/_coordinator/.venv/bin/maas-code-reviewer" review-pr \
+            "${args[@]}" "https://github.com/$REPOSITORY/pull/$PR_NUMBER"
 
       - name: Upload metrics
         if: always()
@@ -60,3 +69,4 @@ jobs:
           name: review-metrics-pr${{ github.event.pull_request.number }}
           path: ${{ runner.temp }}/metrics.json
           retention-days: 30
+          if-no-files-found: ignore

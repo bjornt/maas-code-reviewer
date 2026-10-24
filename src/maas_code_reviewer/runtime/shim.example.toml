@@ -1,0 +1,38 @@
+# Copy this file to an operator-owned directory; set the two trusted executable
+# paths for that installation. This profile is NOT a filesystem/network sandbox.
+review_timeout_seconds = 120
+
+[workshop]
+executable = "/project/scripts/workshop_shim.py"
+project_template = "."
+
+[harness]
+argv = ["/var/lib/workshop/sdk/omp/bin/omp", "acp", "--model={model}", "--append-system-prompt={system_instruction_text}", "--tools=read,grep,glob,web_search", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-pty", "--no-title", "--approval-mode=always-ask", "--config={profile_dir}/policy.yml", "--max-time={timeout_seconds}s"]
+
+[paths]
+repository = "/review/repository"
+full_diff = "/review/inputs/full.diff"
+system_instruction = "/review/control/system.txt"
+cwd = "/review/run"
+agent_dir = "/review/state"
+
+[model]
+default = "openai-codex/gpt-6.1-sol"
+allowed = ["openai-codex/gpt-6.1-sol"]
+
+[authentication]
+interface = "omp:review-inference"
+
+[interfaces]
+allowed = ["omp:review-inference"]
+mounts = []
+
+[artifacts]
+workshop_version = "workshop-shim/1"
+sdk_revisions = {}
+profile_directory = "./profile"
+
+[test_shim]
+omp_executable = "/var/lib/workshop/sdk/omp/bin/omp"
+gateway_url = "http://127.0.0.1:4000"
+token_env = "PI_GATEWAY_TOKEN"

@@ -2,6 +2,8 @@
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
 import json
+import subprocess
+import venv
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -314,6 +316,137 @@ def test_relative_resources_follow_resolved_config_file(
 
     assert config.workshop_executable == tmp_path / "workshop"
     assert config.project_template == tmp_path / "template"
+
+
+def test_artifact_and_interface_policy_is_explicit_and_secret_free(
+    runtime_file: Path,
+    tmp_path: Path,
+) -> None:
+    with runtime_file.open("a") as stream:
+        stream.write("""
+[artifacts]
+workshop_version = "1.2.3"
+sdk_revisions = {system = "2", omp = "250"}
+profile_directory = "./template"
+[interfaces]
+allowed = ["omp:review-inference"]
+mounts = ["omp:home"]
+[test_shim]
+omp_executable = "./workshop"
+gateway_url = "http://localhost:4000"
+token_env = "SCOPED_INFERENCE_BEARER"
+""")
+    config = load_runtime_config(runtime_file)
+    assert config.workshop_version == "1.2.3"
+    assert config.sdk_revisions == {"system": "2", "omp": "250"}
+    assert config.allowed_interfaces == ("omp:review-inference",)
+    assert config.mount_interfaces == ("omp:home",)
+    assert config.profile_directory == tmp_path / "template"
+    assert config.test_shim is not None
+    assert config.test_shim.token_env == "SCOPED_INFERENCE_BEARER"
+    assert config.test_shim.omp_executable == tmp_path / "workshop"
+    assert not (tmp_path / "launched").exists()
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        'artifacts = "bad"\n',
+        "interfaces = []\n",
+        '[artifacts]\nworkshop_version = "1"\nsdk_revisions = []\n'
+        'profile_directory = "./template"\n',
+        '[artifacts]\nworkshop_version = "1"\nsdk_revisions = {omp=1}\n'
+        'profile_directory = "./template"\n',
+        '[interfaces]\nallowed = "omp:gateway"\nmounts = []\n',
+        "[interfaces]\nallowed = [1]\nmounts = []\n",
+    ],
+)
+def test_invalid_artifact_and_interface_extensions_fail_closed(
+    runtime_file: Path,
+    section: str,
+) -> None:
+    text = runtime_file.read_text()
+    runtime_file.write_text(
+        section + text if not section.startswith("[") else text + "\n" + section
+    )
+    with pytest.raises(RunnerConfigurationError):
+        load_runtime_config(runtime_file)
+
+
+@pytest.mark.parametrize("token_env", ["not a variable", "5TOKEN", "éTOKEN"])
+def test_test_shim_bearer_is_an_explicit_environment_name(
+    runtime_file: Path,
+    token_env: str,
+) -> None:
+    with runtime_file.open("a") as stream:
+        stream.write(
+            '\n[test_shim]\nomp_executable = "./workshop"\n'
+            'gateway_url = "http://localhost:4000"\n'
+            f"token_env = {json.dumps(token_env)}\n"
+        )
+    with pytest.raises(RunnerConfigurationError, match="environment variable"):
+        load_runtime_config(runtime_file)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///secret",
+        "http://user:password@localhost:4000",
+        "http://localhost:4000/?token=secret",
+        "http://localhost:4000/#secret",
+        "http://[bad",
+        "http://localhost:invalid",
+    ],
+)
+def test_test_shim_gateway_url_cannot_store_credentials(
+    runtime_file: Path,
+    url: str,
+) -> None:
+    with runtime_file.open("a") as stream:
+        stream.write(
+            '\n[test_shim]\nomp_executable = "./workshop"\n'
+            f'gateway_url = {json.dumps(url)}\ntoken_env = "TOKEN"\n'
+        )
+    with pytest.raises(RunnerConfigurationError, match="gateway URL"):
+        load_runtime_config(runtime_file)
+
+
+@pytest.mark.parametrize(
+    "value", ['"relative/workshop.socket"', '" "', "3", '"/run/\\u0000socket"']
+)
+def test_management_socket_requires_an_explicit_absolute_host_path(
+    runtime_file: Path,
+    value: str,
+) -> None:
+    text = runtime_file.read_text().replace(
+        "[workshop]\n",
+        f"[workshop]\nsocket = {value}\n",
+    )
+    runtime_file.write_text(text)
+    with pytest.raises(RunnerConfigurationError):
+        load_runtime_config(runtime_file)
+
+
+def test_executable_validation_preserves_its_virtual_environment(
+    runtime_file: Path,
+    tmp_path: Path,
+) -> None:
+    environment = tmp_path / "host-tool"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
+    _set_value(runtime_file, "executable", json.dumps(str(environment / "bin/python")))
+    config = load_runtime_config(runtime_file)
+    subprocess.run(
+        [
+            str(config.workshop_executable),
+            "-c",
+            "import sys; assert sys.prefix == sys.argv[1]",
+            str(environment),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def _set_value(path: Path, key: str, toml_value: str) -> None:

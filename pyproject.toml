@@ -8,10 +8,11 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "google-genai",
+    "agent-client-protocol==0.12.1",
     "keyring",
     "launchpadlib",
     "PyGithub",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]

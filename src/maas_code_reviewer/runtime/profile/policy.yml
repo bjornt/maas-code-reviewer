@@ -1,0 +1,13 @@
+# Trusted omp 18.12.2 review profile; never sourced from the reviewed checkout.
+tools:
+  xdev: false
+dev:
+  autoqa: false
+vault:
+  enabled: false
+security:
+  enabled: false
+modelRoles:
+  web: web/duckduckgo
+autolearn:
+  enabled: false

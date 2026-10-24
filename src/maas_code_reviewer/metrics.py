@@ -9,17 +9,20 @@ from pathlib import Path
 
 @dataclass
 class ReviewMetrics:
-    model_name: str = ""
-    tokens_thinking: int = 0
-    tokens_input: int = 0
-    tokens_output: int = 0
-    files_read: int = 0
+    model_name: str | None = None
+    agent_name: str | None = None
+    agent_version: str | None = None
+    tokens_thinking: int | None = None
+    tokens_input: int | None = None
+    tokens_output: int | None = None
+    tokens_cache_read: int | None = None
+    tokens_cache_write: int | None = None
+    tokens_total: int | None = None
+    cost: float | None = None
+    cost_currency: str | None = None
     agents_md_read: bool = False
     diff_lines: int = 0
     diff_size_bytes: int = 0
-    tool_call_limit: int = 0
-    tool_call_limit_reached: bool = False
-    resume_attempts: int = 0
 
 
 def write_metrics(metrics: ReviewMetrics, path: Path) -> None:
