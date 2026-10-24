@@ -1,6 +1,8 @@
 # Copyright 2026 Canonical Ltd.  This software is licensed under the
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
+import json
+
 import pytest
 
 from maas_code_reviewer.review_schema import (
@@ -46,6 +48,139 @@ def test_multifile_inline_findings_accept_only_present_new_side_lines() -> None:
 def test_plain_relative_paths_without_git_prefix_are_preserved() -> None:
     diff = "--- source.py\n+++ source.py\n@@ -1 +1 @@\n-old\n+new\n"
     assert parse_diff_files_and_lines(diff) == {"source.py": {1}}
+
+
+@pytest.mark.parametrize(
+    ("source_prefix", "destination_prefix"),
+    [
+        ("i/", "w/"),
+        ("old/tree/", "new/tree/"),
+        ("left_", "right_"),
+        ("same/", "same/"),
+        ("", ""),
+        ("old prefix/", "new prefix/"),
+        ('source/é"/', 'target/é"/'),
+        ("before\u2028/", "after\u2028/"),
+        ("before\n/", "after\n/"),
+    ],
+)
+def test_arbitrary_prefixes_authorize_only_repository_coordinates(
+    source_prefix: str, destination_prefix: str
+) -> None:
+    old = json.dumps(source_prefix + "src/file.py", ensure_ascii=False)
+    new = json.dumps(destination_prefix + "src/file.py", ensure_ascii=False)
+    diff = (
+        f"diff --git {old} {new}\n--- {old}\n+++ {new}\n"
+        "@@ -1,2 +1,2 @@\n context\n-old\n+new\n"
+    )
+    files = frozenset({"src/file.py"})
+    document: dict = {
+        "general_comment": "Review.",
+        "inline_comments": {"src/file.py": {"2": "Check this change."}},
+    }
+    assert validate_review_json(document, diff, repository_files=files) == []
+    document["inline_comments"]["src/file.py"]["3"] = "Outside the hunk."
+    assert validate_review_json(document, diff, repository_files=files)
+    document["inline_comments"] = {"file.py": {"2": "Wrong repository path."}}
+    assert validate_review_json(document, diff, repository_files=files)
+
+
+def test_mnemonic_prefixes_and_prefixed_additions_work_without_checkout_hints() -> None:
+    diff = (
+        "diff --git before/src/file.py after/src/file.py\n"
+        "--- /dev/null\n+++ after/src/file.py\n@@ -0,0 +1 @@\n+new\n"
+        "diff --git i/other.py w/other.py\n"
+        "--- i/other.py\n+++ w/other.py\n@@ -1 +1 @@\n-old\n+new\n"
+    )
+    assert parse_diff_files_and_lines(diff) == {"src/file.py": {1}, "other.py": {1}}
+
+
+@pytest.mark.parametrize("path", ["b/src/file.py", "w/src/file.py"])
+def test_prefix_free_directory_names_are_not_stripped(path: str) -> None:
+    diff = (
+        f"diff --git {path} {path}\n--- {path}\n+++ {path}\n@@ -1 +1 @@\n-old\n+new\n"
+    )
+    assert parse_diff_files_and_lines(diff) == {path: {1}}
+
+
+@pytest.mark.parametrize("operation", ["rename", "copy"])
+def test_extended_paths_disambiguate_renamed_and_copied_files(operation: str) -> None:
+    diff = (
+        "diff --git previous/old/name.py current/new/name.py\n"
+        f"{operation} from old/name.py\n{operation} to new/name.py\n"
+        "--- previous/old/name.py\n+++ current/new/name.py\n"
+        "@@ -1 +1 @@\n-old\n+new\n"
+    )
+    files = frozenset({"new/name.py", "name.py"})
+    assert parse_diff_files_and_lines(diff, repository_files=files) == {
+        "new/name.py": {1}
+    }
+
+
+@pytest.mark.parametrize("old_path", ["b/file.py", "old/file.py"])
+def test_standard_prefixes_preserve_nested_files_with_matching_basenames(
+    old_path: str,
+) -> None:
+    diff = f"--- a/{old_path}\n+++ b/b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    assert parse_diff_files_and_lines(
+        diff, repository_files=frozenset({"b/file.py", "file.py"})
+    ) == {"b/file.py": {1}}
+
+
+def test_ambiguous_suffixes_require_an_explicit_prefix() -> None:
+    diff = (
+        "--- before/common/src/file.py\n+++ after/common/src/file.py\n"
+        "@@ -1 +1 @@\n-old\n+new\n"
+    )
+    files = frozenset({"src/file.py", "file.py"})
+    with pytest.raises(ValueError):
+        parse_diff_files_and_lines(diff, repository_files=files)
+    assert parse_diff_files_and_lines(
+        diff, path_prefix="after/common/", repository_files=files
+    ) == {"src/file.py": {1}}
+
+
+@pytest.mark.parametrize("prefix", ["wrong/", "b/file.py"])
+def test_an_explicit_prefix_must_leave_a_nonempty_matching_path(prefix: str) -> None:
+    diff = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    with pytest.raises(ValueError):
+        parse_diff_files_and_lines(diff, path_prefix=prefix)
+
+
+def test_an_empty_explicit_prefix_preserves_a_real_b_directory() -> None:
+    diff = "--- b/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    assert parse_diff_files_and_lines(
+        diff, path_prefix="", repository_files=frozenset({"b/file.py", "file.py"})
+    ) == {"b/file.py": {1}}
+
+
+@pytest.mark.parametrize("encoded", ['"unterminated', '"x" + "y"', '"x", "y"'])
+def test_malformed_quoted_paths_do_not_authorize_findings(encoded: str) -> None:
+    diff = f"--- old\n+++ {encoded}\n@@ -1 +1 @@\n-old\n+new\n"
+    assert parse_diff_files_and_lines(diff) == {}
+
+
+def test_c_quoted_unicode_and_timestamp_headers_are_decoded() -> None:
+    diff = (
+        '--- "before/caf\\303\\251.py"\told timestamp\n'
+        '+++ "after/caf\\303\\251.py"\tnew timestamp\n'
+        "@@ -1 +1 @@\n-old\n+new\n"
+    )
+    assert parse_diff_files_and_lines(diff) == {"café.py": {1}}
+
+
+def test_missing_or_inconsistent_old_metadata_does_not_authorize_extra_lines() -> None:
+    diff = (
+        '--- "unterminated\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n'
+        "diff --git unrelated metadata\n--- /dev/null\n+++ next.py\n"
+        "@@ -0,0 +1 @@\n+new\n"
+    )
+    assert parse_diff_files_and_lines(diff) == {"file.py": {1}, "next.py": {1}}
+
+
+def test_crlf_diff_headers_preserve_repository_coordinates() -> None:
+    diff = "--- i/file.py\n+++ w/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    assert parse_diff_files_and_lines(diff.replace("\n", "\r\n")) == {"file.py": {1}}
 
 
 def test_empty_diff_has_no_inline_coordinates() -> None:

@@ -68,6 +68,20 @@ inline finding, including its repository-relative file and line. The original
 diff is retained independently of initial-context truncation. The agent can read
 the complete diff and inspect omitted files.
 
+Git's standard `a/` and `b/` prefixes, mnemonic prefixes such as `i/` and `w/`,
+custom prefixes (including multi-directory or non-directory strings), and
+prefix-free patches are supported. New-side paths are resolved against filenames
+in the original checkout and Git rename/copy metadata, without following checkout
+symlinks. The original diff is retained unchanged; inline findings still require
+repository-relative paths and lines present in its new-side hunks.
+
+Git patches do not record prefix lengths. If more than one checkout filename
+matches a custom-prefixed path, the command fails before starting an agent rather
+than guessing. For `review-diff`, use `--diff-prefix PREFIX` to specify the exact
+new-side prefix, for example `--diff-prefix 'updated/tree/'`. Use
+`--diff-prefix ''` to explicitly preserve prefix-free paths, including real
+directories named `b` or `w`.
+
 ### GitHub pull requests
 
 ```sh

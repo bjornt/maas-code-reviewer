@@ -2,6 +2,8 @@
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
 import json
+import os
+from collections.abc import Set
 from pathlib import Path
 
 from maas_code_reviewer.agent_runner import (
@@ -13,7 +15,10 @@ from maas_code_reviewer.agent_runner import (
     RunnerResultError,
 )
 from maas_code_reviewer.metrics import ReviewMetrics
-from maas_code_reviewer.review_schema import validate_review_json
+from maas_code_reviewer.review_schema import (
+    parse_diff_files_and_lines,
+    validate_review_json,
+)
 
 REVIEW_MARKER = "[maas-code-reviewer review]"
 
@@ -68,6 +73,7 @@ def review_diff_structured(
     metrics: ReviewMetrics | None = None,
     model: str | None = None,
     timeout_seconds: float = 300,
+    diff_prefix: str | None = None,
 ) -> dict:
     """Return host-validated JSON; empty diffs retain the unmarked response."""
     result = _review(
@@ -80,6 +86,7 @@ def review_diff_structured(
         metrics=metrics,
         model=model,
         timeout_seconds=timeout_seconds,
+        diff_prefix=diff_prefix,
     )
     if diff.strip():
         result["general_comment"] = _decorate(result["general_comment"])
@@ -97,6 +104,7 @@ def review_diff(
     metrics: ReviewMetrics | None = None,
     model: str | None = None,
     timeout_seconds: float = 300,
+    diff_prefix: str | None = None,
 ) -> str:
     """Render the validated general comment and every inline finding as text."""
     result = _review(
@@ -109,6 +117,7 @@ def review_diff(
         metrics=metrics,
         model=model,
         timeout_seconds=timeout_seconds,
+        diff_prefix=diff_prefix,
     )
     sections = [_decorate(result["general_comment"])]
     for file_path, comments in result["inline_comments"].items():
@@ -128,6 +137,7 @@ def _review(
     metrics: ReviewMetrics | None,
     model: str | None,
     timeout_seconds: float,
+    diff_prefix: str | None,
 ) -> dict:
     if not diff.strip():
         _populate_metrics(
@@ -152,13 +162,23 @@ def _review(
     if runner is None:
         raise RunnerResultError("A runner is required for a nonempty diff.")
 
+    repository_files = _repository_files(repo_dir)
+    diff_files = parse_diff_files_and_lines(
+        diff, path_prefix=diff_prefix, repository_files=repository_files
+    )
     request = ReviewRequest(
         repository_path=repo_dir,
         full_diff=diff,
         task_prompt=_build_prompt(
-            _truncate_diff(diff, max_diff_chars),
+            _truncate_diff(
+                diff,
+                max_diff_chars,
+                path_prefix=diff_prefix,
+                repository_files=repository_files,
+            ),
             description,
             agents_md,
+            list(diff_files),
         ),
         system_instruction=STRUCTURED_SYSTEM_INSTRUCTION,
         timeout_seconds=timeout_seconds,
@@ -197,7 +217,9 @@ def _review(
             f"Invalid review JSON: {exc}",
             usage=outcome.usage,
         ) from exc
-    errors = validate_review_json(result, diff)
+    errors = validate_review_json(
+        result, diff, path_prefix=diff_prefix, repository_files=repository_files
+    )
     if errors:
         raise RunnerResultError(
             "Invalid review document: " + "\n".join(errors),
@@ -206,9 +228,11 @@ def _review(
     return result
 
 
-def _build_prompt(diff: str, description: str | None, agents_md: str | None) -> str:
+def _build_prompt(
+    diff: str, description: str | None, agents_md: str | None, diff_paths: list[str]
+) -> str:
     """Keep repository-controlled context separate from trusted review policy."""
-    context = {"diff": diff}
+    context = {"diff": diff, "diff_paths": diff_paths}
     if description is not None:
         context["description"] = description
     if agents_md is not None:
@@ -260,7 +284,29 @@ def _populate_metrics(
     metrics.diff_size_bytes = len(diff.encode("utf-8"))
 
 
-def _truncate_diff(diff: str, max_chars: int) -> str:
+def _repository_files(repo_dir: Path) -> frozenset[str]:
+    paths: set[str] = set()
+    for directory, directories, files in os.walk(repo_dir, followlinks=False):
+        directories[:] = [name for name in directories if name.casefold() != ".git"]
+        relative = Path(directory).relative_to(repo_dir)
+        paths.update(
+            (relative / name).as_posix() for name in files if name.casefold() != ".git"
+        )
+        paths.update(
+            (relative / name).as_posix()
+            for name in directories
+            if (Path(directory) / name).is_symlink()
+        )
+    return frozenset(paths)
+
+
+def _truncate_diff(
+    diff: str,
+    max_chars: int,
+    *,
+    path_prefix: str | None,
+    repository_files: Set[str],
+) -> str:
     """Truncate *diff* to around *max_chars*, at a file boundary.
 
     The cut is made at the last ``diff --git`` header that fits entirely
@@ -315,7 +361,7 @@ def _truncate_diff(diff: str, max_chars: int) -> str:
 
     # Collect the paths of files that were omitted (headers at/after the cut).
     omitted_paths: list[str] = []
-    for offset in header_offsets:
+    for index, offset in enumerate(header_offsets):
         if offset < cut:
             continue
         line_end = diff.find("\n", offset)
@@ -323,12 +369,15 @@ def _truncate_diff(diff: str, max_chars: int) -> str:
             header_line = diff[offset:]
         else:
             header_line = diff[offset:line_end]
-        # "diff --git a/<path> b/<path>"
-        parts = header_line.split(" b/", 1)
-        if len(parts) == 2:
-            omitted_paths.append(parts[1])
-        else:
-            omitted_paths.append(header_line)
+        file_end = (
+            header_offsets[index + 1] if index + 1 < len(header_offsets) else len(diff)
+        )
+        paths = parse_diff_files_and_lines(
+            diff[offset:file_end],
+            path_prefix=path_prefix,
+            repository_files=repository_files,
+        )
+        omitted_paths.extend(paths or [header_line])
 
     parts: list[str] = [visible, note]
     if omitted_paths:

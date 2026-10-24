@@ -238,6 +238,42 @@ def test_file_review_prints_every_validated_finding_with_repo_guidance(
     assert request.timeout_seconds == 17.5
 
 
+@pytest.mark.parametrize("structured", [False, True])
+def test_local_diff_prefix_option_resolves_ambiguous_paths_before_output(
+    runner: FakeAgentRunner,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    structured: bool,
+) -> None:
+    (tmp_path / "file.txt").write_text("changed\n")
+    (tmp_path / "same").mkdir()
+    (tmp_path / "same" / "file.txt").write_text("other\n")
+    diff = tmp_path / "changes.diff"
+    diff.write_text(
+        "--- same/file.txt\n+++ same/file.txt\n@@ -1 +1 @@\n-original\n+changed\n"
+    )
+    output = tmp_path / "review.json"
+    args = ["review-diff", str(diff), "--repo-dir", str(tmp_path)]
+    if structured:
+        args.extend(["--json-output", str(output)])
+    with pytest.raises(SystemExit):
+        cli.main(args)
+    assert runner.requests == []
+    assert not output.exists()
+    assert capsys.readouterr().out == ""
+
+    cli.main([*args, "--diff-prefix", "same/"])
+    captured = capsys.readouterr()
+    if structured:
+        assert json.loads(output.read_text())["inline_comments"] == {
+            "file.txt": {"1": "[P1] Preserve the value."}
+        }
+        assert captured.out == ""
+    else:
+        assert "file.txt:1" in captured.out
+        assert "Preserve the value" in captured.out
+
+
 def test_stdin_review_uses_current_checkout(
     runner: FakeAgentRunner,
     tmp_path: Path,

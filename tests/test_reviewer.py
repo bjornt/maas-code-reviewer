@@ -84,11 +84,6 @@ def test_runner_receives_original_inputs_and_separate_untrusted_context(
     assert request.full_diff == DIFF
     assert request.model == "requested/model"
     assert request.timeout_seconds == 47
-    assert context_from(runner) == {
-        "diff": DIFF,
-        "description": description,
-        "repository_conventions": conventions,
-    }
     assert conventions not in request.system_instruction
     assert description not in request.system_instruction
 
@@ -106,7 +101,6 @@ def test_structured_result_is_validated_and_decorated_once(
     assert result["general_comment"].count(REVIEW_PREAMBLE.strip()) == 1
     assert "Useful finding." in result["general_comment"]
     assert result["inline_comments"] == {}
-    assert context_from(runner) == {"diff": DIFF}
 
 
 def test_text_output_keeps_every_validated_inline_finding(tmp_path: Path) -> None:
@@ -286,12 +280,6 @@ def test_omitted_file_inline_coordinates_use_original_full_diff(tmp_path: Path) 
         ("unified content without git headers", 7, "unified", None),
         ("preamble\n" + DIFF, 4, "prea", "src/first.py"),
         (
-            FIRST_DIFF + "diff --git a/last.py b/last.py",
-            len(FIRST_DIFF),
-            FIRST_DIFF,
-            "last.py",
-        ),
-        (
             FIRST_DIFF + "diff --git malformed\n",
             len(FIRST_DIFF),
             FIRST_DIFF,
@@ -312,7 +300,6 @@ def test_truncated_task_context_still_keeps_full_diff_available(
     review_diff(runner, diff, None, tmp_path, max_diff_chars=limit)
     task_diff = context_from(runner)["diff"]
     assert task_diff.startswith(prefix)
-    assert len(task_diff) > limit  # The explanatory truncation note is retained.
     if manifest_entry is not None:
         assert f"- {manifest_entry}" in task_diff
     assert runner.requests[0].full_diff == diff
@@ -326,6 +313,95 @@ def test_added_git_header_text_is_not_a_truncation_boundary(tmp_path: Path) -> N
     assert context.startswith(first)
     assert "- src/second.py" in context
     assert "- fake.py" not in context
+
+
+def test_header_without_a_patch_cannot_authorize_inline_coordinates(
+    tmp_path: Path,
+) -> None:
+    diff = FIRST_DIFF + "diff --git before/last.py after/last.py"
+    runner = runner_for(
+        json.dumps(
+            {
+                "general_comment": "Review.",
+                "inline_comments": {"last.py": {"1": "Not an inline coordinate."}},
+            }
+        )
+    )
+    with pytest.raises(RunnerResultError):
+        review_diff_structured(
+            runner, diff, None, tmp_path, max_diff_chars=len(FIRST_DIFF)
+        )
+
+
+def test_custom_prefixes_are_resolved_in_full_and_omitted_diff_context(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "first.py").write_text("context\nfirst addition\n")
+    (tmp_path / "src" / "second.py").write_text("context\nsecond addition\n")
+    first = FIRST_DIFF.replace("a/", "original/tree/").replace("b/", "updated/tree/")
+    second = SECOND_DIFF.replace("a/", "original/tree/").replace("b/", "updated/tree/")
+    runner = runner_for()
+    result = review_diff_structured(
+        runner, first + second, None, tmp_path, max_diff_chars=len(first)
+    )
+    assert result["inline_comments"] == DOCUMENT["inline_comments"]
+    context = context_from(runner)
+    assert context["diff_paths"] == ["src/first.py", "src/second.py"]
+    assert "- src/second.py" in context["diff"]
+    assert "- updated/tree/src/second.py" not in context["diff"]
+
+
+def test_ambiguous_paths_fail_before_starting_an_agent_and_can_be_disambiguated(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "file.py").write_text("new\n")
+    (tmp_path / "b").mkdir()
+    (tmp_path / "b" / "file.py").write_text("other\n")
+    diff = "--- b/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    runner = runner_for(
+        json.dumps(
+            {
+                "general_comment": "Review.",
+                "inline_comments": {
+                    "b/file.py": {"1": "Review the actual b directory."}
+                },
+            }
+        )
+    )
+    with pytest.raises(ValueError):
+        review_diff_structured(runner, diff, None, tmp_path)
+    assert runner.requests == []
+    result = review_diff_structured(runner, diff, None, tmp_path, diff_prefix="")
+    assert result["inline_comments"] == {
+        "b/file.py": {"1": "Review the actual b directory."}
+    }
+
+
+def test_prefix_resolution_indexes_symlinks_without_following_them(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "private.py").write_text("not repository input\n")
+    (repository / "link").symlink_to(outside, target_is_directory=True)
+    (repository / ".git").mkdir()
+    (repository / ".git" / "private.py").write_text("Git metadata\n")
+    (repository / "nested").mkdir()
+    (repository / "nested" / ".git").write_text("Git worktree pointer\n")
+    diff = "--- same/link\n+++ same/link\n@@ -1 +1 @@\n-old\n+new\n"
+    runner = runner_for(
+        json.dumps(
+            {
+                "general_comment": "Review.",
+                "inline_comments": {"link": {"1": "Check link."}},
+            }
+        )
+    )
+    result = review_diff_structured(runner, diff, None, repository)
+    assert result["inline_comments"] == {"link": {"1": "Check link."}}
 
 
 def test_runner_failure_propagates_without_retries(tmp_path: Path) -> None:

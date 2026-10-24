@@ -1,6 +1,9 @@
 # Copyright 2026 Canonical Ltd.  This software is licensed under the
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
+import ast
+import os
+from collections.abc import Set
 from typing import cast
 
 REVIEW_JSON_SCHEMA: dict = {
@@ -19,14 +22,27 @@ REVIEW_JSON_SCHEMA: dict = {
 }
 
 
-def parse_diff_files_and_lines(diff_text: str) -> dict[str, set[int]]:
-    """Map new-side paths to lines actually present inside unified diff hunks."""
+def parse_diff_files_and_lines(
+    diff_text: str,
+    *,
+    path_prefix: str | None = None,
+    repository_files: Set[str] = frozenset(),
+) -> dict[str, set[int]]:
+    """Map repository-relative new-side paths to lines in unified diff hunks.
+
+    Resolve arbitrary prefixes against original checkout filenames, never model
+    output. An explicit new-side prefix disambiguates identical suffixes.
+    """
     result: dict[str, set[int]] = {}
     current_file: str | None = None
     current_line = 0
     old_remaining = new_remaining = 0
+    old_path: str | None = None
+    git_header: str | None = None
+    renamed_path: str | None = None
 
-    for raw_line in diff_text.splitlines():
+    for raw_line in diff_text.removesuffix("\n").split("\n"):
+        raw_line = raw_line.removesuffix("\r")
         if old_remaining or new_remaining:
             # Interpret hunk content before headers: an added line may itself
             # look like +++ or diff --git metadata.
@@ -54,13 +70,29 @@ def parse_diff_files_and_lines(diff_text: str) -> dict[str, set[int]]:
                 continue
             old_remaining = new_remaining = 0
 
-        if raw_line.startswith("diff --git ") or raw_line.startswith("--- "):
+        if raw_line.startswith("diff --git "):
+            current_file = old_path = renamed_path = None
+            git_header = raw_line.removeprefix("diff --git ")
+        elif raw_line.startswith(("rename to ", "copy to ")):
+            renamed_path = _decode_diff_path(raw_line.split(" to ", 1)[1])
+        elif raw_line.startswith("--- "):
             current_file = None
+            old_path = _decode_diff_path(raw_line[4:])
         elif raw_line.startswith("+++ "):
-            path = raw_line[4:]
-            if path.startswith("b/"):
-                path = path[2:]
-            current_file = None if path == "/dev/null" else path
+            encoded_path = raw_line[4:].partition("\t")[0]
+            path = _decode_diff_path(encoded_path)
+            if old_path == "/dev/null" and git_header is not None:
+                suffix = " " + encoded_path
+                if git_header.endswith(suffix):
+                    old_path = _decode_diff_path(git_header[: -len(suffix)])
+            current_file = (
+                _repository_path(
+                    path, old_path, renamed_path, path_prefix, repository_files
+                )
+                if path is not None and path != "/dev/null"
+                else None
+            )
+            git_header = renamed_path = None
             if current_file is not None:
                 result.setdefault(current_file, set())
         elif raw_line.startswith("@@ "):
@@ -91,7 +123,13 @@ def parse_diff_files_and_lines(diff_text: str) -> dict[str, set[int]]:
     return result
 
 
-def validate_review_json(data: object, diff_text: str) -> list[str]:
+def validate_review_json(
+    data: object,
+    diff_text: str,
+    *,
+    path_prefix: str | None = None,
+    repository_files: Set[str] = frozenset(),
+) -> list[str]:
     """Validate *data* against the review JSON schema and against the diff.
 
     Returns a list of error strings.  An empty list means the data is valid.
@@ -133,7 +171,9 @@ def validate_review_json(data: object, diff_text: str) -> list[str]:
         errors.append(f"'inline_comments' must be a JSON object (dict), got {got}.")
         return errors
 
-    diff_files = parse_diff_files_and_lines(diff_text)
+    diff_files = parse_diff_files_and_lines(
+        diff_text, path_prefix=path_prefix, repository_files=repository_files
+    )
 
     for file_path, line_comments in inline.items():
         if (
@@ -195,6 +235,62 @@ def validate_review_json(data: object, diff_text: str) -> list[str]:
                 )
 
     return errors
+
+
+def _decode_diff_path(value: str) -> str | None:
+    value = value.partition("\t")[0]
+    if not value.startswith('"'):
+        return value
+    # Git quotes C byte strings, including octal UTF-8 and literal Unicode.
+    encoded = value.encode("utf-8").decode("ascii", "backslashreplace")
+    try:
+        path = ast.literal_eval("b" + encoded)
+    except (SyntaxError, ValueError):
+        return None
+    return os.fsdecode(path) if isinstance(path, bytes) else None
+
+
+def _repository_path(
+    path: str,
+    old_path: str | None,
+    renamed_path: str | None,
+    prefix: str | None,
+    repository_files: Set[str],
+) -> str:
+    if prefix is not None:
+        if not path.startswith(prefix) or not path[len(prefix) :]:
+            raise ValueError(
+                f"Diff path {path!r} does not match --diff-prefix {prefix!r}"
+            )
+        return path[len(prefix) :]
+    if renamed_path is not None and path.endswith(renamed_path):
+        return renamed_path
+    if old_path is not None and old_path.startswith("a/") and path.startswith("b/"):
+        return path[2:]
+
+    candidates = [
+        path[index:] for index in range(len(path)) if path[index:] in repository_files
+    ]
+    if len(candidates) > 1:
+        raise ValueError(
+            f"Ambiguous diff path {path!r}; specify --diff-prefix PREFIX "
+            "(use an empty string for prefix-free paths)"
+        )
+    if candidates:
+        return candidates[0]
+
+    if old_path == path:
+        return path
+    if old_path is not None and old_path != "/dev/null":
+        old_parts, new_parts = old_path.split("/"), path.split("/")
+        count = 0
+        for old, new in zip(reversed(old_parts), reversed(new_parts)):
+            if old != new:
+                break
+            count += 1
+        if count:
+            return "/".join(new_parts[-count:])
+    return path.removeprefix("b/")
 
 
 def _hunk_range(value: str) -> tuple[int, int]:

@@ -80,6 +80,7 @@ def handle_review_diff(args: argparse.Namespace) -> None:
             metrics=metrics,
             model=args.model,
             timeout_seconds=args.review_timeout or 300,
+            diff_prefix=args.diff_prefix,
         )
         args.json_output.write_text(json.dumps(result_dict, indent=2))
     else:
@@ -93,6 +94,7 @@ def handle_review_diff(args: argparse.Namespace) -> None:
             metrics=metrics,
             model=args.model,
             timeout_seconds=args.review_timeout or 300,
+            diff_prefix=args.diff_prefix,
         )
         print(result)
     if args.metrics is not None:
@@ -267,6 +269,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_review_options(diff_parser)
     _add_repo_option(diff_parser)
+    diff_parser.add_argument(
+        "--diff-prefix",
+        metavar="PREFIX",
+        help=(
+            "Explicit new-side diff path prefix; inferred from the checkout by "
+            "default. Use an empty string for ambiguous prefix-free diffs."
+        ),
+    )
     diff_parser.add_argument(
         "--json-output",
         type=Path,
