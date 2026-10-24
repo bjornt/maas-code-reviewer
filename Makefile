@@ -4,13 +4,13 @@ build:
 	uv build
 
 lint:
-	uv run ruff check src/ tests/
+	uv run ruff check src/ tests/ scripts/
 
 typecheck:
-	uv run ty check src/
+	uv run ty check src/ scripts/
 
 format:
-	uv run ruff format src/ tests/
+	uv run ruff format src/ tests/ scripts/
 
 test:
 	uv run pytest --cov --cov-fail-under=100 $(if $(COVERAGE_XML),--cov-report=xml:$(COVERAGE_XML))
