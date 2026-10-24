@@ -132,7 +132,9 @@ class _Job:
         self.config, self.root, self.deadline = config, root, deadline
         self.project = root / "project"
         self.host_cwd = root / "launcher"
-        self.name = "review-" + root.name.removeprefix("maas-review-").replace("_", "-")
+        # Preserve the unique suffix without tempfile's forbidden separators.
+        suffix = root.name.removeprefix("maas-review-").encode().hex()
+        self.name = "review-" + suffix
         self.attempted_launch = False
         self.environment = {
             "PATH": _CLEAN_PATH,
@@ -343,7 +345,7 @@ class _Job:
         )
         shutil.copyfile(Path(runtime_launch.__file__), payload / "launch.py")
         (self.project / "layout.json").write_text(json.dumps(self.paths))
-        self._bootstrap(env)
+        self.bootstrap = self._bootstrap(env)
 
     def start(self) -> None:
         config = self.config
@@ -412,6 +414,7 @@ class _Job:
                 raise RunnerStartupError(
                     "Workshop SDK artifact revision does not match trusted pin"
                 )
+        self.command("connect", f"{self.name}/{config.authentication_interface}")
         connections = self.command("connections", "--no-headers", self.name)
         connected: set[str] = set()
         mounts: set[str] = set()
@@ -449,10 +452,15 @@ class _Job:
             raise RunnerStartupError(
                 "Host-backed mounts differ from the explicit disposable-mount policy"
             )
+        if mounts:
+            # Moving SDK state across host filesystems requires a stopped job.
+            self.command("stop", self.name)
         for index, plug in enumerate(sorted(mounts)):
             destination = self.root / "mounts" / str(index)
-            destination.parent.mkdir(exist_ok=True)
+            destination.mkdir(parents=True)
             self.command("remount", f"{self.name}/{plug}", str(destination))
+        if mounts:
+            self.command("start", self.name)
         launch_file = self.project / "payload" / "launch.json"
         specification = json.loads(launch_file.read_text())
         specification["argv"] = [
@@ -479,7 +487,8 @@ class _Job:
             self.name,
             "--",
             "/bin/sh",
-            "/project/bootstrap.sh",
+            "-c",
+            self.bootstrap,
         )
 
     def agent_process(
@@ -616,7 +625,7 @@ class _Job:
                 errors.append("independent cleanup guardian did not settle")
         return errors
 
-    def _bootstrap(self, env: dict[str, str]) -> None:
+    def _bootstrap(self, env: dict[str, str]) -> str:
         targets = {
             "repository": "repository",
             "full.diff": "full_diff",
@@ -662,7 +671,7 @@ class _Job:
             target = shlex.quote(self.paths[key])
             lines.append(f"mount --bind -- {target} {target}")
             lines.append(f"mount -o remount,bind,ro -- {target}")
-        (self.project / "bootstrap.sh").write_text("\n".join(lines) + "\n")
+        return "\n".join(lines) + "\n"
 
 
 def _require_external_policy(resource: Path, repository: Path) -> None:

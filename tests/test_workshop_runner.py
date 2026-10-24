@@ -6,6 +6,7 @@ import http.server
 import json
 import os
 import runpy
+import shlex
 import shutil
 import socketserver
 import subprocess
@@ -254,11 +255,26 @@ class WorkshopService:
             text = "workshop-shim/1\n"
         elif action == "launch":
             definition = yaml.safe_load((project / "workshop.yaml").read_text())
+            name = definition["name"]
+            if not (
+                len(name) <= 40
+                and name[:1].islower()
+                and all(
+                    part
+                    and part.isascii()
+                    and part.isalnum()
+                    and part == part.lower()
+                    for part in name.split("-")
+                )
+            ):
+                return subprocess.CompletedProcess(command, 12, "", "Invalid name")
             self.jobs[project] = {
                 "name": definition["name"],
                 "running": True,
                 "pending": self.pending_launch,
                 "aborted": False,
+                "inference_connected": False,
+                "mounts": {},
             }
             text = "1\n"
         elif action == "info":
@@ -271,15 +287,30 @@ class WorkshopService:
                     else "status: ready\nsdks: {}\n"
                 )
             )
+        elif action == "connect":
+            job = self.jobs[project]
+            if command[4] != f"{job['name']}/omp:review-inference":
+                return subprocess.CompletedProcess(command, 12, "", "Unknown plug")
+            job["inference_connected"] = True
+            text = ""
         elif action == "connections":
             name = self.jobs[project]["name"]
             text = (
                 self.connection
                 if self.connection is not None
-                else f"tunnel {name}/omp:review-inference {name}/system:tunnel -\n"
+                else (
+                    f"tunnel {name}/omp:review-inference "
+                    + (
+                        f"{name}/system:review-inference manual\n"
+                        if self.jobs[project]["inference_connected"]
+                        else "- -\n"
+                    )
+                )
             )
             text = text.replace("JOB", name)
         elif action == "exec":
+            if not self.jobs[project]["running"]:
+                return subprocess.CompletedProcess(command, 12, "", "Job is stopped")
             workshop_shim._bootstrap(project)
             text = ""
         elif action in ("wait", "abort"):
@@ -297,6 +328,9 @@ class WorkshopService:
                     "status": "Undone" if job["aborted"] else "Done",
                 }
             )
+        elif action == "start":
+            self.jobs[project]["running"] = True
+            text = ""
         elif action in ("stop", "remove"):
             if project in self.jobs:
                 assert not self.jobs[project]["pending"], (
@@ -305,7 +339,17 @@ class WorkshopService:
                 self.jobs[project]["running"] = False
             text = ""
         elif action == "remount":
-            Path(command[-1]).mkdir()
+            job = self.jobs[project]
+            if job["running"]:
+                return subprocess.CompletedProcess(
+                    command, 12, "", "Cross-filesystem remount requires a stopped job"
+                )
+            destination = Path(command[-1])
+            if not destination.is_dir():
+                return subprocess.CompletedProcess(
+                    command, 12, "", "Replacement mount source does not exist"
+                )
+            job["mounts"][command[4].split("/", 1)[1]] = destination
             text = ""
         else:
             raise AssertionError(action)
@@ -397,6 +441,89 @@ def test_snapshot_policy_inputs_and_credentials_are_isolated(
     assert [action for _, action in service.actions][-2:] == ["stop", "remove"]
 
 
+@pytest.mark.parametrize("suffix", ["8n5agii_", "_8n5agii", "8n__5agi", "________"])
+def test_temporary_directory_separators_do_not_prevent_workshop_startup(
+    config: RuntimeConfig,
+    review_request: ReviewRequest,
+    service: WorkshopService,
+    tmp_path: Path,
+    suffix: str,
+) -> None:
+    root = tmp_path / ("maas-review-" + suffix)
+    root.mkdir()
+    job = workshop_runner._Job(config, root, time.monotonic() + 30)
+    job.start_guard()
+    try:
+        job.prepare(review_request)
+        job.start()
+        assert service.jobs[job.project]["running"]
+    finally:
+        assert not job.cleanup()
+    assert not root.exists()
+
+
+def test_bootstrap_shell_does_not_hold_the_host_project_open(
+    config: RuntimeConfig,
+    review_request: ReviewRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class BootstrapService(WorkshopService):
+        def run(self, command, **kwargs):
+            if command[3] != "exec":
+                return super().run(command, **kwargs)
+            project = Path(command[2])
+            arguments = command[command.index("--") + 1 :]
+            if len(arguments) == 2 and arguments[1].startswith("/project/"):
+                arguments[1] = str(project / arguments[1].removeprefix("/project/"))
+            return subprocess.run(
+                arguments,
+                cwd=kwargs["cwd"],
+                env=kwargs["env"],
+                timeout=kwargs["timeout"],
+                capture_output=True,
+                text=True,
+            )
+
+    service = BootstrapService()
+    monkeypatch.setattr(workshop_runner.runtime_guard, "run_command", service.run)
+    probe = tmp_path / "probe.py"
+    probe.write_text('''
+import json
+import os
+import sys
+from pathlib import Path
+
+project = Path(sys.argv[1])
+open_paths = []
+for descriptor in Path(f"/proc/{os.getppid()}/fd").iterdir():
+    try:
+        target = descriptor.resolve(strict=True)
+    except FileNotFoundError:
+        continue
+    if target.is_relative_to(project):
+        open_paths.append(str(target))
+Path(sys.argv[2]).write_text(json.dumps(open_paths))
+sys.exit(32 if open_paths else 0)
+''')
+    observation = tmp_path / "open-project-descriptors.json"
+    root = tmp_path / "job"
+    root.mkdir()
+    job = workshop_runner._Job(config, root, time.monotonic() + 30)
+    job.start_guard()
+    try:
+        job.prepare(review_request)
+        job.bootstrap = (
+            shlex.join([sys.executable, str(probe), str(job.project), str(observation)])
+            + '\nstatus=$?\nexit "$status"\n'
+        )
+        (job.project / "bootstrap.sh").write_text(job.bootstrap)
+        job.start()
+        assert json.loads(observation.read_text()) == []
+    finally:
+        assert not job.cleanup()
+
+
 def test_concurrent_reviews_have_independent_lifecycle_and_state(
     config: RuntimeConfig,
     review_request: ReviewRequest,
@@ -444,7 +571,7 @@ def test_agent_failures_always_stop_remove_and_delete_state(
     assert all(not project.parent.exists() for project in service.jobs)
 
 
-@pytest.mark.parametrize("action", ["launch", "info", "exec"])
+@pytest.mark.parametrize("action", ["launch", "info", "connect", "exec"])
 def test_startup_failures_cleanup_even_when_launch_did_not_complete(
     config: RuntimeConfig,
     review_request: ReviewRequest,
@@ -461,18 +588,24 @@ def test_startup_failures_cleanup_even_when_launch_did_not_complete(
         assert root.exists()
     else:
         assert [item for _, item in service.actions][-2:] == ["stop", "remove"]
+        assert all(not job["running"] for job in service.jobs.values())
+        assert all(not project.parent.exists() for project in service.jobs)
+        if action == "connect":
+            assert "exec" not in [item for _, item in service.actions]
 
 
+@pytest.mark.parametrize("action", ["wait", "connect"])
 def test_startup_timeout_is_one_total_deadline_and_still_disposes(
     config: RuntimeConfig,
     review_request: ReviewRequest,
     service: WorkshopService,
+    action: str,
 ) -> None:
     service.pending_launch = True
-    service.timeout = "wait"
+    service.timeout = action
     with pytest.raises(RunnerTimeoutError):
         WorkshopRunner(config).run(review_request)
-    assert [item for _, item in service.actions][-3:] == ["abort", "wait", "info"]
+    assert "exec" not in [item for _, item in service.actions]
     assert all(not job["running"] for job in service.jobs.values())
     assert all(not project.parent.exists() for project in service.jobs)
 
@@ -535,11 +668,46 @@ def test_mounts_are_owned_remapped_and_deleted(
     )
 
     async def agent(process, task, *, deadline):
-        assert (process.cwd.parent / "mounts" / "0").is_dir()
+        job = service.jobs[process.cwd.parent / "project"]
+        destination = job["mounts"]["omp:home"]
+        assert job["running"]
+        assert destination.is_dir() and destination.is_relative_to(process.cwd.parent)
+        (destination / "session.json").write_text("disposable session")
         return completed()
 
     monkeypatch.setattr(workshop_runner.acp_client, "run_acp", agent)
     WorkshopRunner(replace(config, mount_interfaces=("omp:home",))).run(review_request)
+    assert all(not job["running"] for job in service.jobs.values())
+    assert all(not project.parent.exists() for project in service.jobs)
+
+
+@pytest.mark.parametrize("action", ["stop", "remount", "start"])
+@pytest.mark.parametrize("timeout", [False, True])
+def test_mount_transition_failure_blocks_agent_and_disposes_job(
+    config: RuntimeConfig,
+    review_request: ReviewRequest,
+    service: WorkshopService,
+    action: str,
+    timeout: bool,
+) -> None:
+    service.connection = (
+        "tunnel JOB/omp:review-inference JOB/system:review-inference manual\n"
+        "mount JOB/omp:home JOB/system:mount -"
+    )
+    if timeout:
+        service.timeout = action
+    else:
+        service.fail.add(action)
+
+    expected = RunnerTimeoutError if timeout else RunnerStartupError
+    with pytest.raises(expected):
+        WorkshopRunner(replace(config, mount_interfaces=("omp:home",))).run(
+            review_request
+        )
+
+    assert "exec" not in [item for _, item in service.actions]
+    assert all(not job["running"] for job in service.jobs.values())
+    assert all(not project.parent.exists() for project in service.jobs)
 
 
 def test_sdk_revision_pin_and_workshop_version_are_enforced(

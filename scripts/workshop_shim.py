@@ -51,9 +51,16 @@ def main(argv: list[str] | None = None) -> int:
                 if _pending(project):
                     status = "pending"
                 print(f"status: {status}\nsdks: {{}}")
+            case "connect":
+                (project / "shim-inference-plug").write_text(args.arguments[0])
             case "connections":
                 name = args.arguments[-1]
-                print(f"tunnel {name}/omp:review-inference {name}/system:tunnel -")
+                plug = f"{name}/omp:review-inference"
+                connection = project / "shim-inference-plug"
+                if connection.exists() and connection.read_text() == plug:
+                    print(f"tunnel {plug} {name}/system:review-inference manual")
+                else:
+                    print(f"tunnel {plug} - -")
             case "exec":
                 return _exec(project, args.arguments)
             case "stop" | "remove":
@@ -61,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
                     raise RuntimeError("Pending launch must be aborted and settled")
                 _stop(project)
                 (project / "shim-ready").unlink(missing_ok=True)
+                (project / "shim-inference-plug").unlink(missing_ok=True)
             case _:
                 parser.error("Unsupported Workshop test lifecycle command")
         return 0
@@ -154,7 +162,11 @@ def _exec(project: Path, arguments: list[str]) -> int:
     command = arguments[separator + 1 :]
     if not command:
         parser.error("exec requires a command after the separator")
-    if command == ["/bin/sh", "/project/bootstrap.sh"]:
+    if (
+        args.uid == args.gid == "0"
+        and len(command) == 3
+        and command[:2] == ["/bin/sh", "-c"]
+    ):
         _bootstrap(project)
         return 0
     if not (project / "shim-ready").exists():

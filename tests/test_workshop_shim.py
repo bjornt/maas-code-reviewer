@@ -103,7 +103,8 @@ def test_lifecycle_shim_transports_real_process_stdio_without_protocol_translati
                 "review",
                 "--",
                 "/bin/sh",
-                "/project/bootstrap.sh",
+                "-c",
+                "set -eu\ncp -a -- /project/payload/. /review/",
             ]
         )
         == 0
@@ -240,6 +241,26 @@ def test_shim_reports_only_explicit_test_identity(local_job, capsys) -> None:
         == 0
     )
     assert "omp:review-inference" in capsys.readouterr().out
+
+
+def test_inference_tunnel_requires_explicit_connection(local_job, capsys) -> None:
+    project, paths, omp, observation = local_job
+    workshop_shim.main(["-p", str(project), "launch", "review"])
+    capsys.readouterr()
+
+    def inference_slot() -> str:
+        workshop_shim.main(
+            ["-p", str(project), "connections", "--no-headers", "review"]
+        )
+        return capsys.readouterr().out.split()[2]
+
+    assert inference_slot() == "-"
+    workshop_shim.main(
+        ["-p", str(project), "connect", "review/omp:review-inference"]
+    )
+    assert inference_slot() == "review/system:review-inference"
+    workshop_shim.main(["-p", str(project), "stop", "review"])
+    assert inference_slot() == "-"
 
 
 def test_stop_uses_stable_process_identity_and_reaps_active_work(local_job) -> None:

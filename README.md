@@ -147,9 +147,23 @@ The profile describes:
 - `[model]`: `default` and exact `allowed` identities. Registry advertisement and
   resolved model identity must agree with the requested identity before a turn.
 - `[authentication]`: required inference `SDK:plug`, not provider/publication
-  credentials or broker authority.
+  credentials or broker authority. After readiness/artifact checks, each job runs
+  `workshop connect JOB/SDK:plug` before validating the interface allowlist. Declare
+  the same-named `system:plug` host tunnel slot in the trusted Workshop template;
+  configuring the allowlist alone does not establish a connection. Connection
+  failure or timeout aborts startup and follows normal job cleanup.
 - `[interfaces]`: complete approved connected plugs and host-backed mounts. Every
   host-backed SDK state mount must be inventoried and remapped to fresh job state.
+  Each replacement source directory is created before invoking `workshop remount`;
+  Workshop does not create it on the stopped cross-filesystem path when the old
+  source exists.
+  Jobs with approved mounts are stopped before remapping and restarted before
+  bootstrap: Workshop cannot safely perform every live remount across host
+  filesystems (for example, SDK storage to a job directory under `/tmp`). Failure
+  to stop, remap, or restart aborts startup and follows normal job cleanup.
+  Raw lifecycle stderr is intentionally not echoed because it may contain secrets.
+  If remount still fails, obtain the underlying diagnostic by running it directly
+  against a disposable probe Workshop, never a development or production job.
 - `[artifacts]`: exact Workshop version, observed SDK revisions, and trusted
   harness-profile directory. A moving SDK Store channel alone is not a pin;
   drift must fail before agent execution.
@@ -250,6 +264,10 @@ requires real-host verification: mount flags/aliases, persistence of unmounts,
 SDK state, shell startup, and host-service reachability cannot be proved by the
 shim, which deliberately performs no real mounts.
 
+Trusted bootstrap code is passed inline to `sh -c`, not executed from a file on
+`/project`. Executing the script from that mount would leave a shell descriptor
+open on it and prevent bootstrap from unmounting its own host project view.
+
 ACP advertises no host filesystem, terminal, or interactive elicitation services;
 unexpected permissions/services are rejected. Protocol stdout and diagnostics are
 separate. Visible messages, thoughts, tools, and usage are tracked separately; only
@@ -274,6 +292,13 @@ error, both are reported without losing the primary exception/partial usage.
 An independent ownership-pipe guard and bounded lifecycle supervisors handle
 abrupt coordinator death rather than relying solely on Python `finally` or a
 local subprocess exit.
+
+Workshop names use `review-` followed by the hexadecimal encoding of the unique
+temporary-directory suffix, so underscores cannot produce trailing or repeated
+hyphens. For retained jobs from older versions, an invalid-definition warning is
+not proof that a container exists. Inspect the retained `control.json` and check
+running and stopped Workshop/LXD state before removing only that job's directory.
+`workshop okay` acknowledges warnings; it does not stop or remove workloads.
 
 Workshop itself does not filter egress. The operator must restrict host/internal
 services and gateway authority and accept/document residual outbound disclosure
