@@ -5,9 +5,12 @@ local diffs with an ACP agent. Python acquires inputs, validates the final revie
 against the full original diff, formats output, and publishes. The agent and its
 native tools run in a disposable Workshop selected by an explicit trusted profile.
 
-The tested harness is **omp 18.12.2**, using Python
-**agent-client-protocol 0.12.1**. There is no Google Python SDK dependency, legacy
-Gemini execution path, transcript-repair retry, or automatic local fallback.
+**omp is the only currently supported harness.** The tested runtime is
+**omp 18.12.2** with Python **agent-client-protocol 0.12.1**. ACP and the neutral
+runner boundary make a future harness switch easier; alternative-harness
+support or conformance is not part of the current deliverable. There is no
+Google Python SDK dependency, legacy Gemini execution path, transcript-repair
+retry, or automatic local fallback.
 
 **Verification boundary:** the explicitly selected Workshop CLI shim runs the
 real installed omp inside an already isolated development environment. It is not
@@ -218,8 +221,9 @@ extensions/skills/rules/LSP/PTY and skill-learning companions, sets unattended
 permission behavior explicitly, and disables device-write companions
 (`tools.xdev: false`, `autolearn.enabled: false`). Native web search is
 pinned by the harness profile to `modelRoles.web: web/duckduckgo`; it was exercised
-with real sources without copying search credentials. Another provider/harness
-requires its own tested trusted profile. Python has no provider API-key switches.
+with real sources without copying search credentials. Changing the model/search
+provider requires a tested trusted omp profile, not support for another harness.
+Python has no provider API-key switches.
 
 ## Input, credential, and lifecycle boundary
 

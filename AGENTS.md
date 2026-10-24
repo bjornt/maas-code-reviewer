@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`maas-code-reviewer` is a Python CLI tool that reviews [Launchpad](https://launchpad.net/) merge proposals and [GitHub](https://github.com/) pull requests using an ACP harness inside a disposable Workshop. Python acquires inputs, validates results, and publishes reviews. See `DESIGN.md` and `PLAN.md` for architecture and verification status.
+`maas-code-reviewer` is a Python CLI tool that reviews [Launchpad](https://launchpad.net/) merge proposals and [GitHub](https://github.com/) pull requests using omp over ACP inside a disposable Workshop. omp is the only currently supported harness; the neutral ACP boundary exists to ease a future switch, not to require alternative-harness support or conformance now. Python acquires inputs, validates results, and publishes reviews. See `DESIGN.md` and `PLAN.md` for architecture and verification status.
 
 ## Project Structure
 
