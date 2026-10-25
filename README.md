@@ -25,7 +25,7 @@ Requires Python 3.12 or newer, uv, and git. Production review execution
 additionally requires a supported host installation of Workshop, its daemon, and
 LXD. `workshopctl` inside a development Workshop is not a host launcher.
 The trusted Workshop base/SDKs must provide `/usr/bin/python3` and standard
-`cp`, `chown`, `mount`, `umount`, and `mountpoint` utilities for bootstrap/isolation
+`cp`, `chown`, `rm`, `mount`, `umount`, and `mountpoint` utilities for bootstrap/isolation
 checks; SDK/interface availability is verified before agent execution.
 
 From a trusted checkout/revision:
@@ -261,9 +261,86 @@ diagnostic by running it directly against a disposable probe Workshop, never a
 development or production job. Credential, device, and other non-tunnel
 interfaces are rejected outright.
 
-There is no verified production Workshop artifact combination. On the real host,
-an operator must provision Workshop and LXD, configure inference access, and
-complete the deployment gates below.
+### Real Workshop host setup
+
+The installed wheel was exercised on Ubuntu 26.04.1 with Workshop 0.9.9,
+LXD 6.10.0, the `omp` SDK's `latest/stable` channel (observed omp 18.12.2,
+SDK revision 250), and Python ACP 0.12.1. Observed revisions are evidence, not
+enforced pins. Full outcomes and remaining CI/publication gates are in
+[`PLAN.md`, section 8.4](PLAN.md#84-real-workshop-vm-execution-record).
+
+On a dedicated Ubuntu host, install the host tools:
+
+```sh
+sudo snap install --channel=6/stable lxd
+sudo snap install --classic workshop
+sudo snap install --classic astral-uv
+workshop --version
+lxc version
+sdk info omp
+```
+
+Install the trusted coordinator wheel as described above. Run the following with
+the Python interpreter from that installation, outside any reviewed checkout:
+
+```python
+from importlib.resources import files
+from pathlib import Path
+import json
+import shutil
+
+root = Path.home() / ".config" / "maas-code-reviewer"
+root.mkdir(parents=True, exist_ok=True)
+profile = root / "profile"
+shutil.copytree(str(files("maas_code_reviewer").joinpath("runtime/profile")),
+                profile, dirs_exist_ok=True)
+(profile / "models.yml").write_text('''providers:
+  openai-codex:
+    baseUrl: http://127.0.0.1:4400
+    transport: pi-native
+    apiKey: review-inference
+''')
+(root / "runtime.toml").write_text('''[workshop]
+executable = "/snap/bin/workshop"
+socket = "/var/snap/workshop/common/workshop/workshop.socket"
+[omp]
+channel = "latest/stable"
+[authentication]
+endpoint = "127.0.0.1:4400"
+[profile]
+directory = ''' + json.dumps(str(profile)) + '''
+[model]
+default = "openai-codex/gpt-6.1-sol"
+allowed = ["openai-codex/gpt-6.1-sol"]
+''')
+print(root / "runtime.toml")
+```
+
+This profile requires an operator-managed inference-only listener on host
+loopback port 4400, serving that exact model through the native gateway protocol.
+`review-inference` is a nonsecret literal: the listener injects upstream
+authentication itself. It must not expose provider credentials, broker/admin
+routes, arbitrary model/endpoint selection, or forwarding authority. The VM
+verification used a temporary filtered listener over SSH, not a newly installed
+production gateway. Supply a persistent scoped listener before unattended use.
+
+```sh
+maas-code-reviewer review-diff \
+  --runtime-config "$HOME/.config/maas-code-reviewer/runtime.toml" \
+  --repo-dir /path/to/checkout changes.diff
+```
+
+Host network restrictions are separate from this TOML. The verified VM uses
+`maas-review-network.service` and nftables tables `inet maas_review` / `bridge
+maas_review` to deny unrelated host/private/peer services while permitting DNS
+and public IPv4 traffic. Public egress still permits disclosure of review data;
+neither Workshop nor this application claims an Internet allowlist.
+
+Workshop 0.9.9 exposed a shared-SDK ETag conflict during concurrent provisioning.
+Serialize provisioning on affected hosts; two already-running jobs still have
+independent state. A failed launch/removal retains recovery metadata rather than
+silently retrying or declaring cleanup. See the phase-8 record before removing
+retained state.
 
 ### Local Workshop shim with this container's omp
 
@@ -352,10 +429,13 @@ remapped mounts before the agent starts. Trusted
 bootstrap copies staged data into container-private locations and removes the
 host-backed `/project` view before any agent execution. It then read-only bind
 mounts the copied repository, full diff, and system-instruction file; it does
-not substitute chmod for the host boundary. This source-derived sequence still
-requires real-host verification: mount flags/aliases, persistence of unmounts,
-SDK state, shell startup, and host-service reachability cannot be proved by the
-shim, which deliberately performs no real mounts.
+not substitute chmod for the host boundary. Real-host mount inventories, write
+probes, effective-tool registration, clean ACP stdout, and host/private/peer
+reachability checks verify the recorded deployment. Recheck after host/SDK policy
+changes; the shim deliberately performs no real mounts.
+Bootstrap also unmounts the unused `/dev/lxd` guest API and unlinks the
+container-local Workshop untrusted proxy socket before agent execution. These
+operations remove guest access paths, not the host's daemon sockets.
 
 Trusted bootstrap code is passed inline to `sh -c`, not executed from a file on
 `/project`. Executing the script from that mount would leave a shell descriptor
@@ -371,9 +451,18 @@ transcript-wide JSON salvage, or partial-output publication are performed.
 
 Cancellation sends `session/cancel`, settles bounded protocol work, and escalates
 to job teardown. SDK shutdown is bounded even if a peer stops reading a large
-prompt. EOF can drain an active turn rather than cancel immediately. Launches
-use `--no-wait`; ownership of pending daemon changes is retained independently
+prompt. EOF can drain an active turn rather than cancel immediately.
+
+The SDK gets a separate bounded graceful-exit window so a valid review is not
+lost merely because its remote launcher needs more than a permission-cancel
+grace period to drain. Forced/nonzero process shutdown still fails the review.
+
+Launches use `--no-wait`; ownership of pending daemon changes is retained independently
 so abort and rollback settlement precede stop/remove after timeout or owner death.
+An observed launch ID is retained even if its CLI times out after printing it.
+Before removal, cleanup settles pending exec changes belonging to the launch's
+verified project; closing a local pipe or stopping a container alone does not
+settle the daemon's exec operation.
 Host change control uses Workshop's supported Unix-socket HTTP APIs, not invented
 CLI abort/wait flags. The explicit shim has a separate internal change helper.
 
@@ -385,6 +474,10 @@ error, both are reported without losing the primary exception/partial usage.
 An independent ownership-pipe guard and bounded lifecycle supervisors handle
 abrupt coordinator death rather than relying solely on Python `finally` or a
 local subprocess exit.
+
+Container stop has a separate bounded budget covering Workshop's normal
+60-second LXD shutdown allowance plus bookkeeping. The full guardian reserve
+includes launch and exec settlement; cleanup can outlast the review deadline.
 
 Workshop names use `review-` followed by the hexadecimal encoding of the unique
 temporary-directory suffix, so underscores cannot produce trailing or repeated

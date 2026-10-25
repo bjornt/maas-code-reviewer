@@ -551,7 +551,8 @@ class _Job:
                 self.lease = None
         if self.guardian is not None:
             try:
-                status = self.guardian.wait(timeout=5 * _CLEANUP_SECONDS + 5)
+                # Include launch/exec settlement and the ownership-lock wait.
+                status = self.guardian.wait(timeout=runtime_guard.GUARD_WAIT_SECONDS)
                 if status:
                     errors.append(
                         "independent cleanup guardian failed; recovery control: "
@@ -604,6 +605,10 @@ class _Job:
                 "if mountpoint -q -- /project; then exit 70; fi",
                 "test ! -e /project/workshop.yaml",
                 "test ! -e /project/layout.json",
+                "if mountpoint -q -- /dev/lxd; then umount -- /dev/lxd; fi",
+                "rm -f -- /var/lib/workshop/run/workshop.socket.untrusted",
+                "test ! -e /dev/lxd/sock",
+                "test ! -e /var/lib/workshop/run/workshop.socket.untrusted",
             ]
         )
         # These binds protect disposable input contents, not the host boundary;

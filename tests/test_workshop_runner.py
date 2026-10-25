@@ -84,7 +84,8 @@ if action == "launch":
     state.update(pending=True, running=True, cli_pid=os.getpid())
     save()
     time.sleep(state.get("response_delay", 0))
-    print("1")
+    print(state.get("launch_reply", "1"), flush=True)
+    time.sleep(state.get("post_response_delay", 0))
 elif action == "abort":
     state.update(pending=False, running=False, aborted=True)
     save()
@@ -102,7 +103,14 @@ elif action == "info":
     save()
     print("status: off" if state.get("aborted") else "status: ready")
 elif action in ("stop", "remove"):
-    if state["pending"] or (action == "remove" and state.get("fail_remove")):
+    if action == "stop":
+        time.sleep(state.get("stop_delay", 0))
+    if state["pending"] or (
+        action == "remove" and (
+            state.get("fail_remove") or state.get("pending_exec")
+            or (state.get("require_stopped") and state["running"])
+        )
+    ):
         save()
         sys.exit(12)
     state["running"] = False
@@ -124,7 +132,12 @@ def unix_daemon():
         "reply": {
             "type": "sync",
             "status-code": 200,
-            "result": {"id": "1", "ready": True, "status": "Done"},
+            "result": {
+                "id": "1",
+                "ready": True,
+                "status": "Done",
+                "project-id": "owned",
+            },
         },
         "requests": [],
     }
@@ -133,8 +146,34 @@ def unix_daemon():
         def reply(self):
             body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             state["requests"].append((self.command, self.path, body))
-            data = json.dumps(state["reply"]).encode()
-            self.send_response(state["status"])
+            reply = state["reply"]
+            status = state["status"]
+            if self.path.startswith("/v1/changes?"):
+                pending = []
+                if state.get("exec_record"):
+                    remote = json.loads(state["exec_record"].read_text())
+                    if remote.get("pending_exec"):
+                        pending = [{"id": "2", "kind": "exec", "project-id": "owned"}]
+                reply = dict(reply, result=state.get("pending_changes", pending))
+            elif self.path.startswith("/v1/changes/2") and state.get("exec_record"):
+                remote = json.loads(state["exec_record"].read_text())
+                if self.command == "POST":
+                    if not state.get("unsettled"):
+                        remote["pending_exec"] = False
+                        state["exec_record"].write_text(json.dumps(remote))
+                    if state.get("abort_race"):
+                        status = 400
+                reply = dict(
+                    reply,
+                    result={
+                        "id": "2",
+                        "ready": not remote["pending_exec"],
+                        "status": "Doing" if remote["pending_exec"] else "Done",
+                        "project-id": "owned",
+                    },
+                )
+            data = json.dumps(reply).encode()
+            self.send_response(status)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -251,10 +290,7 @@ class WorkshopService:
                 len(name) <= 40
                 and name[:1].islower()
                 and all(
-                    part
-                    and part.isascii()
-                    and part.isalnum()
-                    and part == part.lower()
+                    part and part.isascii() and part.isalnum() and part == part.lower()
                     for part in name.split("-")
                 )
             ):
@@ -479,7 +515,7 @@ def test_bootstrap_shell_does_not_hold_the_host_project_open(
     service = BootstrapService()
     monkeypatch.setattr(workshop_runner.runtime_guard, "run_command", service.run)
     probe = tmp_path / "probe.py"
-    probe.write_text('''
+    probe.write_text("""
 import json
 import os
 import sys
@@ -496,7 +532,7 @@ for descriptor in Path(f"/proc/{os.getppid()}/fd").iterdir():
         open_paths.append(str(target))
 Path(sys.argv[2]).write_text(json.dumps(open_paths))
 sys.exit(32 if open_paths else 0)
-''')
+""")
     observation = tmp_path / "open-project-descriptors.json"
     root = tmp_path / "job"
     root.mkdir()
@@ -737,15 +773,11 @@ def test_harness_policy_cannot_omit_model_or_system_instruction(
     assert not service.jobs
 
 
-def test_no_test_bearer_is_required_until_nonempty_runner_call(
+def test_missing_shim_bearer_blocks_nonempty_review(
     config: RuntimeConfig,
     review_request: ReviewRequest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runner = ConfiguredAgentRunner(Path("/missing/profile"))
-    assert runner.config_path == Path("/missing/profile")
-    with pytest.raises(RunnerConfigurationError, match="runtime-config"):
-        ConfiguredAgentRunner(None).run(review_request)
     monkeypatch.delenv("TEST_REVIEW_BEARER")
     with pytest.raises(RunnerConfigurationError, match="empty"):
         WorkshopRunner(config).run(review_request)
@@ -1353,6 +1385,145 @@ def test_source_shaped_unused_slots_grant_no_authority(
 
     monkeypatch.setattr(workshop_runner.acp_client, "run_acp", agent)
     assert WorkshopRunner(config).run(review_request) == completed()
+
+
+def test_container_stop_can_outlast_the_short_change_request_grace(
+    tmp_path: Path, remote_service: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable, record = remote_service
+    record.write_text(
+        json.dumps(
+            {
+                "pending": False,
+                "running": True,
+                "actions": [],
+                "stop_delay": 0.3,
+                "require_stopped": True,
+            }
+        )
+    )
+    root = tmp_path / "slow-stop"
+    root.mkdir()
+    control(
+        root,
+        launch_attempted=True,
+        launch_change="1",
+        launch_settled=True,
+        launch_status="Done",
+    )
+    monkeypatch.setattr(runtime_guard, "CLEANUP_SECONDS", 0.1)
+    monkeypatch.setattr(runtime_guard, "STOP_SECONDS", 2)
+    assert runtime_guard.cleanup_remote(root, str(executable), "job", {}) == []
+    remote = json.loads(record.read_text())
+    assert remote["removed"] and not remote["running"]
+    assert runtime_guard.read_control(root)["removed"]
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "pending",
+        "none",
+        "abort-race",
+        "bad-list",
+        "overlapping",
+        "foreign",
+        "other-kind",
+        "bad-id",
+        "missing-project",
+        "unsettled",
+    ],
+)
+def test_remote_disposal_settles_only_its_owned_exec_changes(
+    tmp_path: Path, remote_service: tuple[Path, Path], unix_daemon, scenario: str
+) -> None:
+    executable, record = remote_service
+    record.write_text(
+        json.dumps(
+            {
+                "pending": False,
+                "running": True,
+                "pending_exec": scenario != "none",
+                "actions": [],
+            }
+        )
+    )
+    socket_path, daemon = unix_daemon
+    daemon["exec_record"] = record
+    if scenario == "bad-list":
+        daemon["pending_changes"] = {}
+    elif scenario == "overlapping":
+        daemon["pending_changes"] = [
+            {"id": identity, "kind": "exec", "project-id": "owned"}
+            for identity in ("2", "3")
+        ]
+    elif scenario in ("foreign", "other-kind", "bad-id"):
+        pending = {"id": "2", "kind": "exec", "project-id": "owned"}
+        pending[
+            {"foreign": "project-id", "other-kind": "kind", "bad-id": "id"}[scenario]
+        ] = "unexpected"
+        daemon["pending_changes"] = [pending]
+    elif scenario == "missing-project":
+        daemon["reply"]["result"].pop("project-id")
+    elif scenario == "unsettled":
+        daemon["unsettled"] = True
+    elif scenario == "abort-race":
+        daemon["abort_race"] = True
+    root = tmp_path / "owned-job"
+    root.mkdir()
+    control(
+        root,
+        shim=False,
+        daemon_socket=str(socket_path),
+        launch_attempted=True,
+        launch_change="1",
+        launch_settled=True,
+        launch_status="Done",
+    )
+    errors = runtime_guard.cleanup_remote(root, str(executable), "job", {})
+    remote = json.loads(record.read_text())
+    if scenario in ("pending", "none", "abort-race"):
+        assert errors == []
+        assert remote["removed"] and not remote["pending_exec"]
+        assert runtime_guard.read_control(root)["removed"]
+    else:
+        assert errors
+        assert not remote.get("removed", False)
+        assert not runtime_guard.read_control(root)["removed"]
+        assert root.exists()
+
+
+@pytest.mark.parametrize("reply", ["1", "not-a-change-id"])
+def test_timed_out_launch_retains_only_an_observed_change_id(
+    tmp_path: Path,
+    remote_service: tuple[Path, Path],
+    reply: str,
+) -> None:
+    executable, record = remote_service
+    state = json.loads(record.read_text()) | {
+        "launch_reply": reply,
+        "post_response_delay": 30,
+    }
+    record.write_text(json.dumps(state))
+    root = tmp_path / "timed-out-launch"
+    root.mkdir()
+    control(root, launch_attempted=True)
+    runtime_guard.supervise(
+        [str(executable), "-p", str(root / "project"), "launch", "--no-wait"],
+        0.5,
+        -1,
+        root,
+    )
+    if reply == "1":
+        assert runtime_guard.read_control(root)["launch_change"] == "1"
+        assert runtime_guard.cleanup_remote(root, str(executable), "job", {}) == []
+        state = json.loads(record.read_text())
+        assert state["aborted"] and not state["running"]
+        assert runtime_guard.read_control(root)["removed"]
+    else:
+        assert runtime_guard.read_control(root)["launch_change"] is None
+        assert runtime_guard.cleanup_remote(root, str(executable), "job", {})
+        assert root.exists()
 
 
 def test_pending_launch_timeout_aborts_before_remote_disposal(

@@ -15,9 +15,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 CONTROL = "control.json"
 CLEANUP_SECONDS = 10.0
+# Workshop's LXD backend permits 60 seconds for a normal stop, plus bookkeeping.
+STOP_SECONDS = 75.0
+GUARD_WAIT_SECONDS = STOP_SECONDS + 10 * CLEANUP_SECONDS + 5
 
 
 def read_control(root: Path) -> dict:
@@ -73,38 +77,18 @@ def change_request(
             raise OSError("Workshop shim change operation failed")
         details = json.loads(result.stdout)
     else:
-        connection = http.client.HTTPConnection("localhost", timeout=timeout)
-        transport = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            transport.settimeout(timeout)
-            transport.connect(state["daemon_socket"])
-            connection.sock = transport
-            path = "/v1/changes/" + change
-            if operation == "abort":
-                connection.request(
-                    "POST",
-                    path,
-                    '{"action":"abort"}',
-                    {"Content-Type": "application/json"},
-                )
-            else:
-                connection.request("GET", path + f"/wait?timeout={timeout}s")
-            response = connection.getresponse()
-            envelope = json.loads(response.read())
-            if response.status == 504:
-                raise subprocess.TimeoutExpired(
-                    ["Workshop", operation, change], timeout
-                )
-            if (
-                response.status != 200
-                or not isinstance(envelope, dict)
-                or envelope.get("type") != "sync"
-            ):
-                raise OSError("Workshop daemon change operation failed")
-            details = envelope.get("result")
-        finally:
-            connection.close()
-            transport.close()
+        path = "/v1/changes/" + change
+        if operation == "abort":
+            details = _daemon_request(
+                state["daemon_socket"], "POST", path, timeout, '{"action":"abort"}'
+            )
+        else:
+            details = _daemon_request(
+                state["daemon_socket"],
+                "GET",
+                path + f"/wait?timeout={timeout}s",
+                timeout,
+            )
     if (
         not isinstance(details, dict)
         or details.get("id") != change
@@ -178,13 +162,17 @@ def cleanup_remote(
                 return []
         except (OSError, subprocess.TimeoutExpired):
             pass
+    try:
+        _settle_exec_changes(root, executable, env)
+    except (OSError, ValueError, http.client.HTTPException, subprocess.TimeoutExpired):
+        errors.append("Workshop exec changes did not settle")
     for action in ("stop", "remove"):
         try:
             result = run_command(
                 base + [action, name],
                 cwd=root,
                 env=env,
-                timeout=CLEANUP_SECONDS,
+                timeout=STOP_SECONDS if action == "stop" else CLEANUP_SECONDS,
                 root=root,
             )
             if result.returncode:
@@ -329,7 +317,12 @@ def supervise(
         if root is not None and command[3] == "launch" and result.returncode == 0:
             record_launch(root, result.stdout)
         return {"returncode": result.returncode, "stdout": result.stdout}
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as expired:
+        if root is not None and command[3] == "launch" and expired.output:
+            try:
+                record_launch(root, expired.output.decode("utf-8", "replace"))
+            except ValueError:
+                pass
         return {"timeout": True}
     except (OSError, ValueError):
         return {"error": True}
@@ -338,6 +331,86 @@ def supervise(
             os.close(descriptor)
         if owner >= 0:
             os.close(owner)
+
+
+def _daemon_request(
+    socket_path: str, method: str, path: str, timeout: float, body: str | None = None
+):
+    connection = http.client.HTTPConnection("localhost", timeout=timeout)
+    transport = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        transport.settimeout(timeout)
+        transport.connect(socket_path)
+        connection.sock = transport
+        connection.request(method, path, body, {"Content-Type": "application/json"})
+        response = connection.getresponse()
+        envelope = json.loads(response.read())
+        if response.status == 504:
+            raise subprocess.TimeoutExpired(["Workshop", method, path], timeout)
+        if (
+            response.status != 200
+            or not isinstance(envelope, dict)
+            or envelope.get("type") != "sync"
+        ):
+            raise OSError("Workshop daemon change operation failed")
+        return envelope.get("result")
+    finally:
+        connection.close()
+        transport.close()
+
+
+def _settle_exec_changes(root: Path, executable: str, env: dict[str, str]) -> None:
+    state = read_control(root)
+    if state["shim"] or state["launch_status"] != "Done":
+        return
+    launch = change_request(
+        root,
+        executable,
+        "wait",
+        state["launch_change"],
+        env=env,
+        timeout=CLEANUP_SECONDS,
+    )
+    project = launch.get("project-id")
+    if not isinstance(project, str) or not project:
+        raise ValueError("Workshop launch did not identify its project")
+    query = urlencode({"select": "in-progress", "project-id": project})
+    pending = _daemon_request(
+        state["daemon_socket"], "GET", "/v1/changes?" + query, CLEANUP_SECONDS
+    )
+    if not isinstance(pending, list):
+        raise ValueError("Malformed Workshop pending-change report")
+    # The job runs one ACP process, never overlapping Workshop exec commands.
+    if len(pending) > 1:
+        raise ValueError("Unexpected overlapping Workshop exec operations")
+    for change in pending:
+        if (
+            not isinstance(change, dict)
+            or change.get("project-id") != project
+            or change.get("kind") != "exec"
+            or not isinstance(change.get("id"), str)
+            or not change["id"].isascii()
+            or not change["id"].isdecimal()
+        ):
+            raise ValueError("Unexpected pending Workshop operation")
+        identity = change["id"]
+        try:
+            change_request(
+                root, executable, "abort", identity, env=env, timeout=CLEANUP_SECONDS
+            )
+        except (
+            OSError,
+            ValueError,
+            http.client.HTTPException,
+            subprocess.TimeoutExpired,
+        ):
+            # Completion can race abort; readiness from wait remains authoritative.
+            pass
+        settled = change_request(
+            root, executable, "wait", identity, env=env, timeout=CLEANUP_SECONDS
+        )
+        if not settled["ready"]:
+            raise OSError("Workshop exec change did not settle")
 
 
 def _execute_command(
@@ -382,8 +455,10 @@ def _execute_command(
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            process.wait(timeout=2)
-            raise
+            stdout, stderr = process.communicate(timeout=2)
+            raise subprocess.TimeoutExpired(
+                command, timeout, output=stdout.encode(), stderr=stderr.encode()
+            ) from None
         return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
     finally:
         if process.stdout is not None:

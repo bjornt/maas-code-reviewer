@@ -623,6 +623,65 @@ def test_backpressured_prompt_cannot_park_cleanup_or_asyncio_shutdown(tmp_path, 
         os.kill(int(marker.read_text()), 0)
 
 
+def test_valid_review_survives_delayed_graceful_launcher_exit(tmp_path):
+    marker = tmp_path / "closing"
+    process, request, _ = configured(
+        tmp_path, usage=USAGE, shutdown_marker=str(marker), shutdown_delay=0.75
+    )
+    result = asyncio.run(run_acp(process, request, deadline=time.monotonic() + 10))
+    assert marker.exists()
+    assert result.terminal_text == FINAL
+    assert result.status is CompletionStatus.COMPLETED
+    assert result.usage.total_tokens == 101
+
+
+def test_stalled_sdk_shutdown_cannot_publish_or_leave_a_live_launcher(
+    tmp_path, monkeypatch
+):
+    from maas_code_reviewer import acp_client
+
+    process, request, _ = configured(tmp_path, usage=USAGE)
+    real_spawn = acp_client.spawn_agent_process
+    managers = []
+
+    class StalledExit:
+        def __init__(self, *args, **kwargs):
+            self.manager = real_spawn(*args, **kwargs)
+            self.child = None
+            self.closed = False
+
+        async def __aenter__(self):
+            connection, self.child = await self.manager.__aenter__()
+            return connection, self.child
+
+        async def __aexit__(self, *args):
+            # Model an SDK deadlock: process reap precedes stdin closure.
+            await self.child.wait()
+            await self.manager.__aexit__(*args)
+            self.closed = True
+
+    def spawn(*args, **kwargs):
+        manager = StalledExit(*args, **kwargs)
+        managers.append(manager)
+        return manager
+
+    monkeypatch.setattr(acp_client, "spawn_agent_process", spawn)
+    monkeypatch.setattr(acp_client, "_SHUTDOWN_GRACE", 0.05)
+    monkeypatch.setattr(acp_client, "_CLEANUP_GRACE", 0.05)
+
+    async def scenario():
+        with pytest.raises(RunnerTransportError) as caught:
+            await run_acp(process, request, deadline=time.monotonic() + 10)
+        assert caught.value.usage.total_tokens == 101
+        assert managers[0].closed
+        assert managers[0].child.returncode is not None
+        assert not [
+            task for task in asyncio.all_tasks() if task is not asyncio.current_task()
+        ]
+
+    asyncio.run(scenario())
+
+
 def test_successful_turn_with_failed_process_cleanup_is_not_publishable(tmp_path):
     marker = tmp_path / "closing"
     process, request, _ = configured(

@@ -53,6 +53,7 @@ from .agent_runner import (
 )
 
 _CLEANUP_GRACE = 0.5
+_SHUTDOWN_GRACE = 2.0
 _LOG_OWNER: contextvars.ContextVar["_Conversation | None"] = contextvars.ContextVar(
     "acp_log_owner", default=None
 )
@@ -105,7 +106,7 @@ async def run_acp(
         env=environment,
         observers=[client.observe],
         use_unstable_protocol=True,
-        transport_kwargs={"shutdown_timeout": _CLEANUP_GRACE},
+        transport_kwargs={"shutdown_timeout": _SHUTDOWN_GRACE},
     )
     try:
         try:
@@ -544,8 +545,12 @@ def _abort_process(child: asyncio.subprocess.Process) -> None:
 async def _close_process(
     manager: Any, child: asyncio.subprocess.Process, client: _Conversation
 ) -> None:
+    if client.active:
+        # An unsettled turn cannot publish; release any backpressured SDK sender.
+        _abort_process(child)
     close = asyncio.create_task(manager.__aexit__(None, None, None))
-    done, _ = await asyncio.wait((close,), timeout=_CLEANUP_GRACE)
+    # Leave room for the SDK's graceful process wait and connection shutdown.
+    done, _ = await asyncio.wait((close,), timeout=_SHUTDOWN_GRACE + _CLEANUP_GRACE)
     failed = not done
     if failed:
         _abort_process(child)
@@ -557,7 +562,8 @@ async def _close_process(
         failed = True
         _abort_process(child)
     try:
-        await asyncio.wait_for(child.wait(), _CLEANUP_GRACE)
+        if await asyncio.wait_for(child.wait(), _CLEANUP_GRACE) != 0:
+            failed = True
     except TimeoutError:
         failed = True
         _abort_process(child)
