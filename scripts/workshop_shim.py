@@ -45,15 +45,24 @@ def main(argv: list[str] | None = None) -> int:
                     status = "pending"
                 print(f"status: {status}\nsdks: {{}}")
             case "connect":
-                (project / "shim-inference-plug").write_text(args.arguments[0])
+                connection = project / "shim-connected-plugs"
+                plugs = (
+                    json.loads(connection.read_text()) if connection.exists() else []
+                )
+                plug = args.arguments[0]
+                if plug not in plugs:
+                    plugs.append(plug)
+                connection.write_text(json.dumps(plugs))
             case "connections":
                 name = args.arguments[-1]
-                plug = f"{name}/omp:review-inference"
-                connection = project / "shim-inference-plug"
-                if connection.exists() and connection.read_text() == plug:
-                    print(f"tunnel {plug} {name}/system:review-inference manual")
-                else:
-                    print(f"tunnel {plug} - -")
+                connection = project / "shim-connected-plugs"
+                plugs = (
+                    json.loads(connection.read_text()) if connection.exists() else []
+                )
+                for plug in dict.fromkeys([f"{name}/omp:review-inference", *plugs]):
+                    slot = f"{name}/system:" + plug.partition(":")[2]
+                    target = f"{slot} manual" if plug in plugs else "- -"
+                    print(f"tunnel {plug} {target}")
             case "exec":
                 return _exec(project, args.arguments)
             case "stop" | "remove":
@@ -61,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
                     raise RuntimeError("Pending launch must be aborted and settled")
                 _stop(project)
                 (project / "shim-ready").unlink(missing_ok=True)
-                (project / "shim-inference-plug").unlink(missing_ok=True)
+                (project / "shim-connected-plugs").unlink(missing_ok=True)
             case _:
                 parser.error("Unsupported Workshop test lifecycle command")
         return 0

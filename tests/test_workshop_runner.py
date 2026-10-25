@@ -2,6 +2,7 @@
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
 import fcntl
+import http.client
 import http.server
 import json
 import os
@@ -21,6 +22,9 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 import yaml
+from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import (
+    ExportMetricsServiceRequest,
+)
 
 from maas_code_reviewer import runtime_guard, runtime_launch, workshop_runner
 from maas_code_reviewer.agent_runner import (
@@ -300,7 +304,8 @@ class WorkshopService:
                 "running": True,
                 "pending": self.pending_launch,
                 "aborted": False,
-                "inference_connected": False,
+                "tunnels": definition["sdks"][0]["plugs"],
+                "connected": set(),
                 "mounts": {},
             }
             text = "1\n"
@@ -316,22 +321,25 @@ class WorkshopService:
             )
         elif action == "connect":
             job = self.jobs[project]
-            if command[4] != f"{job['name']}/omp:review-inference":
+            plug = command[4].partition(":")[2]
+            if plug not in job["tunnels"]:
                 return subprocess.CompletedProcess(command, 12, "", "Unknown plug")
-            job["inference_connected"] = True
+            job["connected"].add(plug)
             text = ""
         elif action == "connections":
-            name = self.jobs[project]["name"]
+            job = self.jobs[project]
+            name = job["name"]
             text = (
                 self.connection
                 if self.connection is not None
-                else (
-                    f"tunnel {name}/omp:review-inference "
+                else "".join(
+                    f"tunnel {name}/omp:{plug} "
                     + (
-                        f"{name}/system:review-inference manual\n"
-                        if self.jobs[project]["inference_connected"]
+                        f"{name}/system:{plug} manual\n"
+                        if plug in job["connected"]
                         else "- -\n"
                     )
+                    for plug in job["tunnels"]
                 )
             )
             text = text.replace("JOB", name)
@@ -1388,8 +1396,10 @@ def test_source_shaped_unused_slots_grant_no_authority(
 
 
 def test_container_stop_can_outlast_the_short_change_request_grace(
-    tmp_path: Path, remote_service: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, remote_service: tuple[Path, Path]
 ) -> None:
+    # Keep production grace periods: subprocess startup alone can exceed a
+    # 100 ms test-only removal deadline on a busy host.
     executable, record = remote_service
     record.write_text(
         json.dumps(
@@ -1397,7 +1407,7 @@ def test_container_stop_can_outlast_the_short_change_request_grace(
                 "pending": False,
                 "running": True,
                 "actions": [],
-                "stop_delay": 0.3,
+                "stop_delay": runtime_guard.CLEANUP_SECONDS + 0.3,
                 "require_stopped": True,
             }
         )
@@ -1411,8 +1421,6 @@ def test_container_stop_can_outlast_the_short_change_request_grace(
         launch_settled=True,
         launch_status="Done",
     )
-    monkeypatch.setattr(runtime_guard, "CLEANUP_SECONDS", 0.1)
-    monkeypatch.setattr(runtime_guard, "STOP_SECONDS", 2)
     assert runtime_guard.cleanup_remote(root, str(executable), "job", {}) == []
     remote = json.loads(record.read_text())
     assert remote["removed"] and not remote["running"]
@@ -2275,3 +2283,80 @@ def test_default_packaged_policy_cannot_belong_to_reviewed_tree(
             )
         )
     assert not service.jobs
+
+
+@pytest.mark.parametrize("fail_review", [False, True])
+def test_per_review_telemetry_outlives_acp_and_preserves_failure_diagnostics(
+    config: RuntimeConfig,
+    review_request: ReviewRequest,
+    service: WorkshopService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fail_review: bool,
+) -> None:
+    output = tmp_path / "otel"
+    endpoints: list[str] = []
+
+    async def agent(process, task, *, deadline):
+        layout = json.loads(
+            (process.cwd.parent / "project" / "layout.json").read_text()
+        )
+        spec = json.loads(Path(layout["launch_spec"]).read_text())
+        environment = spec["environment"]
+        endpoint = environment["OTEL_EXPORTER_OTLP_ENDPOINT"].removeprefix("http://")
+        endpoints.append(endpoint)
+        packet = ExportMetricsServiceRequest()
+        metric = packet.resource_metrics.add().scope_metrics.add().metrics.add()
+        metric.name = "omp.agent.tool.calls"
+        point = metric.sum.data_points.add()
+        point.as_int = 2
+        point.attributes.add(key="gen_ai.tool.name").value.string_value = "read"
+        connection = http.client.HTTPConnection(endpoint, timeout=2)
+        connection.request(
+            "POST",
+            "/v1/metrics",
+            packet.SerializeToString(),
+            {"Content-Type": "application/x-protobuf"},
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        response.read()
+        connection.close()
+        if fail_review:
+            raise RunnerTransportError("lost review transport")
+        return completed()
+
+    monkeypatch.setattr(workshop_runner.acp_client, "run_acp", agent)
+    runner = WorkshopRunner(config, otel_output=output)
+    if fail_review:
+        with pytest.raises(RunnerTransportError, match="lost review transport"):
+            runner.run(review_request)
+    else:
+        assert runner.run(review_request) == completed()
+    batch = json.loads((output / "metrics.jsonl").read_text())
+    metric = batch["resourceMetrics"][0]["scopeMetrics"][0]["metrics"][0]
+    assert metric["name"] == "omp.agent.tool.calls"
+    assert metric["sum"]["dataPoints"][0]["asInt"] == "2"
+    assert all(not state["running"] for state in service.jobs.values())
+    assert all(not project.parent.exists() for project in service.jobs)
+    connection = http.client.HTTPConnection(endpoints[0], timeout=2)
+    try:
+        with pytest.raises(ConnectionRefusedError):
+            connection.connect()
+    finally:
+        connection.close()
+
+
+def test_missing_declared_telemetry_tunnel_blocks_agent_start(
+    config: RuntimeConfig,
+    review_request: ReviewRequest,
+    service: WorkshopService,
+    tmp_path: Path,
+) -> None:
+    service.connection = (
+        "tunnel JOB/omp:review-inference JOB/system:review-inference manual\n"
+    )
+    with pytest.raises(RunnerStartupError, match="Connected interfaces differ"):
+        WorkshopRunner(config, otel_output=tmp_path / "otel").run(review_request)
+    assert "exec" not in [action for _, action in service.actions]
+    assert all(not state["running"] for state in service.jobs.values())

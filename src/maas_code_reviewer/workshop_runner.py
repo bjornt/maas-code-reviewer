@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from maas_code_reviewer.agent_runner import (
     RunnerTimeoutError,
 )
 from maas_code_reviewer.runtime_config import RuntimeConfig, load_runtime_config
+from maas_code_reviewer.telemetry import TelemetryCollector
 
 _CLEAN_PATH = "/usr/local/bin:/usr/bin:/bin:/snap/bin"
 _CLEANUP_SECONDS = 10.0
@@ -48,10 +50,12 @@ class ConfiguredAgentRunner:
         *,
         model: str | None = None,
         timeout_seconds: float | None = None,
+        otel_output: Path | None = None,
     ) -> None:
         self.config_path = config_path
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.otel_output = otel_output
 
     def run(self, request: ReviewRequest) -> AgentRunResult:
         if self.config_path is not None:
@@ -64,12 +68,15 @@ class ConfiguredAgentRunner:
             ),
             timeout_seconds=config.resolve_timeout(self.timeout_seconds),
         )
-        return WorkshopRunner(config).run(request)
+        return WorkshopRunner(config, otel_output=self.otel_output).run(request)
 
 
 class WorkshopRunner:
-    def __init__(self, config: RuntimeConfig) -> None:
+    def __init__(
+        self, config: RuntimeConfig, *, otel_output: Path | None = None
+    ) -> None:
         self.config = config
+        self.otel_output = otel_output
 
     def run(self, request: ReviewRequest) -> AgentRunResult:
         resources = [
@@ -89,12 +96,23 @@ class WorkshopRunner:
             model=self.config.resolve_model(request.model),
             timeout_seconds=self.config.resolve_timeout(request.timeout_seconds),
         )
+        collector = (
+            TelemetryCollector(self.otel_output)
+            if self.otel_output is not None
+            else nullcontext()
+        )
+        with collector as telemetry:
+            return self._run(request, telemetry)
+
+    def _run(
+        self, request: ReviewRequest, telemetry: TelemetryCollector | None
+    ) -> AgentRunResult:
         deadline = time.monotonic() + request.timeout_seconds
         try:
             root = Path(tempfile.mkdtemp(prefix="maas-review-"))
         except OSError as exc:
             raise RunnerStartupError("Cannot allocate disposable review state") from exc
-        job = _Job(self.config, root, deadline)
+        job = _Job(self.config, root, deadline, telemetry)
         job.start_guard()
         returned = False
         try:
@@ -120,8 +138,15 @@ class WorkshopRunner:
 
 
 class _Job:
-    def __init__(self, config: RuntimeConfig, root: Path, deadline: float) -> None:
+    def __init__(
+        self,
+        config: RuntimeConfig,
+        root: Path,
+        deadline: float,
+        telemetry: TelemetryCollector | None = None,
+    ) -> None:
         self.config, self.root, self.deadline = config, root, deadline
+        self.telemetry = telemetry
         self.project = root / "project"
         self.host_cwd = root / "launcher"
         # Preserve the unique suffix without tempfile's forbidden separators.
@@ -140,7 +165,11 @@ class _Job:
             "USER": "review",
             "LOGNAME": "review",
         }
-        self.definition = yaml.safe_dump(config.workshop_definition(self.name))
+        self.definition = yaml.safe_dump(
+            config.workshop_definition(
+                self.name, telemetry.endpoint if telemetry is not None else None
+            )
+        )
         self.paths: dict[str, str] = {}
         self.lease: int | None = None
         self.guardian: subprocess.Popen | None = None
@@ -271,6 +300,8 @@ class _Job:
             },
             "XDG_RUNTIME_DIR": agent_dir + "/run",
         }
+        if self.telemetry is not None:
+            env.update(self.telemetry.environment)
         inherit: list[str] = []
         if config.test_shim is not None:
             shim = config.test_shim
@@ -360,7 +391,11 @@ class _Job:
             raise RunnerStartupError(
                 "Workshop did not reach the documented ready state"
             )
-        self.command("connect", f"{self.name}/{config.authentication_interface}")
+        expected_tunnels = {config.authentication_interface}
+        if self.telemetry is not None:
+            expected_tunnels.add(config.telemetry_interface)
+        for interface in sorted(expected_tunnels):
+            self.command("connect", f"{self.name}/{interface}")
         connections = self.command("connections", "--no-headers", self.name)
         connected: set[str] = set()
         mounts: set[str] = set()
@@ -387,9 +422,8 @@ class _Job:
                 raise RunnerStartupError(
                     "Credential, device, and non-tunnel interfaces are forbidden"
                 )
-        # The generated definition declares exactly one tunnel, so anything else
-        # connected is authority this application did not ask for.
-        if connected != {config.authentication_interface}:
+        # Only explicitly generated inference/telemetry tunnels are accepted.
+        if connected != expected_tunnels:
             raise RunnerStartupError(
                 "Connected interfaces differ from the generated definition"
             )

@@ -168,7 +168,10 @@ def main(argv: list[str] | None = None) -> None:
 
 def _configured_runner(args: argparse.Namespace) -> ConfiguredAgentRunner:
     return ConfiguredAgentRunner(
-        args.runtime_config, model=args.model, timeout_seconds=args.review_timeout
+        args.runtime_config,
+        model=args.model,
+        timeout_seconds=args.review_timeout,
+        otel_output=args.otel_output,
     )
 
 
@@ -221,6 +224,12 @@ def _add_review_options(parser: argparse.ArgumentParser) -> None:
         type=Path,
         metavar="FILE",
         help="Write reported agent usage and host diff statistics as JSON to FILE.",
+    )
+    parser.add_argument(
+        "--otel-output",
+        type=Path,
+        metavar="DIR",
+        help="Collect omp OpenTelemetry traces and metrics as OTLP JSONL files in DIR.",
     )
 
 

@@ -187,11 +187,14 @@ mode posts a host-validated comment.
 | `--max-diff-chars N` | Bounds initial diff context; default 200000. Full-diff validation remains authoritative. |
 | `--repo-dir DIR` | Local input checkout for `review-diff`/`review-pr`; defaults to cwd. Never a runtime-definition source. |
 | `--metrics FILE` | Write reported usage and host context/diff metadata after a successful validated review. |
+| `--otel-output DIR` | Collect omp traces and metrics in `DIR/traces.jsonl` and `DIR/metrics.jsonl` using a review-scoped receiver. No persistent OTEL service is needed. |
 
 Whitespace-only diffs skip the runtime and model authentication. Structured empty
 reviews retain their unmarked response; plain text retains the host review
 marker/preamble. Empty-review usage is known zero. Runtime/result failures are
-nonzero, use stderr, and do not publish or emit review/metrics artifacts.
+nonzero, use stderr, and do not publish or emit review/legacy metrics artifacts.
+Requested OTEL files retain diagnostics already received, including on failure.
+Empty diffs and duplicate MP skips do not start a receiver or create OTEL files.
 
 ## Review runtime configuration
 
@@ -236,9 +239,11 @@ are argv arrays, never shell-interpolated strings. Every setting is optional:
 - `[authentication]`: inference `plug` name (default `review-inference`) and
   tunnel `endpoint` (default `localhost:4000`). The SDK is always `omp` because
   this application writes the definition that declares the plug and its
-  same-named `system` slot. Each job runs `workshop connect JOB/omp:PLUG` after
-  readiness, then verifies that exactly that one tunnel is connected. Connection
-  failure or timeout aborts startup and follows normal job cleanup.
+  same-named `system` slot. Each job connects the inference tunnel after readiness.
+  With `--otel-output`, it also declares and connects `PLUG-otel` to a temporary
+  host-loopback receiver on a dynamically allocated port. Startup verifies that
+  exactly these generated tunnels are connected; unexpected connections,
+  connection failure, or timeout abort startup and follow normal job cleanup.
 - `[profile]`: `directory` holding the trusted harness policy; defaults to the
   packaged profile.
 
@@ -555,6 +560,54 @@ are not summed with prompt-response usage. Exact file-read counts and Gemini
 resume/tool-limit fields have been removed. Failure exceptions retain available
 partial usage, but failed reviews do not produce a metrics file. Duplicate MP
 skips also produce no metrics file.
+
+### Tool activity and OpenTelemetry
+
+Every agent tool call is printed immediately to stderr as one escaped JSON line
+containing `toolCallId`, the harness's human-readable `title`, and complete
+`rawInput` parameters. This includes repository paths/ranges, directory reads,
+search patterns, URLs, and web-search queries. Later parameter changes are logged
+under the same call ID; status-only progress and tool results are not printed.
+Deduplicate by call ID rather than counting log lines. Review stdout remains
+separate, including when the review is written to a JSON file.
+
+Collect both artifact formats in one invocation:
+
+```sh
+maas-code-reviewer review-diff --repo-dir /path/to/checkout \
+  --json-output review.json --metrics metrics.json --otel-output otel \
+  changes.diff 2>tool-calls.log
+```
+
+`--otel-output` starts a temporary Python receiver bound to `127.0.0.1`, exposes
+only its OTLP HTTP/protobuf endpoint through the generated Workshop tunnel, and
+sets explicit `OTEL_*` variables in the trusted agent environment. It needs no
+Collector executable, database, or long-running service. The receiver remains
+available through agent shutdown and Workshop teardown, then closes its listener
+and output files. Ambient host OTEL endpoints/credentials are not forwarded.
+
+The files contain newline-delimited OTLP JSON export batches, not another copy
+of the legacy summary. `metrics.jsonl` includes omp's token usage, tool-call
+counts by tool/status, chat-call counts, costs, and durations when reported.
+`traces.jsonl` includes individual agent, model-call, and tool-call spans. Trace
+IDs use OTLP's hex encoding; enum values are numeric. Existing files are appended
+to when a directory is reused; use a separate directory per review to keep runs
+apart. Cumulative metric snapshots must not be summed as independent increments;
+for the token-usage histogram, `sum` measures tokens while `count` counts samples.
+
+OTEL message/tool-content capture and log export are disabled. Tool-call stderr
+deliberately contains full parameters; traces may contain model/tool identities
+and error information. Treat logs and telemetry artifacts as potentially
+confidential. Export depends on the installed omp's OTLP support and trusted
+profile; unavailable data is not reconstructed from ACP or invented. Forced
+termination can lose buffered exports. Collector write/worker failures are
+reported, preserve the primary review exception, and block an otherwise
+successful review. Legacy metrics still require a successful validated result.
+
+Both GitHub review workflows enable OTEL collection and upload the two JSONL
+files alongside the legacy metrics artifact. Already received OTEL diagnostics
+are uploaded even when the review fails.
+
 
 ## GitHub Actions and deployment
 

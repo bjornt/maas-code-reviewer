@@ -95,22 +95,35 @@ class RuntimeConfig:
 
     @property
     def authentication_interface(self) -> str:
-        """The single tunnel this application's own definition declares."""
+        """The inference tunnel declared by every generated definition."""
         return f"{HARNESS_SDK}:{self.inference_plug}"
 
-    def workshop_definition(self, name: str) -> dict[str, Any]:
+    @property
+    def telemetry_interface(self) -> str:
+        """The optional per-review loopback OTLP tunnel."""
+        return f"{HARNESS_SDK}:{self.inference_plug}-otel"
+
+    def workshop_definition(
+        self, name: str, telemetry_endpoint: str | None = None
+    ) -> dict[str, Any]:
         """Build the whole job definition; never read one from any other source."""
         tunnel = {"interface": "tunnel", "endpoint": self.inference_endpoint}
         harness: dict[str, Any] = {"name": HARNESS_SDK}
         if self.omp_channel is not None:
             harness["channel"] = self.omp_channel
         harness["plugs"] = {self.inference_plug: dict(tunnel)}
+        slots = {self.inference_plug: dict(tunnel)}
+        if telemetry_endpoint is not None:
+            telemetry = {"interface": "tunnel", "endpoint": telemetry_endpoint}
+            plug = self.inference_plug + "-otel"
+            harness["plugs"][plug] = dict(telemetry)
+            slots[plug] = dict(telemetry)
         return {
             "name": name,
             "base": self.base,
             "sdks": [
                 harness,
-                {"name": "system", "slots": {self.inference_plug: dict(tunnel)}},
+                {"name": "system", "slots": slots},
             ],
         }
 

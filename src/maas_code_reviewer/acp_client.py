@@ -9,6 +9,7 @@ verifies that selection; it never grants the agent authority on the host.
 
 import asyncio
 import contextvars
+import json
 import logging
 import math
 import sys
@@ -178,6 +179,7 @@ class _Conversation:
         self.message_epoch: dict[str, int] = {}
         self.tool_epoch = 0
         self.tools: dict[str, str | None] = {}
+        self.tool_inputs: dict[str, tuple[str, str | None]] = {}
 
     def observe(self, event: StreamEvent) -> None:
         """Retain legacy model advertising discarded by the newer SDK schema."""
@@ -237,10 +239,30 @@ class _Conversation:
             if update.tool_call_id in self.tools:
                 self.fail(RunnerResultError("Duplicate ACP tool identity"))
             self.tools[update.tool_call_id] = update.status
+            self.tool_inputs[update.tool_call_id] = (
+                update.title,
+                json.dumps(update.raw_input, sort_keys=True)
+                if "raw_input" in update.model_fields_set
+                else None,
+            )
+            self._log_tool_input(update.tool_call_id)
             self.tool_epoch += 1
         elif isinstance(update, ToolCallProgress):
             if update.tool_call_id not in self.tools:
                 self.fail(RunnerResultError("Unknown ACP tool identity"))
+            if update.tool_call_id in self.tool_inputs:
+                title, previous_input = self.tool_inputs[update.tool_call_id]
+                raw_input = (
+                    json.dumps(update.raw_input, sort_keys=True)
+                    if "raw_input" in update.model_fields_set
+                    else previous_input
+                )
+                self.tool_inputs[update.tool_call_id] = (
+                    update.title if update.title is not None else title,
+                    raw_input,
+                )
+                if raw_input != previous_input:
+                    self._log_tool_input(update.tool_call_id)
             if update.status is not None:
                 self.tools[update.tool_call_id] = update.status
             self.tool_epoch += 1
@@ -364,6 +386,17 @@ class _Conversation:
         if not text.strip():
             raise RunnerResultError("ACP terminal message is empty", usage=self.usage)
         return text
+
+    def _log_tool_input(self, identity: str) -> None:
+        # Keep every untrusted value JSON-escaped, including IDs and titles.
+        title, raw_input = self.tool_inputs[identity]
+        print(
+            f'{{"toolCallId": {json.dumps(identity)}, '
+            f'"title": {json.dumps(title)}, '
+            f'"rawInput": {raw_input if raw_input is not None else "null"}}}',
+            file=sys.stderr,
+            flush=True,
+        )
 
     def _message(self, update: AgentMessageChunk) -> None:
         identity = update.message_id

@@ -11,6 +11,7 @@ dependencies = [
     "agent-client-protocol==0.12.1",
     "keyring",
     "launchpadlib",
+    "opentelemetry-proto",
     "PyGithub",
     "pyyaml>=6.0.3",
 ]

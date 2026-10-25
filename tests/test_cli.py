@@ -90,6 +90,7 @@ def test_explicit_runtime_configuration_selects_the_review_runner(
         *,
         model: str | None = None,
         timeout_seconds: float | None = None,
+        otel_output: Path | None = None,
     ) -> FakeAgentRunner:
         return configured if config_path == selected else unconfigured
 

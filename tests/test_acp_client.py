@@ -10,6 +10,7 @@ import os
 import sys
 import time
 from dataclasses import FrozenInstanceError, replace
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +62,9 @@ def visible(text: str = FINAL, identity: str | None = "final") -> dict[str, Any]
     }
 
 
-def tool(status: str = "in_progress", *, start: bool = True) -> dict[str, Any]:
+def tool(
+    status: str = "in_progress", *, start: bool = True, **fields: Any
+) -> dict[str, Any]:
     update = {
         "sessionUpdate": "tool_call" if start else "tool_call_update",
         "toolCallId": "read-1",
@@ -69,7 +72,7 @@ def tool(status: str = "in_progress", *, start: bool = True) -> dict[str, Any]:
     }
     if start:
         update["title"] = "Read repository"
-    return {"update": update}
+    return {"update": update | fields}
 
 
 def configured(
@@ -151,7 +154,122 @@ def test_split_frames_chunks_and_real_session_contract(tmp_path):
         setattr(process, "cwd", Path("/elsewhere"))
 
 
-def test_thoughts_progress_narration_and_late_terminal_message(tmp_path):
+@pytest.mark.parametrize(
+    ("title", "arguments"),
+    [
+        (
+            "read: Inspecting repository",
+            {"path": "src/reviewer.py:50-200", "i": "Reading review code"},
+        ),
+        (
+            "web_search: Checking API behavior",
+            {"query": 'site:docs.example.com "API behavior"', "limit": 7},
+        ),
+    ],
+)
+def test_tool_identity_and_full_parameters_are_visible_only_on_stderr(
+    tmp_path, capsys, title, arguments
+):
+    arguments = arguments | {
+        "nested": {"all": [True, False, None, 1.5, "x" * 5000]},
+    }
+    result = execute(
+        tmp_path,
+        actions=[tool("completed", title=title, rawInput=arguments), visible()],
+    )
+    assert result.terminal_text == FINAL
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert len(captured.err.splitlines()) == 1
+    assert json.loads(captured.err) == {
+        "toolCallId": "read-1",
+        "title": title,
+        "rawInput": arguments,
+    }
+
+
+def test_streamed_tool_inputs_escape_controls_and_skip_status_or_output_noise(
+    tmp_path, capsys
+):
+    identity = 'read-1\n\x1b[31m\r\t"\\'
+    title = 'read: Inspecting\n\x1b[2J\r\t"\\\u2028\u202e'
+    updated_title = "read: Inspecting updated input"
+    first_input = {
+        "path": 'src/a.py\n\x1b[31m\r\t"\\\x00',
+        "range": {"start": 1, "end": 20},
+    }
+    updated_input = {"path": "src/b.py", "literal": "é\u2028\u2029"}
+    result = execute(
+        tmp_path,
+        actions=[
+            tool(toolCallId=identity, title=title),
+            tool(start=False, toolCallId=identity),
+            tool(start=False, toolCallId=identity, rawInput=None),
+            tool(start=False, toolCallId=identity, rawInput=first_input),
+            tool(
+                start=False,
+                toolCallId=identity,
+                rawInput={
+                    "range": {"end": 20, "start": 1},
+                    "path": first_input["path"],
+                },
+            ),
+            tool(start=False, toolCallId=identity, title=updated_title),
+            tool(
+                start=False,
+                toolCallId=identity,
+                rawOutput={"secret-tool-output": "must stay private"},
+                content=[
+                    {
+                        "type": "content",
+                        "content": {"type": "text", "text": "secret-tool-content"},
+                    }
+                ],
+            ),
+            tool(start=False, toolCallId=identity, rawInput=updated_input),
+            tool(start=False, toolCallId=identity, rawInput=None),
+            tool(start=False, toolCallId=identity, rawInput=None),
+            tool("completed", start=False, toolCallId=identity),
+            {"stderr": 10},
+            visible(),
+        ],
+    )
+    assert result.terminal_text == FINAL
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    lines = captured.err.splitlines()
+    assert [json.loads(line) for line in lines] == [
+        {"toolCallId": identity, "title": title, "rawInput": None},
+        {"toolCallId": identity, "title": title, "rawInput": None},
+        {"toolCallId": identity, "title": title, "rawInput": first_input},
+        {"toolCallId": identity, "title": updated_title, "rawInput": updated_input},
+        {"toolCallId": identity, "title": updated_title, "rawInput": None},
+    ]
+    assert all(32 <= ord(character) < 127 for line in lines for character in line)
+    assert "secret" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "raw_input", [None, {}, [], [True, None, 3.5], "text", False, 0]
+)
+def test_tool_logging_flushes_each_complete_json_record(
+    tmp_path, monkeypatch, raw_input
+):
+    stream = StringIO()
+    flushed = []
+    monkeypatch.setattr(stream, "flush", lambda: flushed.append(stream.getvalue()))
+    monkeypatch.setattr(sys, "stderr", stream)
+    result = execute(
+        tmp_path,
+        actions=[tool("completed", rawInput=raw_input), visible()],
+    )
+    assert result.terminal_text == FINAL
+    assert flushed == [stream.getvalue()]
+    assert stream.getvalue().endswith("\n")
+    assert json.loads(flushed[0])["rawInput"] == raw_input
+
+
+def test_thoughts_progress_narration_and_late_terminal_message(tmp_path, capsys):
     result = execute(
         tmp_path,
         actions=[
@@ -188,6 +306,13 @@ def test_thoughts_progress_narration_and_late_terminal_message(tmp_path):
         ],
     )
     assert result.terminal_text == FINAL
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "toolCallId": "read-1",
+        "title": "Read repository",
+        "rawInput": None,
+    }
 
 
 def test_completion_prose_is_not_error_matched_or_json_salvaged(tmp_path):
@@ -696,10 +821,13 @@ def test_successful_turn_with_failed_process_cleanup_is_not_publishable(tmp_path
     assert caught.value.usage.total_tokens == 101
 
 
-def test_stderr_is_drained_without_exposing_or_retaining_diagnostics(tmp_path, caplog):
+def test_stderr_is_drained_without_exposing_or_retaining_diagnostics(
+    tmp_path, caplog, capsys
+):
     result = execute(tmp_path, actions=[{"stderr": 50000}, visible()])
     assert result.terminal_text == FINAL
     assert "secret-diagnostic" not in caplog.text
+    assert capsys.readouterr() == ("", "")
 
 
 @pytest.mark.parametrize(
