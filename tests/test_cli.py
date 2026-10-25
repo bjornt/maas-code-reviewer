@@ -455,15 +455,29 @@ def test_invalid_terminal_review_never_reaches_text_or_json_output(
     assert not output.exists()
 
 
+@pytest.mark.parametrize("missing_input", ["diff", "description"])
 def test_diff_acquisition_failure_is_useful_stderr(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    runner: FakeAgentRunner,
+    diff_file: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    missing_input: str,
 ) -> None:
+    output = tmp_path / "review.json"
+    missing = tmp_path / f"missing-{missing_input}"
+    arguments = ["review-diff", "--json-output", str(output)]
+    if missing_input == "description":
+        arguments.extend([str(diff_file), "--description-file", str(missing)])
+    else:
+        arguments.append(str(missing))
     with pytest.raises(SystemExit) as exc:
-        cli.main(["review-diff", str(tmp_path / "missing.diff")])
+        cli.main(arguments)
     assert exc.value.code == 1
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "missing.diff" in captured.err
+    assert missing.name in captured.err
+    assert runner.requests == []
+    assert not output.exists()
 
 
 def test_mp_publishes_host_validated_text_and_usage_after_review(

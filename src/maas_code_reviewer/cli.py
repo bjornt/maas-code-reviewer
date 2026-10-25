@@ -63,6 +63,11 @@ def handle_review_diff(args: argparse.Namespace) -> None:
     diff = (
         sys.stdin.read() if args.diff_file == "-" else Path(args.diff_file).read_text()
     )
+    description = (
+        args.description_file.read_text(encoding="utf-8")
+        if args.description_file is not None
+        else None
+    )
     repo_dir = args.repo_dir or Path.cwd()
     runner = _configured_runner(args)
     metrics = ReviewMetrics()
@@ -73,7 +78,7 @@ def handle_review_diff(args: argparse.Namespace) -> None:
         result_dict = review_diff_structured(
             runner,
             diff,
-            None,
+            description,
             repo_dir,
             agents_md=agents_md,
             max_diff_chars=args.max_diff_chars,
@@ -87,7 +92,7 @@ def handle_review_diff(args: argparse.Namespace) -> None:
         result = review_diff(
             runner,
             diff,
-            None,
+            description,
             repo_dir,
             agents_md=agents_md,
             max_diff_chars=args.max_diff_chars,
@@ -278,6 +283,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_review_options(diff_parser)
     _add_repo_option(diff_parser)
+    diff_parser.add_argument(
+        "--description-file",
+        type=Path,
+        metavar="FILE",
+        help="Read the change description from a UTF-8 file (e.g. the PR body).",
+    )
     diff_parser.add_argument(
         "--diff-prefix",
         metavar="PREFIX",

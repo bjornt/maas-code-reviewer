@@ -120,6 +120,10 @@ maas-code-reviewer review-diff --repo-dir /path/to/checkout changes.diff
 maas-code-reviewer review-diff --repo-dir /path/to/checkout \
   --json-output review.json --metrics metrics.json -
 
+# include the same description context as review-pr (the PR body, not its title)
+maas-code-reviewer review-diff --repo-dir /path/to/checkout \
+  --description-file description.md --json-output review.json changes.diff
+
 # with an operator profile overriding the built-in runtime defaults
 maas-code-reviewer review-diff --runtime-config /etc/maas-code-reviewer/runtime.toml \
   --repo-dir /path/to/checkout changes.diff
@@ -129,6 +133,11 @@ Without `--json-output`, stdout contains the validated general comment and every
 inline finding, including its repository-relative file and line. The original
 diff is retained independently of initial-context truncation. The agent can read
 the complete diff and inspect omitted files.
+
+`--description-file FILE` reads a UTF-8 change description into the same
+untrusted task-context field used by `review-pr`. Omit it to review a diff
+without a description. It works with both text and structured JSON output;
+the file is separate from diff stdin.
 
 Git's standard `a/` and `b/` prefixes, mnemonic prefixes such as `i/` and `w/`,
 custom prefixes (including multi-directory or non-directory strings), and
@@ -176,6 +185,186 @@ configuration, model authentication, a job, or a metrics artifact. Otherwise it
 clones the target branch, merges the source, and keeps the merged tree alive
 until the synchronous review and cleanup finish. Dry run prints text; normal
 mode posts a host-validated comment.
+
+### Comparing models against historical MAAS reviews
+
+Run these scripts from a trusted checkout of this project. Collection needs Git,
+network access to GitHub, and optionally `GITHUB_TOKEN` (or `GH_TOKEN`) for API
+rate limits. Replay needs the installed reviewer and its normal Workshop and
+inference setup; it never publishes a review.
+
+```sh
+# Inspect the last 20 first-parent commits on canonical/maas's default branch.
+uv run python scripts/collect_reviews.py --count 20 --output /tmp/maas-reviews
+
+# Exact provider/model identities; repeat --model to compare several models.
+# Every identity must be supported by omp and allowed by the runtime profile.
+uv run python scripts/replay_reviews.py /tmp/maas-reviews \
+  --run-id maas-model-comparison-20261025 \
+  --runtime-config /etc/maas-code-reviewer/runtime.toml \
+  --model openai-codex/gpt-6.1-sol
+```
+
+Collection defaults to `--repository canonical/maas`; `--ref REF` selects a
+different branch or revision. `--count N` counts inspected commits, not reviews:
+unreviewed commits remain visible in `manifest.json`. Each matching published
+maas-code-reviewer review becomes a separate case, including reviews of earlier
+PR revisions. Human reviews are saved separately and do not create replay cases;
+human replies and PR conversation comments are retained as discussion context.
+
+Collection does not overwrite existing inputs or baselines. Reusing an output
+directory requires the same selected commits and unchanged fetched data; use a
+new output directory for a refreshed branch, changed description, or different
+baseline model label.
+
+The human-review archive uses corpus schema version 2. Older corpora must be
+collected into a fresh output directory; existing model inputs, run results,
+and baselines are never silently rewritten or migrated.
+
+The corpus contains:
+
+```text
+repository.git/                       Git object cache for original snapshots
+manifest.json                         selected commits, cases, and skip reasons
+cases/<landed-sha>-pr<N>-review<ID>/
+  diff.patch                          reconstructed diff at the reviewed head
+  description.md                      fetched PR body
+  metadata.json                       revision and provenance information
+reviews/<model>/<case>.json            original published baseline
+human_reviews/<landed-sha>-pr<N>/
+  discussion.json                     human inline threads and PR conversation
+  review<ID>/
+    review.json                       one submitted human review, same JSON schema
+    metadata.json                     author, state, revision, and original data
+    diff.patch                        human-reviewed diff, when reconstructable
+    description.md                    fetched PR body
+runs/<run-id>/reviews/<model>/<case>/attempts/<attempt-id>/
+  attempt.json                        correlation IDs and review/export status
+  review.json                         validated replay review
+  metrics.json                        aggregate usage, cost, and model identity
+  otel/traces.jsonl                    raw omp trace export batches
+  otel/metrics.jsonl                   raw omp metric export batches
+  otel/langfuse-traces.jsonl           annotated trace batches for export
+```
+
+Model and run directory names are URL-encoded, so `openai-codex/gpt-6.1-sol`
+becomes `openai-codex%2Fgpt-6.1-sol`. Review files use the same
+`{"general_comment": "...", "inline_comments": {"path": {"line": "..."}}}`
+format as `review-diff --json-output`. Original general comments retain the
+published marker and preamble. Original inline findings use their original
+new-side coordinates, including outdated comments; findings that cannot fit
+this single-line, new-side schema are retained separately in case metadata.
+
+Human archives include all submitted reviews from GitHub accounts of type
+`User`, including approvals, dismissed reviews, and PR-author self-reviews;
+pending drafts and bot accounts are excluded. Each review stays attributed to
+its author, submission time, state, and original head SHA. `is_pr_author` in
+metadata distinguishes author responses/self-review when that identity is
+available. The account type is a classification, not proof of human authorship.
+
+Human `review.json` files contain the general comment and the review author's
+top-level, single-line, new-side findings at their original coordinates. Replies
+are not promoted into findings. Unsupported left-side/range coordinates remain
+verbatim in metadata, while `discussion.json` preserves human inline comments,
+replies (including replies to the bot), and general PR conversation comments
+with their GitHub IDs, URLs, authors, and thread links. Human reviews are saved
+even without a model baseline. If an old human head cannot be fetched, the
+review remains available with `diff_status = "unavailable"`; no landed diff is
+substituted.
+
+Human and model reviewers can have seen different revisions. Compare their
+`head_sha` values and saved diffs before interpreting a human finding as an LLM
+miss. Human comments are comparison evidence, not automatic correctness labels.
+All human answers remain outside the disposable replay checkout.
+
+Historical provenance has limits. GitHub's published review records its head
+commit, but not the original request's diff, description, or model identity.
+The collector reconstructs the diff using the merge-base of that reviewed head
+and the landed commit's first parent, rather than substituting the final merged
+patch. The PR body is the body available **at collection time**; earlier edits
+cannot be recovered by this script. The baseline model label defaults to
+`gemini-3.1-pro-preview`, matching the MAAS workflow observed when these scripts
+were added; use `--original-model ID` for another known configuration. This is
+an operator-supplied attribution, not per-review model verification. Case
+metadata records these limitations. Comparisons also span harness/prompt
+versions and should not be treated as a controlled model-only benchmark.
+
+Replay checks out each recorded review head in a disposable worktree and passes
+both saved diff and description to `review-diff`. Baselines and other model
+answers stay outside that checkout. `--run-id` is required: reuse it to resume
+the same comparison, or change it for an independent run. Every model execution
+has its own attempt ID and artifacts. `--overwrite` creates a new attempt; it
+never deletes earlier results. Original baselines remain outside the run tree,
+so the original model can also be replayed without replacing its historical
+review. Failures return nonzero, retain received telemetry and attempt status,
+and do not prevent other case/model combinations from running.
+`--reviewer PATH` selects another installed reviewer executable, and
+`--review-timeout SECONDS` / `--max-diff-chars N` select review limits.
+
+#### Exporting comparison traces to Langfuse
+
+The replay script reads standard OTLP trace-export environment variables on the
+coordinator. Set these before the replay command above; the trace endpoint is
+used verbatim, including `/v1/traces`:
+
+```sh
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT='http://langfuse.internal:3000/api/public/otel/v1/traces'
+export OTEL_EXPORTER_OTLP_TRACES_PROTOCOL='http/protobuf'
+# Supply LANGFUSE_AUTH_BASE64 privately: base64(public_key:secret_key).
+export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Basic%20${LANGFUSE_AUTH_BASE64},x-langfuse-ingestion-version=4"
+export OTEL_TRACES_EXPORTER=otlp
+export OTEL_SDK_DISABLED=false
+```
+
+Keep authentication in the operator environment or secret store, not in the
+corpus, runtime TOML, repository, or command arguments. Both percent-encoded
+`Basic%20...` and literal `Basic ...` header values are supported.
+
+| Variable | Replay exporter behavior |
+| --- | --- |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Complete trace URL; overrides the generic endpoint. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Fallback base URL; `/v1/traces` is appended. |
+| `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` | Overrides `OTEL_EXPORTER_OTLP_PROTOCOL`; only `http/protobuf` is supported. |
+| `OTEL_EXPORTER_OTLP_TRACES_HEADERS` | Overrides `OTEL_EXPORTER_OTLP_HEADERS`; comma-separated, percent-decoded header pairs. |
+| `OTEL_TRACES_EXPORTER` | `otlp` enables configured export; `none` disables remote export. |
+| `OTEL_SDK_DISABLED` | `true` disables remote export. |
+
+With no endpoint, replay only saves local artifacts. Regardless of these remote
+export toggles, replay collects local traces and metrics through the existing
+review-scoped receiver. Only traces are uploaded to Langfuse: model-call spans
+carry reported token usage. The annotated copy maps omp's per-call estimated
+USD cost to `gen_ai.usage.cost`, which Langfuse recognizes, and marks its source
+as `omp_estimate` in observation metadata. Existing standard cost values take
+precedence. Agent aggregate costs are not mapped again, avoiding double counting.
+The separate OTEL metric stream remains local. `metrics.json` remains the
+straightforward whole-review usage/cost summary; unavailable values remain null.
+Costs reported by the harness are not necessarily provider invoices. Historical
+baseline reviews do not acquire token or cost data merely by being collected.
+
+Every annotated span has `langfuse.session.id` set to the run ID, the
+`model-review-comparison` tag, and filterable `langfuse.trace.metadata.*` keys:
+`run_id`, `case_id`, `reviewed_commit`, `landed_commit`, `repository`, `model`,
+and `attempt_id`. Use these fields to compare the same input across models and
+separate repetitions. Raw batches are unchanged; the annotated copy keeps the
+original trace/span IDs and parent relationships.
+
+Export runs on the coordinator after the reviewer shuts down. All ambient
+`OTEL_*` and `LANGFUSE_*` variables and publication tokens are removed from the
+reviewer process; Langfuse credentials never enter Workshop. The runtime supplies
+its own local telemetry endpoint. Ambient `OTEL_SERVICE_NAME` and
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` do not change that runtime:
+message-content capture remains disabled.
+
+If upload fails after a successful review, rerun with the same `--run-id` and
+model to retry exporting the saved spans without another model invocation.
+Successful uploads are skipped on resume. Already received telemetry is also
+retained and exported for failed reviews, but a failed review still makes the
+run fail. An enabled exporter with no spans reports `no_spans`, not a successful
+upload. Endpoint/protocol errors fail before inference; transport errors and
+OTLP partial rejections return nonzero without printing credentials or remote
+response bodies. Both protobuf responses and JSON acknowledgements are accepted,
+including asynchronous-ingestion acknowledgements used by Langfuse servers.
+
 
 ### Shared review options
 
