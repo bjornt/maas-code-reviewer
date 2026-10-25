@@ -1,0 +1,36 @@
+[Unit]
+Description=Maas review inference-only loopback gateway
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+LoadCredential=gateway-token:/etc/maas-code-reviewer/auth-gateway-token
+ExecStart=/usr/bin/python3 -I /usr/local/lib/maas-code-reviewer/inference_proxy.py
+Restart=always
+RestartSec=2
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32
+SocketBindDeny=any
+SocketBindAllow=ipv4:tcp:4401
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

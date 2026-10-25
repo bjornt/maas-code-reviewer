@@ -263,11 +263,11 @@ interfaces are rejected outright.
 
 ### Real Workshop host setup
 
-The installed wheel was exercised on Ubuntu 26.04.1 with Workshop 0.9.9,
-LXD 6.10.0, the `omp` SDK's `latest/stable` channel (observed omp 18.12.2,
-SDK revision 250), and Python ACP 0.12.1. Observed revisions are evidence, not
-enforced pins. Full outcomes and remaining CI/publication gates are in
-[`PLAN.md`, section 8.4](PLAN.md#84-real-workshop-vm-execution-record).
+Installed-wheel and live GitHub Actions runs were exercised on Ubuntu 26.04.1
+with Workshop 0.9.9, LXD 6.10.0, the `omp` SDK's `latest/stable` channel
+(observed omp 18.12.2 / revision 250), Python ACP 0.12.1, and Actions runner
+2.338.0. Observed revisions are evidence, not enforced pins. See
+[`PLAN.md` sections 8.4–8.5](PLAN.md#84-real-workshop-vm-execution-record).
 
 On a dedicated Ubuntu host, install the host tools:
 
@@ -280,23 +280,25 @@ lxc version
 sdk info omp
 ```
 
-Install the trusted coordinator wheel as described above. Run the following with
-the Python interpreter from that installation, outside any reviewed checkout:
+Create policy outside every reviewed checkout, using the Python interpreter
+from the trusted coordinator installation. This example uses the verified VM's
+installation path and creates root-owned policy for the workflow default:
 
-```python
+```sh
+sudo /home/ubuntu/reviewer-env/bin/python -I - <<'PY'
 from importlib.resources import files
 from pathlib import Path
 import json
 import shutil
 
-root = Path.home() / ".config" / "maas-code-reviewer"
+root = Path("/etc/maas-code-reviewer")
 root.mkdir(parents=True, exist_ok=True)
 profile = root / "profile"
 shutil.copytree(str(files("maas_code_reviewer").joinpath("runtime/profile")),
                 profile, dirs_exist_ok=True)
 (profile / "models.yml").write_text('''providers:
   openai-codex:
-    baseUrl: http://127.0.0.1:4400
+    baseUrl: http://127.0.0.1:4401
     transport: pi-native
     apiKey: review-inference
 ''')
@@ -306,7 +308,7 @@ socket = "/var/snap/workshop/common/workshop/workshop.socket"
 [omp]
 channel = "latest/stable"
 [authentication]
-endpoint = "127.0.0.1:4400"
+endpoint = "127.0.0.1:4401"
 [profile]
 directory = ''' + json.dumps(str(profile)) + '''
 [model]
@@ -314,19 +316,46 @@ default = "openai-codex/gpt-6.1-sol"
 allowed = ["openai-codex/gpt-6.1-sol"]
 ''')
 print(root / "runtime.toml")
+PY
 ```
 
-This profile requires an operator-managed inference-only listener on host
-loopback port 4400, serving that exact model through the native gateway protocol.
-`review-inference` is a nonsecret literal: the listener injects upstream
-authentication itself. It must not expose provider credentials, broker/admin
-routes, arbitrary model/endpoint selection, or forwarding authority. The VM
-verification used a temporary filtered listener over SSH, not a newly installed
-production gateway. Supply a persistent scoped listener before unattended use.
+The example uses an authenticated native inference gateway at host loopback
+port 4000, with its bearer in `$HOME/auth-gateway-token`. Install the maintained
+inference-only front end from a **trusted coordinator source checkout**, never
+from PR input:
+
+```sh
+sudo install -d -m 0755 /usr/local/lib/maas-code-reviewer
+sudo install -m 0600 "$HOME/auth-gateway-token" /etc/maas-code-reviewer/auth-gateway-token
+sudo install -m 0644 scripts/review_inference_proxy.py \
+  /usr/local/lib/maas-code-reviewer/inference_proxy.py
+sudo install -m 0644 scripts/maas-review-inference.service \
+  /etc/systemd/system/maas-review-inference.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now maas-review-inference.service
+```
+
+`maas-review-inference.service` listens only on loopback port 4401 and exposes
+only `GET /v1/models` and `POST /v1/pi/stream`. It fixes the upstream endpoint,
+rejects forwarding/management authority, removes caller provider headers and
+credential/URL options, and loads the upstream bearer through systemd
+`LoadCredential`. `review-inference` in the container profile is a nonsecret
+literal; the real bearer stays on the host. Downstream cancellation closes the
+upstream inference stream. Restart the service after changing its code or
+installing a rotated credential file.
+
+The operator explicitly accepted inference authority over all advertised models;
+the filter preserves that catalog rather than pretending its bearer is model-
+scoped. The review profile still selects/authorizes its exact model separately.
+The provided upstream port 4000 is a user-managed SSH reverse forward: its
+availability remains an operator dependency. The old assistant-owned temporary
+port-4400 gateway/tunnel was retired after this deployment passed real reviews.
+An existing equivalently restricted inference-only service may replace this
+example, but never expose broker administration or credential export.
 
 ```sh
 maas-code-reviewer review-diff \
-  --runtime-config "$HOME/.config/maas-code-reviewer/runtime.toml" \
+  --runtime-config /etc/maas-code-reviewer/runtime.toml \
   --repo-dir /path/to/checkout changes.diff
 ```
 
@@ -533,8 +562,9 @@ Both automatic `pull_request_target` and manual `workflow_dispatch` review paths
 use `[self-hosted, linux, x64, maas-review-workshop]`. Provision a dedicated ephemeral
 runner with working host Workshop/LXD, uv, and a protected runtime profile before
 enabling these jobs. They do not install nested LXD or assume GitHub-hosted runners
-can reach a Workshop daemon. Actual deployment/workflow runs are not claimed by
-local shim verification.
+can reach a Workshop daemon. Both paths were exercised on authorized private
+test PRs with real Workshop and official one-job runner 2.338.0; the shim is not
+their deployment evidence.
 
 The workflows check out coordinator code at the trusted workflow SHA separately
 from PR input, disable persisted checkout credentials, install through its frozen
@@ -546,11 +576,42 @@ automatic review. Publication uses the step-scoped `GITHUB_TOKEN`; model access
 belongs to the runtime/gateway. Manual inputs preserve PR number, dry run, initial
 diff size, model, and total review deadline. Metrics are uploaded when produced.
 
-Before production cutover, verify real Workshop login-shell stdout cleanliness,
-exact SDK/interface/mount state, protected input/control boundaries, gateway and
-search reachability, cancellation/EOF/timeout/coordinator-death termination, host
-state deletion, and authorized GitHub/Launchpad/workflow dry runs. Publication
-testing must use explicitly authorized disposable proposals.
+Install the official Linux x64 runner using the repository's **Settings →
+Actions → Runners** instructions and verify its published checksum. Use a fresh
+runner directory and unique runner name for each job. Supply its short-lived
+registration token only to configuration, not as a workflow secret or argv value:
+
+```sh
+read -rp 'Repository URL: ' ACTIONS_RUNNER_INPUT_URL
+read -rp 'Unique runner name: ' runner_name
+read -rsp 'Runner registration token: ' ACTIONS_RUNNER_INPUT_TOKEN
+printf '\n'
+export ACTIONS_RUNNER_INPUT_URL ACTIONS_RUNNER_INPUT_TOKEN
+./config.sh --unattended --ephemeral --labels maas-review-workshop --name "$runner_name"
+unset runner_name ACTIONS_RUNNER_INPUT_TOKEN ACTIONS_RUNNER_INPUT_URL
+./run.sh
+```
+
+The runner deregisters after one job. Remove its used workspace/credentials and
+provision another ephemeral runner for the next job; this application does not
+install a persistent privileged runner pool. The personal token used to provision
+test fixtures/runners is not the step-scoped publication `GITHUB_TOKEN` and must
+not be passed into jobs or review containers. The verified deployment used the
+default `/etc/maas-code-reviewer/runtime.toml`, so repository-variable write
+permission was unnecessary.
+
+The live record includes automatic and manual publication, a manual dry run of
+poisoned coordinator/Workshop/omp/MCP/hook/dotenv/symlink input, metrics downloads,
+and a deliberately invalid deadline that failed with exit 2 and no publication
+or metrics artifact. Checkout logs show the trusted coordinator SHA separately
+from the PR SHA; host execution sentinels remained absent. See
+[`PLAN.md` section 8.5](PLAN.md#85-authorized-live-github-and-persistent-gateway-proof).
+
+Repeat the recorded host/mount/gateway/lifecycle and live workflow checks when
+deploying a different host/profile/SDK combination. Publication testing must use
+explicitly authorized disposable proposals. Live Launchpad API/publication
+verification still requires a separately authorized MP and account; GitHub proof
+is not relabeled as Launchpad proof.
 
 ## Migration and development
 
