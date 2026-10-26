@@ -20,7 +20,8 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import nullcontext
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
 
@@ -113,13 +114,19 @@ class WorkshopRunner:
         except OSError as exc:
             raise RunnerStartupError("Cannot allocate disposable review state") from exc
         job = _Job(self.config, root, deadline, telemetry)
-        job.start_guard()
+        with _timed("start cleanup guardian"):
+            job.start_guard()
         returned = False
         try:
-            job.prepare(request)
-            job.start()
+            with _timed("stage review payload"):
+                job.prepare(request)
+            with _timed("create workshop"):
+                job.start()
             process, task = job.agent_process(request)
-            result = asyncio.run(acp_client.run_acp(process, task, deadline=deadline))
+            with _timed("agent review session"):
+                result = asyncio.run(
+                    acp_client.run_acp(process, task, deadline=deadline)
+                )
             returned = True
             return result
         except OSError as exc:
@@ -128,7 +135,8 @@ class WorkshopRunner:
             ) from exc
         finally:
             primary = None if returned else sys.exception()
-            errors = job.cleanup()
+            with _timed("teardown workshop"):
+                errors = job.cleanup()
             if errors:
                 message = "Review cleanup failed: " + "; ".join(errors)
                 if primary is not None:
@@ -652,6 +660,20 @@ class _Job:
             lines.append(f"mount --bind -- {target} {target}")
             lines.append(f"mount -o remount,bind,ro -- {target}")
         return "\n".join(lines) + "\n"
+
+
+@contextmanager
+def _timed(phase: str) -> Iterator[None]:
+    """Log the wall-clock duration of one review lifecycle phase."""
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        print(
+            f"timing: {phase}: {time.perf_counter() - start:.2f}s",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def _require_external_policy(resource: Path, repository: Path) -> None:

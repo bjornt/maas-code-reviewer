@@ -148,6 +148,7 @@ class TestGitHubClientGetPrDiff:
         client = _make_client(fake_gh)
 
         with pytest.MonkeyPatch.context() as m:
+
             def raise_http_error(
                 _req: request.Request, timeout: float | None = None
             ) -> _FakeHttpResponse:

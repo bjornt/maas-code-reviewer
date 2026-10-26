@@ -12,8 +12,12 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
@@ -26,6 +30,12 @@ class ReplayError(ValueError):
     """A corpus entry or reviewer result cannot safely be replayed."""
 
 
+_LOG_LOCK = threading.Lock()
+_REVIEWERS: list[subprocess.Popen[str]] = []
+_REVIEWER_LOCK = threading.Lock()
+_CANCELLED = threading.Event()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("corpus", type=Path)
@@ -34,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime-config", type=Path)
     parser.add_argument("--review-timeout", type=_positive_float)
     parser.add_argument("--max-diff-chars", type=_positive_int)
+    parser.add_argument("--parallel", type=_positive_int, default=4)
     parser.add_argument("--reviewer", default="maas-code-reviewer")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args(argv)
@@ -48,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _replay(args: argparse.Namespace) -> int:
+    started = time.perf_counter()
     exporter = TraceExporter.from_environment()
     corpus = args.corpus.resolve(strict=True)
     bare = _inside(corpus / "repository.git", corpus)
@@ -65,121 +77,176 @@ def _replay(args: argparse.Namespace) -> int:
     if "/" in args.reviewer:
         args.reviewer = str(Path(args.reviewer).resolve(strict=True))
     failures = 0
+    units: list[tuple[_CaseInputs, str]] = []
     for metadata_path in cases:
         try:
-            case = _inside(metadata_path.parent, cases_root)
-            metadata = _metadata(_inside(metadata_path, case), case.name)
-            diff = _inside(case / "diff.patch", case)
-            description = _inside(case / "description.md", case)
-            if not diff.is_file() or not description.is_file():
-                raise ReplayError("Case needs diff.patch and description.md")
-            diff_text = diff.read_text(encoding="utf-8")
+            with _timed(f"load inputs for {metadata_path.parent.name}"):
+                case = _inside(metadata_path.parent, cases_root)
+                metadata = _metadata(_inside(metadata_path, case), case.name)
+                diff = _inside(case / "diff.patch", case)
+                description = _inside(case / "description.md", case)
+                if not diff.is_file() or not description.is_file():
+                    raise ReplayError("Case needs diff.patch and description.md")
+                diff_text = diff.read_text(encoding="utf-8")
+            inputs = _CaseInputs(
+                case=case,
+                metadata=metadata,
+                diff=diff,
+                description=description,
+                diff_text=diff_text,
+            )
         except (OSError, ValueError) as error:
             print(f"Error: {metadata_path}: {error}", file=sys.stderr)
             failures += 1
             continue
-        for model in dict.fromkeys(args.model):
-            try:
-                attempts = _inside(
-                    corpus
-                    / "runs"
-                    / quote(args.run_id, safe="")
-                    / "reviews"
-                    / quote(model, safe="")
-                    / case.name
-                    / "attempts",
-                    corpus,
-                )
-                attempts.mkdir(parents=True, exist_ok=True)
-                labels = {
-                    "run_id": args.run_id,
-                    "case_id": case.name,
-                    "reviewed_commit": metadata["head_sha"],
-                    "landed_commit": metadata["landed_commit"],
-                    "repository": metadata["repository"],
-                    "model": model,
-                }
-                existing = (
-                    None
-                    if args.overwrite
-                    else _successful_attempt(attempts, labels, diff_text)
-                )
-                if existing is not None:
-                    attempt, state = existing
-                    if exporter is not None and state["export_status"] == "succeeded":
-                        print(
-                            f"Skipping {case.name} [{model}]: successful result exists"
-                        )
-                        continue
-                    if not _export_attempt(attempt, state, exporter):
-                        failures += 1
-                    print(f"Resumed {case.name} [{model}] without inference")
-                    continue
-                attempt_id = uuid4().hex
-                attempt = _inside(attempts / attempt_id, attempts)
-                attempt.mkdir()
-                otel = attempt / "otel"
-                otel.mkdir()
-                for name in ("traces.jsonl", "metrics.jsonl"):
-                    (otel / name).touch()
-                state = {
-                    **labels,
-                    "attempt_id": attempt_id,
-                    "review_status": "running",
-                    "export_status": "pending" if exporter is not None else "disabled",
-                }
-                _write_json(attempt / "attempt.json", state)
-                try:
-                    _review(
-                        args,
-                        bare,
-                        metadata["head_sha"],
-                        diff,
-                        description,
-                        model,
-                        diff_text,
-                        attempt / "review.json",
-                        attempt / "metrics.json",
-                        otel,
-                    )
-                    state["review_status"] = "succeeded"
-                    _write_json(attempt / "attempt.json", state)
-                    exported = _export_attempt(attempt, state, exporter)
-                except (
-                    OSError,
-                    ValueError,
-                    subprocess.SubprocessError,
-                    KeyboardInterrupt,
-                ) as error:
-                    review_failed = state["review_status"] == "running"
-                    if review_failed:
-                        state["review_status"] = (
-                            "interrupted"
-                            if isinstance(error, KeyboardInterrupt)
-                            else "failed"
-                        )
-                    elif state["export_status"] == "pending":
-                        state["export_status"] = "failed"
-                    # Finalization must not replace the primary failure. A review
-                    # that finished remains resumable if export was interrupted.
-                    try:
-                        if review_failed:
-                            _export_attempt(attempt, state, exporter)
-                        else:
-                            _write_json(attempt / "attempt.json", state)
-                    except (OSError, ValueError):
-                        print(
-                            "Error: could not finalize review attempt",
-                            file=sys.stderr,
-                        )
-                    raise
-                if not exported:
-                    failures += 1
-                print(f"Reviewed {case.name} [{model}]")
-            except (OSError, ValueError, subprocess.SubprocessError) as error:
-                print(f"Error: {case.name} [{model}]: {error}", file=sys.stderr)
+        units.extend((inputs, model) for model in dict.fromkeys(args.model))
+    pool = ThreadPoolExecutor(max_workers=args.parallel)
+    futures = [
+        pool.submit(_attempt, args, corpus, bare, inputs, model, exporter)
+        for inputs, model in units
+    ]
+    try:
+        for future in as_completed(futures):
+            if not future.result():
                 failures += 1
+        pool.shutdown(wait=True)
+    except KeyboardInterrupt:
+        # Stop pending attempts first; running workers finish their own
+        # reviewer termination, worktree cleanup, and attempt finalization
+        # before this returns.
+        _CANCELLED.set()
+        pool.shutdown(wait=False, cancel_futures=True)
+        _terminate_reviewers()
+        pool.shutdown(wait=True)
+        raise
+    print(
+        f"Replay of {len(cases)} cases finished in "
+        f"{time.perf_counter() - started:.2f}s with {failures} failures",
+        flush=True,
+    )
     return 1 if failures else 0
+
+
+@dataclass(frozen=True)
+class _CaseInputs:
+    """Validated per-case inputs shared by every model attempt."""
+
+    case: Path
+    metadata: dict
+    diff: Path
+    description: Path
+    diff_text: str
+
+
+def _attempt(
+    args: argparse.Namespace,
+    corpus: Path,
+    bare: Path,
+    inputs: _CaseInputs,
+    model: str,
+    exporter: TraceExporter | None,
+) -> bool:
+    """Run or resume one case/model attempt; return whether it fully succeeded."""
+    case, metadata = inputs.case, inputs.metadata
+    attempt_started = time.perf_counter()
+    try:
+        attempts = _inside(
+            corpus
+            / "runs"
+            / quote(args.run_id, safe="")
+            / "reviews"
+            / quote(model, safe="")
+            / case.name
+            / "attempts",
+            corpus,
+        )
+        attempts.mkdir(parents=True, exist_ok=True)
+        labels = {
+            "run_id": args.run_id,
+            "case_id": case.name,
+            "reviewed_commit": metadata["head_sha"],
+            "landed_commit": metadata["landed_commit"],
+            "repository": metadata["repository"],
+            "model": model,
+        }
+        with _timed(f"check previous attempts for {case.name} [{model}]"):
+            existing = (
+                None
+                if args.overwrite
+                else _successful_attempt(attempts, labels, inputs.diff_text)
+            )
+        if existing is not None:
+            attempt, state = existing
+            if exporter is not None and state["export_status"] == "succeeded":
+                _log(f"Skipping {case.name} [{model}]: successful result exists")
+                return True
+            resumed = _export_attempt(attempt, state, exporter)
+            _log(f"Resumed {case.name} [{model}] without inference")
+            return resumed
+        _log(f"Reviewing {case.name} [{model}]")
+        attempt_id = uuid4().hex
+        attempt = _inside(attempts / attempt_id, attempts)
+        attempt.mkdir()
+        otel = attempt / "otel"
+        otel.mkdir()
+        for name in ("traces.jsonl", "metrics.jsonl"):
+            (otel / name).touch()
+        state = {
+            **labels,
+            "attempt_id": attempt_id,
+            "review_status": "running",
+            "export_status": "pending" if exporter is not None else "disabled",
+        }
+        _write_json(attempt / "attempt.json", state)
+        try:
+            _review(
+                args,
+                bare,
+                metadata["head_sha"],
+                inputs.diff,
+                inputs.description,
+                model,
+                inputs.diff_text,
+                attempt / "review.json",
+                attempt / "metrics.json",
+                otel,
+            )
+            state["review_status"] = "succeeded"
+            _write_json(attempt / "attempt.json", state)
+            exported = _export_attempt(attempt, state, exporter)
+        except (
+            OSError,
+            ValueError,
+            subprocess.SubprocessError,
+            KeyboardInterrupt,
+        ) as error:
+            review_failed = state["review_status"] == "running"
+            if review_failed:
+                state["review_status"] = (
+                    "interrupted"
+                    if _CANCELLED.is_set() or isinstance(error, KeyboardInterrupt)
+                    else "failed"
+                )
+            elif state["export_status"] == "pending":
+                state["export_status"] = "failed"
+            # Finalization must not replace the primary failure. A review
+            # that finished remains resumable if export was interrupted.
+            try:
+                if review_failed:
+                    _export_attempt(attempt, state, exporter)
+                else:
+                    _write_json(attempt / "attempt.json", state)
+            except (OSError, ValueError):
+                _log("Error: could not finalize review attempt", error=True)
+            raise
+        _log(
+            f"Reviewed {case.name} [{model}] "
+            f"in {time.perf_counter() - attempt_started:.2f}s"
+        )
+        return exported
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        _log(f"Error: {case.name} [{model}]: {error}", error=True)
+        return False
 
 
 def _successful_attempt(
@@ -211,43 +278,44 @@ def _successful_attempt(
 
 
 def _export_attempt(attempt: Path, state: dict, exporter: TraceExporter | None) -> bool:
-    try:
-        otel = _inside(attempt / "otel", attempt)
-        source = _inside(otel / "traces.jsonl", attempt)
-        destination = _inside(otel / "langfuse-traces.jsonl", attempt)
-        labels = {
-            key: state[key]
-            for key in (
-                "run_id",
-                "case_id",
-                "reviewed_commit",
-                "landed_commit",
-                "repository",
-                "model",
-                "attempt_id",
-            )
-        }
-        spans = annotate_traces(source, destination, labels)
-        if exporter is None:
-            state["export_status"] = "disabled"
-        elif not spans:
-            state["export_status"] = "no_spans"
-            print("Error: trace export received no spans", file=sys.stderr)
-        else:
-            state["export_status"] = "pending"
+    with _timed(f"export traces for {state['case_id']} [{state['model']}]"):
+        try:
+            otel = _inside(attempt / "otel", attempt)
+            source = _inside(otel / "traces.jsonl", attempt)
+            destination = _inside(otel / "langfuse-traces.jsonl", attempt)
+            labels = {
+                key: state[key]
+                for key in (
+                    "run_id",
+                    "case_id",
+                    "reviewed_commit",
+                    "landed_commit",
+                    "repository",
+                    "model",
+                    "attempt_id",
+                )
+            }
+            spans = annotate_traces(source, destination, labels)
+            if exporter is None:
+                state["export_status"] = "disabled"
+            elif not spans:
+                state["export_status"] = "no_spans"
+                _log("Error: trace export received no spans", error=True)
+            else:
+                state["export_status"] = "pending"
+                _write_json(attempt / "attempt.json", state)
+                exported = exporter.export_file(destination)
+                if exported != spans:
+                    raise ReplayError("Trace export did not export all recorded spans")
+                state["export_status"] = "succeeded"
+        except (OSError, ValueError) as error:
+            state["export_status"] = "failed"
+            _log(f"Error: trace export: {error}", error=True)
+        except KeyboardInterrupt:
+            state["export_status"] = "failed"
+            raise
+        finally:
             _write_json(attempt / "attempt.json", state)
-            exported = exporter.export_file(destination)
-            if exported != spans:
-                raise ReplayError("Trace export did not export all recorded spans")
-            state["export_status"] = "succeeded"
-    except (OSError, ValueError) as error:
-        state["export_status"] = "failed"
-        print(f"Error: trace export: {error}", file=sys.stderr)
-    except KeyboardInterrupt:
-        state["export_status"] = "failed"
-        raise
-    finally:
-        _write_json(attempt / "attempt.json", state)
     return state["export_status"] in {"disabled", "succeeded"}
 
 
@@ -294,15 +362,18 @@ def _review(
                 if value is not None:
                     command.extend([option, str(value)])
             command.append(str(diff))
-            _run_reviewer(command, root)
-            review, reported_metrics = _result(
-                staged_output, staged_metrics, model, diff_text
-            )
+            with _timed("run reviewer"):
+                _run_reviewer(command, root)
+            with _timed("validate review result"):
+                review, reported_metrics = _result(
+                    staged_output, staged_metrics, model, diff_text
+                )
         # Publish only after checkout teardown succeeds. Each file is replaced
         # atomically on its destination filesystem; the review is the commit marker.
         try:
-            _write_json(metrics, reported_metrics)
-            _write_json(output, review)
+            with _timed("publish review results"):
+                _write_json(metrics, reported_metrics)
+                _write_json(output, review)
         except (OSError, ValueError, KeyboardInterrupt):
             output.unlink(missing_ok=True)
             metrics.unlink(missing_ok=True)
@@ -325,9 +396,13 @@ def _run_reviewer(command: list[str], cwd: Path) -> None:
         text=True,
         start_new_session=True,
     ) as process:
+        with _REVIEWER_LOCK:
+            _REVIEWERS.append(process)
         try:
             stdout, stderr = process.communicate()
         finally:
+            with _REVIEWER_LOCK:
+                _REVIEWERS.remove(process)
             if process.poll() is None:
                 try:
                     os.killpg(process.pid, signal.SIGTERM)
@@ -338,6 +413,9 @@ def _run_reviewer(command: list[str], cwd: Path) -> None:
                 except subprocess.TimeoutExpired:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.communicate()
+        # Forward reviewer diagnostics (phase timings) to the replay log.
+        for line in stderr.splitlines():
+            _log(f"reviewer: {line}", error=True)
         if process.returncode:
             detail = stderr.strip() or stdout.strip() or "no diagnostic output"
             raise ReplayError(f"Reviewer exited {process.returncode}: {detail}")
@@ -347,14 +425,16 @@ def _run_reviewer(command: list[str], cwd: Path) -> None:
 def _checkout(bare: Path, checkout: Path, head_sha: str) -> Iterator[Path]:
     added = False
     try:
-        _git(bare, "worktree", "add", "--detach", str(checkout), head_sha)
+        with _timed(f"git worktree add {head_sha}"):
+            _git(bare, "worktree", "add", "--detach", str(checkout), head_sha)
         added = True
         yield checkout
     finally:
         # Also run after a failed add: Git can have registered a partial worktree.
-        cleanup = _git_process(
-            bare, "worktree", "remove", "--force", "--force", str(checkout)
-        )
+        with _timed("git worktree remove"):
+            cleanup = _git_process(
+                bare, "worktree", "remove", "--force", "--force", str(checkout)
+            )
         if cleanup.returncode and (added or checkout.exists()):
             raise ReplayError(f"Worktree cleanup failed: {cleanup.stderr.strip()}")
 
@@ -466,6 +546,33 @@ def _write_json(path: Path, value: dict) -> None:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _timed(phase: str) -> Iterator[None]:
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        _log(f"timing: {phase}: {time.perf_counter() - start:.2f}s")
+
+
+def _log(message: str, *, error: bool = False) -> None:
+    """Print exactly one whole line; concurrent attempts never interleave."""
+    with _LOG_LOCK:
+        print(message, file=sys.stderr if error else sys.stdout, flush=True)
+
+
+def _terminate_reviewers() -> None:
+    """Stop active reviewer processes when a parallel replay is interrupted."""
+    with _REVIEWER_LOCK:
+        processes = list(_REVIEWERS)
+    for process in processes:
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
 
 
 def _environment() -> dict[str, str]:

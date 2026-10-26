@@ -85,6 +85,7 @@ def review_merge_proposal(
     metrics: ReviewMetrics | None = None,
     model: str | None = None,
     timeout_seconds: float = 300,
+    repair_attempts: int = 1,
 ) -> str | None:
     """Review a merged target/source tree; return None for duplicate reviews.
 
@@ -118,6 +119,7 @@ def review_merge_proposal(
             metrics=metrics,
             model=model,
             timeout_seconds=timeout_seconds,
+            repair_attempts=repair_attempts,
         )
 
 
@@ -133,6 +135,7 @@ def review_pull_request(
     metrics: ReviewMetrics | None = None,
     model: str | None = None,
     timeout_seconds: float = 300,
+    repair_attempts: int = 1,
 ) -> dict:
     """Acquire PR metadata and review the caller's already prepared checkout."""
     diff = github.get_pr_diff(owner, repo, pr_number)
@@ -147,6 +150,7 @@ def review_pull_request(
         metrics=metrics,
         model=model,
         timeout_seconds=timeout_seconds,
+        repair_attempts=repair_attempts,
     )
 
 

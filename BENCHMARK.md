@@ -181,6 +181,29 @@ before calling a human finding an LLM miss. Human reviews do not add replay
 cases or become model context, and approvals/comments are not automatically
 treated as correctness labels.
 
+The reviewer repairs an invalid review instead of failing it outright: when the
+agent's terminal output fails JSON parsing or review-schema validation, the
+reviewer re-prompts it (a fresh session carrying the original task, the
+previous output, and the validation failure) up to `--repair-attempts` rounds
+(default 1; `0` disables repair). Token usage and cost aggregate across
+attempts, and a repair that still fails validation is rejected as before —
+nothing unvalidated is ever published.
+
+For a deterministic side-by-side view of every run, model, and case — wall
+time from the `invoke_agent` span, reported token usage, harness cost
+estimates, attempt status, and comment counts, next to the original baseline
+reviews — generate an HTML report:
+
+```sh
+uv run python scripts/compare_reviews.py "$CORPUS"
+```
+
+This writes the self-contained `$CORPUS/report.html` (use `--output` to pick
+another path). It covers all runs under `$CORPUS/runs/`, all models, and all
+cases, so it scales to larger commits counts and model counts unchanged.
+Wall-time, token, and cost data for the original reviews was not collected and
+is reported as unavailable.
+
 In Langfuse, filter by **session ID = `$RUN_ID`**. Every span also carries
 filterable metadata for `run_id`, `case_id`, `reviewed_commit`, `landed_commit`,
 `repository`, `model`, and `attempt_id`.
@@ -193,3 +216,40 @@ environment first. Do not rerun the timestamp assignment in step 4 when resuming
 Add `--overwrite` only when you intentionally want another model execution.
 It creates a new attempt without deleting earlier evidence. Use a different
 `--run-id` for an independent comparison.
+
+## 7. Classify review points across models
+
+The deterministic report shows timing, tokens, and cost. To compare what the
+reviewers actually said, run an LLM classification pass per case: an omp agent
+with the classification model (here `openrouter/moonshotai/kimi-k3`) reads the
+case's PR description, the original collected review under `$CORPUS/reviews/`,
+and one replay review per model under
+`$CORPUS/runs/$RUN_ID/reviews/<model>/<case>/attempts/<attempt>/review.json`,
+and writes `$CORPUS/analysis/<case-id>.json`:
+
+```json
+{
+  "schema_version": 1,
+  "case_id": "<case-id>",
+  "classifier_model": "<classification model>",
+  "generated": "<ISO-8601 UTC>",
+  "reviewers": [{"key": "<reviewer key>", "label": "<column heading>"}],
+  "issues": [
+    {
+      "summary": "<= 80 chars",
+      "detail": "<1-3 sentences>",
+      "kind": "correctness | performance | security | style | documentation | testing | scope | question",
+      "severity": "high | medium | low",
+      "reviewers": ["<reviewer keys that raised this issue>"]
+    }
+  ]
+}
+```
+
+The classifier merges equivalent review points across reviewers; each issue
+lists the reviewer keys that raised it, and general-comment points count as
+review points. `compare_reviews.py` renders any existing
+`analysis/<case-id>.json` as a per-case issues table with one column per
+reviewer (`✓` marks the reviewers that raised the issue); cases without an
+analysis file render no issues table. Regenerate the report after
+classification files appear.

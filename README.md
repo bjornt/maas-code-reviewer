@@ -301,6 +301,26 @@ and do not prevent other case/model combinations from running.
 `--reviewer PATH` selects another installed reviewer executable, and
 `--review-timeout SECONDS` / `--max-diff-chars N` select review limits.
 
+Each attempt logs a `Reviewing <case> [<model>]` start line, a
+`timing: <phase>: <seconds>s` line for every phase (case inputs,
+previous-attempt scan, worktree add/remove, reviewer run, validation, publish,
+trace export), and the total duration on the final `Reviewed <case> [<model>]`
+line, so slow phases stay visible during long replays.
+
+The reviewer itself logs the same `timing:` lines on its stderr for each
+Workshop lifecycle phase (cleanup guardian, payload staging, workshop creation,
+agent review session, teardown); replay forwards every reviewer stderr line
+prefixed with `reviewer:` so the split between workshop startup and inference
+stays visible per attempt.
+
+
+`--parallel N` (default 4) runs that many case/model attempts concurrently.
+Each attempt owns its own disposable worktree, reviewer process, and Workshop
+job; every status and timing line stays labeled with its case and model, so
+interleaved output remains attributable. An interrupt cancels attempts that
+have not started, terminates running reviewer processes, and waits for each
+worker's own worktree cleanup before exiting.
+
 #### Exporting comparison traces to Langfuse
 
 The replay script reads standard OTLP trace-export environment variables on the

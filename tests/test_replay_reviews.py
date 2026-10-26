@@ -81,6 +81,7 @@ record = {
 control_path = Path(os.environ["REPLAY_TEST_CONTROL"])
 control = json.loads(control_path.read_text())
 mode = control.get(args.model, "success")
+print("timing: fake reviewer phase: 0.00s", file=sys.stderr)
 args.otel_output.mkdir(parents=True, exist_ok=True)
 spans = [
     {
@@ -344,6 +345,30 @@ def test_replays_original_snapshot_and_description_without_baseline_answers(
     assert_clean(corpus)
 
 
+def test_replay_logs_timings_for_each_review_phase(
+    corpus: Corpus,
+    capsys,
+) -> None:
+    model = "provider/timed"
+    assert corpus.run("--model", model) == 0
+    captured = capsys.readouterr()
+    case_name = corpus.case.name
+    assert f"Reviewing {case_name} [{model}]" in captured.out
+    assert f"timing: load inputs for {case_name}" in captured.out
+    assert f"timing: check previous attempts for {case_name} [{model}]" in captured.out
+    assert "timing: git worktree add" in captured.out
+    assert "timing: run reviewer" in captured.out
+    assert "timing: validate review result" in captured.out
+    assert "timing: git worktree remove" in captured.out
+    assert "timing: publish review results" in captured.out
+    assert f"timing: export traces for {case_name} [{model}]" in captured.out
+    assert f"Reviewed {case_name} [{model}] in" in captured.out
+    assert "Replay of 1 cases finished in" in captured.out
+    assert "s with 0 failures" in captured.out
+    assert "reviewer: timing: fake reviewer phase: 0.00s" in captured.err
+    assert_clean(corpus)
+
+
 def test_resume_overwrite_and_incomplete_metrics(corpus: Corpus) -> None:
     model = "provider/resume"
     assert corpus.run("--model", model) == 0
@@ -505,7 +530,7 @@ def test_rejects_empty_and_dot_models(corpus: Corpus, model: str) -> None:
         ("--review-timeout", "0"),
         ("--review-timeout", "nan"),
         ("--review-timeout", "inf"),
-        ("--max-diff-chars", "0"),
+        ("--parallel", "0"),
     ],
 )
 def test_rejects_invalid_numeric_options(
@@ -575,6 +600,60 @@ def test_interrupt_stops_reviewer_and_removes_worktree(corpus: Corpus) -> None:
     assert attempt_state(attempt)["export_status"] == "disabled"
     assert len(trace_spans(attempt / "otel" / "traces.jsonl")) == 2
     assert len(trace_spans(attempt / "otel" / "langfuse-traces.jsonl")) == 2
+    assert_clean(corpus)
+    for call in corpus.calls():
+        with pytest.raises(ProcessLookupError):
+            os.kill(call["pid"], 0)
+
+
+def test_parallel_attempts_run_concurrently_and_stop_on_interrupt(
+    corpus: Corpus,
+) -> None:
+    models = ["provider/first-wait", "provider/second-wait"]
+    corpus.set_mode(**{model: "wait" for model in models})
+    command = [
+        sys.executable,
+        str(Path(replay_reviews.__file__)),
+        str(corpus.path),
+        "--run-id",
+        RUN_ID,
+        "--reviewer",
+        str(corpus.reviewer),
+        "--parallel",
+        "2",
+    ]
+    for model in models:
+        command.extend(["--model", model])
+    with subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as process:
+        try:
+            # Both waiting reviewers must be started at once: a sequential
+            # replay cannot reach a second log entry while the first sleeps.
+            deadline = time.monotonic() + 10
+            while process.poll() is None and len(corpus.calls()) < 2:
+                if time.monotonic() >= deadline:
+                    pytest.fail("Two reviewers did not run concurrently")
+                time.sleep(0.02)
+            assert process.poll() is None
+            process.send_signal(signal.SIGINT)
+            _, stderr = process.communicate(timeout=30)
+            assert process.returncode == 130
+            assert "Interrupted" in stderr
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+    assert len(corpus.calls()) == 2
+    for model in models:
+        attempt = corpus.attempts(model)[-1]
+        assert attempt_state(attempt)["review_status"] == "interrupted"
+        assert attempt_state(attempt)["export_status"] == "disabled"
+        assert not corpus.output(model).exists()
+        assert not corpus.metrics(model).exists()
     assert_clean(corpus)
     for call in corpus.calls():
         with pytest.raises(ProcessLookupError):

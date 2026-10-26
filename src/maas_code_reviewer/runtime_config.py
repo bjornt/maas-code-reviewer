@@ -282,9 +282,7 @@ def _name(value: Any, name: str, *, extra: str = "") -> str:
     if (
         not text.isascii()
         or any(map(str.isspace, text))
-        or not all(
-            part.isalnum() and part == part.lower() for part in parts.split(" ")
-        )
+        or not all(part.isalnum() and part == part.lower() for part in parts.split(" "))
     ):
         raise RunnerConfigurationError(
             f"{name} must be lowercase alphanumeric groups separated by "

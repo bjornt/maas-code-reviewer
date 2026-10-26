@@ -46,6 +46,7 @@ def handle_review_mp(args: argparse.Namespace) -> None:
         metrics=metrics,
         model=args.model,
         timeout_seconds=args.review_timeout or 300,
+        repair_attempts=args.repair_attempts,
     )
     if result is None:
         print("Already reviewed, skipping.")
@@ -86,6 +87,7 @@ def handle_review_diff(args: argparse.Namespace) -> None:
             model=args.model,
             timeout_seconds=args.review_timeout or 300,
             diff_prefix=args.diff_prefix,
+            repair_attempts=args.repair_attempts,
         )
         args.json_output.write_text(json.dumps(result_dict, indent=2))
     else:
@@ -100,6 +102,7 @@ def handle_review_diff(args: argparse.Namespace) -> None:
             model=args.model,
             timeout_seconds=args.review_timeout or 300,
             diff_prefix=args.diff_prefix,
+            repair_attempts=args.repair_attempts,
         )
         print(result)
     if args.metrics is not None:
@@ -127,6 +130,7 @@ def handle_review_pr(args: argparse.Namespace) -> None:
         metrics=metrics,
         model=args.model,
         timeout_seconds=args.review_timeout or 300,
+        repair_attempts=args.repair_attempts,
     )
     if args.metrics is not None:
         write_metrics(metrics, args.metrics)
@@ -223,6 +227,13 @@ def _add_review_options(parser: argparse.ArgumentParser) -> None:
         default=200_000,
         metavar="N",
         help="Maximum initial diff context in characters (default: 200000).",
+    )
+    parser.add_argument(
+        "--repair-attempts",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Repair rounds for an invalid review (default: 1; 0 disables repair).",
     )
     parser.add_argument(
         "--metrics",

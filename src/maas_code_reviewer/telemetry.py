@@ -99,7 +99,6 @@ class TelemetryCollector:
                 self.__exit__(*sys.exc_info())
         return self
 
-
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
@@ -154,7 +153,6 @@ class _OTLPHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         pass
-
 
     def do_POST(self) -> None:
         signal = _SIGNALS.get(self.path)

@@ -200,31 +200,104 @@ def test_completed_turn_requires_nonempty_terminal_text(
 
 
 @pytest.mark.parametrize("review", [review_diff, review_diff_structured])
-@pytest.mark.parametrize(
-    "text",
-    [
-        "before " + JSON_REVIEW,
-        JSON_REVIEW + " after",
-        JSON_REVIEW + JSON_REVIEW,
-        "```JSON\n" + JSON_REVIEW + "\n```",
-        "```json extra\n" + JSON_REVIEW + "\n```",
-        "```json\n" + JSON_REVIEW,
-        "```json\n" + JSON_REVIEW + "\n```\ntrailing",
-        "```json " + JSON_REVIEW + "```",
-        "```",
-        "```json\n\n```",
-        '{"general_comment": "ok", "inline_comments": {}, "extra": NaN}',
-    ],
-)
-def test_terminal_json_is_not_salvaged_or_repaired(
-    tmp_path: Path,
-    review,
-    text: str,
+def test_invalid_terminal_json_is_repaired_once_and_accepted(
+    tmp_path: Path, review
 ) -> None:
-    runner = runner_for(text)
+    runner = FakeAgentRunner(
+        outcomes=[
+            runner_for("```json extra\n" + JSON_REVIEW + "\n```").outcome,
+            runner_for(JSON_REVIEW).outcome,
+        ]
+    )
+    metrics = ReviewMetrics()
+    review(runner, DIFF, None, tmp_path, metrics=metrics)
+    assert len(runner.requests) == 2
+    assert "Repair request" in runner.requests[1].task_prompt
+    assert "Validation failure" in runner.requests[1].task_prompt
+    assert runner.requests[0].task_prompt in runner.requests[1].task_prompt
+    # The repair prompt carries the previous output as data for correction.
+    assert "```json extra" in runner.requests[1].task_prompt
+
+
+def test_repair_sums_usage_across_attempts(tmp_path: Path) -> None:
+    first = runner_for(
+        "not JSON",
+        usage=AgentUsage(
+            input_tokens=10,
+            output_tokens=5,
+            total_tokens=15,
+            cost=0.001,
+            cost_currency="USD",
+        ),
+    )
+    second = runner_for(
+        JSON_REVIEW,
+        usage=AgentUsage(
+            input_tokens=20,
+            output_tokens=8,
+            total_tokens=28,
+            cost=0.002,
+            cost_currency="USD",
+        ),
+    )
+    runner = FakeAgentRunner(outcomes=[first.outcome, second.outcome])
+    metrics = ReviewMetrics()
+    result = review_diff_structured(runner, DIFF, None, tmp_path, metrics=metrics)
+    assert result["general_comment"].startswith(REVIEW_MARKER)
+    assert metrics.tokens_input == 30
+    assert metrics.tokens_output == 13
+    assert metrics.tokens_total == 43
+    assert metrics.cost == 0.003
+    assert metrics.cost_currency == "USD"
+
+
+@pytest.mark.parametrize("review", [review_diff, review_diff_structured])
+def test_repair_exhausted_raises_with_combined_usage(tmp_path: Path, review) -> None:
+    invalid = json.dumps(
+        {"general_comment": "ok", "inline_comments": {"src/first.py": {"99": "x"}}}
+    )
+    first = runner_for(
+        invalid,
+        usage=AgentUsage(input_tokens=10, cost=0.001, cost_currency="USD"),
+    )
+    second = runner_for(
+        invalid,
+        usage=AgentUsage(input_tokens=20, cost=0.002, cost_currency="USD"),
+    )
+    runner = FakeAgentRunner(outcomes=[first.outcome, second.outcome])
+    with pytest.raises(RunnerResultError, match="Invalid review document") as caught:
+        review(runner, DIFF, None, tmp_path)
+    assert caught.value.usage.input_tokens == 30
+    assert caught.value.usage.cost == pytest.approx(0.003)
+    assert len(runner.requests) == 2
+    # The repair prompt carries the first failure for correction.
+    assert "99" in runner.requests[1].task_prompt
+
+
+@pytest.mark.parametrize("review", [review_diff, review_diff_structured])
+def test_zero_repair_attempts_keeps_single_shot_failure(tmp_path: Path, review) -> None:
+    runner = runner_for('{"general_comment": "ok", "inline_comments": []}')
+    with pytest.raises(RunnerResultError):
+        review(runner, DIFF, None, tmp_path, repair_attempts=0)
+    assert len(runner.requests) == 1
+
+
+@pytest.mark.parametrize("review", [review_diff, review_diff_structured])
+def test_unsalvageable_terminal_json_still_fails(tmp_path: Path, review) -> None:
+    """Formats no repair round can fix still fail after the bounded retries."""
+    runner = runner_for("```")
     with pytest.raises(RunnerResultError):
         review(runner, DIFF, None, tmp_path)
-    assert len(runner.requests) == 1
+    assert len(runner.requests) == 2
+
+
+def test_non_json_constants_fail_review_json_parsing(tmp_path: Path) -> None:
+    """NaN/Infinity constants are rejected as invalid review JSON."""
+    runner = runner_for('{"general_comment": "ok", "inline_comments": {}, "x": NaN}')
+    with pytest.raises(RunnerResultError, match="Non-JSON numeric constant: NaN"):
+        review_diff(runner, DIFF, None, tmp_path)
+    # One original attempt plus one repair round, both rejected.
+    assert len(runner.requests) == 2
 
 
 @pytest.mark.parametrize("review", [review_diff, review_diff_structured])

@@ -43,10 +43,7 @@ def raw_exchange(collector, headers, body=b"", *, shutdown_write=False):
     with socket.create_connection(("127.0.0.1", port), timeout=2) as connection:
         connection.sendall(
             b"POST /v1/metrics HTTP/1.0\r\n"
-            b"Content-Type: application/x-protobuf\r\n"
-            + headers
-            + b"\r\n"
-            + body
+            b"Content-Type: application/x-protobuf\r\n" + headers + b"\r\n" + body
         )
         if shutdown_write:
             connection.shutdown(socket.SHUT_WR)
@@ -60,9 +57,9 @@ def raw_exchange(collector, headers, body=b"", *, shutdown_write=False):
 def trace_request():
     request = ExportTraceServiceRequest()
     resource = request.resource_spans.add()
-    resource.resource.attributes.add(key="service.name").value.string_value = (
-        "maas-code-reviewer"
-    )
+    resource.resource.attributes.add(
+        key="service.name"
+    ).value.string_value = "maas-code-reviewer"
     scope = resource.scope_spans.add()
     scope.scope.name = "omp.tools"
     span = scope.spans.add(
@@ -238,9 +235,7 @@ def test_bounded_body_reads(
 ):
     monkeypatch.setattr(telemetry._OTLPHandler, "timeout", 0.05)
     with TelemetryCollector(tmp_path) as collector:
-        actual = raw_exchange(
-            collector, headers, body, shutdown_write=shutdown_write
-        )
+        actual = raw_exchange(collector, headers, body, shutdown_write=shutdown_write)
         assert actual == status
     assert (tmp_path / "metrics.jsonl").read_text() == ""
 
@@ -383,9 +378,7 @@ def test_chunk_extensions_and_trailers_preserve_metric_values(tmp_path):
         + b"\r\n0\r\nx-exporter: omp\r\n\r\n"
     )
     with TelemetryCollector(tmp_path) as collector:
-        assert raw_exchange(
-            collector, b"Transfer-Encoding: chunked\r\n", body
-        ) == 200
+        assert raw_exchange(collector, b"Transfer-Encoding: chunked\r\n", body) == 200
     document = json.loads((tmp_path / "metrics.jsonl").read_text())
     point = document["resourceMetrics"][0]["scopeMetrics"][0]["metrics"][0]["sum"][
         "dataPoints"

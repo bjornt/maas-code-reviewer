@@ -476,6 +476,29 @@ def test_snapshot_policy_inputs_and_credentials_are_isolated(
     assert [action for _, action in service.actions][-2:] == ["stop", "remove"]
 
 
+def test_run_logs_timing_for_each_workshop_phase(
+    config: RuntimeConfig,
+    review_request: ReviewRequest,
+    service: WorkshopService,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    async def agent(process, task, *, deadline):
+        return completed()
+
+    monkeypatch.setattr(workshop_runner.acp_client, "run_acp", agent)
+    assert WorkshopRunner(config).run(review_request) == completed()
+    err = capsys.readouterr().err
+    for phase in (
+        "timing: start cleanup guardian",
+        "timing: stage review payload",
+        "timing: create workshop",
+        "timing: agent review session",
+        "timing: teardown workshop",
+    ):
+        assert phase in err
+
+
 @pytest.mark.parametrize("suffix", ["8n5agii_", "_8n5agii", "8n__5agi", "________"])
 def test_temporary_directory_separators_do_not_prevent_workshop_startup(
     config: RuntimeConfig,

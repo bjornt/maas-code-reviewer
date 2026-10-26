@@ -253,9 +253,7 @@ def test_inference_tunnel_requires_explicit_connection(local_job, capsys) -> Non
         return capsys.readouterr().out.split()[2]
 
     assert inference_slot() == "-"
-    workshop_shim.main(
-        ["-p", str(project), "connect", "review/omp:review-inference"]
-    )
+    workshop_shim.main(["-p", str(project), "connect", "review/omp:review-inference"])
     assert inference_slot() == "review/system:review-inference"
     workshop_shim.main(["-p", str(project), "stop", "review"])
     assert inference_slot() == "-"
