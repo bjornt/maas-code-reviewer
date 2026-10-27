@@ -1,0 +1,8 @@
+{
+  "general_comment": "nit",
+  "inline_comments": {
+    "src/maasapiserver/v3/api/internal/handlers/agent.py": {
+      "210": "nit: you can avoid the noqa by using the annotated method which is no recommended by fastapi and use in placed like `src/maasapiserver/v3/api/public/handlers/operations.py`, however, we might want to do a larger refactor to fix this across the codebase at some point so this isn't necessary to change here. \nSee https://github.com/canonical/maas/pull/367#discussion_r3420501537"
+    }
+  }
+}

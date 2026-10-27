@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "case_id": "45bff65f436e683ff0159474c43f477bbefbde96-pr791-review5575788827",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T22:44:16Z",
+  "reviewers": [
+    {
+      "key": "gemini-3.1-pro-preview",
+      "label": "gemini-3.1-pro-preview (original)"
+    },
+    {
+      "key": "github-copilot/claude-opus-5",
+      "label": "github-copilot/claude-opus-5"
+    },
+    {
+      "key": "github-copilot/gemini-3.8-flash",
+      "label": "github-copilot/gemini-3.8-flash"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4-pro-0813",
+      "label": "openrouter/deepseek/deepseek-v4-pro-0813"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+      "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"
+    },
+    {
+      "key": "openrouter/moonshotai/kimi-k3",
+      "label": "openrouter/moonshotai/kimi-k3"
+    },
+    {
+      "key": "openrouter/z-ai/glm-5.3",
+      "label": "openrouter/z-ai/glm-5.3"
+    }
+  ],
+  "issues": [
+    {
+      "summary": "Prefer rack.boot_interface over current_config.interface_set.first()",
+      "detail": "make_RackController(subnet=subnet) already sets node.boot_interface to the interface created on the subnet (factory.py make_Node_with_Interface_on_Subnet); .first() only works because interface_count=1 and relies on Interface.Meta.ordering (\"created\"), so it would silently pick the wrong NIC if a second interface were ever added. Applies to test_discoveries.py:130,143 and test_discovery.py:44,55,80,87.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "gemini-3.1-pro-preview",
+        "github-copilot/claude-opus-5",
+        "openrouter/deepseek/deepseek-v4-pro-0813",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/z-ai/glm-5.3"
+      ]
+    },
+    {
+      "summary": "Extract helper for duplicated pinned-subnet rack setup",
+      "detail": "The 3-line setup (make_Subnet(cidr=\"10.0.0.0/8\") / make_RackController(subnet=subnet) / grab iface) is now repeated ~6 times across test_discovery.py and test_discoveries.py; a small helper returning (subnet, iface) would cut duplication and document intent. Non-blocking; consistent with existing test style.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/moonshotai/kimi-k3"
+      ]
+    },
+    {
+      "summary": "Decouple fixture gateway_ip default from the discovery IP",
+      "detail": "make_Subnet(cidr=\"10.0.0.0/8\") defaults gateway_ip to first+1 = 10.0.0.1 (factory.py:1555-1557), the same address used as the discovered IP in these tests; pre-existing and harmless for current assertions, but gateway_ip=None would remove the coincidence.",
+      "kind": "correctness",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5"
+      ]
+    },
+    {
+      "summary": "Pin subnet in test_does_not_fail_if_cannot_find_subnet too",
+      "detail": "The untouched test still gets a random subnet on its interface VLAN; the assertion would break if that random subnet contained 10.0.0.1 (negligible probability). Pinning a subnet and using an IP outside it would make it fully deterministic.",
+      "kind": "testing",
+      "severity": "low",
+      "reviewers": [
+        "openrouter/deepseek/deepseek-v4.1-flash-1017"
+      ]
+    }
+  ]
+}

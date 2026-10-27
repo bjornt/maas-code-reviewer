@@ -1,0 +1,62 @@
+{
+  "author": "motrilense",
+  "author_id": 83240569,
+  "base_sha": "24130990b883f0dbb037d7158b869bee55e1919e",
+  "description_source": "latest fetched PR body; NOT the review-time body",
+  "description_updated_at": "2026-10-20T15:45:37Z",
+  "diff_source": "git diff of merge-base(landed first parent, review head) to review head",
+  "diff_status": "collected",
+  "head_sha": "29d1bdafe1ad5e716138cfe0f1465cdf9c043b31",
+  "is_pr_author": false,
+  "landed_commit": "bb09b483f0f810b8f29a17a71b6a03959d90cbf8",
+  "pr_number": 645,
+  "published_review": {
+    "_links": {
+      "html": {
+        "href": "https://github.com/canonical/maas/pull/645#pullrequestreview-5585025877"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/canonical/maas/pulls/645"
+      }
+    },
+    "author_association": "MEMBER",
+    "body": "+1",
+    "commit_id": "29d1bdafe1ad5e716138cfe0f1465cdf9c043b31",
+    "copilot_code_review_effort": null,
+    "html_url": "https://github.com/canonical/maas/pull/645#pullrequestreview-5585025877",
+    "id": 5585025877,
+    "is_copilot_code_review": false,
+    "node_id": "PRR_kwDOBSgIKM8AAAABTOS7VQ",
+    "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/645",
+    "state": "DISMISSED",
+    "submitted_at": "2026-10-20T12:33:54Z",
+    "user": {
+      "avatar_url": "https://avatars.githubusercontent.com/u/83240569?v=4",
+      "events_url": "https://api.github.com/users/motrilense/events{/privacy}",
+      "followers_url": "https://api.github.com/users/motrilense/followers",
+      "following_url": "https://api.github.com/users/motrilense/following{/other_user}",
+      "gists_url": "https://api.github.com/users/motrilense/gists{/gist_id}",
+      "gravatar_id": "",
+      "html_url": "https://github.com/motrilense",
+      "id": 83240569,
+      "login": "motrilense",
+      "node_id": "MDQ6VXNlcjgzMjQwNTY5",
+      "organizations_url": "https://api.github.com/users/motrilense/orgs",
+      "received_events_url": "https://api.github.com/users/motrilense/received_events",
+      "repos_url": "https://api.github.com/users/motrilense/repos",
+      "site_admin": false,
+      "starred_url": "https://api.github.com/users/motrilense/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/motrilense/subscriptions",
+      "type": "User",
+      "url": "https://api.github.com/users/motrilense",
+      "user_view_type": "public"
+    }
+  },
+  "repository": "canonical/maas",
+  "review_id": 5585025877,
+  "review_submitted_at": "2026-10-20T12:33:54Z",
+  "review_url": "https://github.com/canonical/maas/pull/645#pullrequestreview-5585025877",
+  "state": "DISMISSED",
+  "unsupported_inline_comment_count": 0,
+  "unsupported_inline_comments": []
+}

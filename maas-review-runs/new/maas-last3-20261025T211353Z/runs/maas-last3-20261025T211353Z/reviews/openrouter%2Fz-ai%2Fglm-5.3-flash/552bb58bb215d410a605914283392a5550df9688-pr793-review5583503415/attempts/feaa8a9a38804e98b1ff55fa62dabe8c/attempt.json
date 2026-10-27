@@ -1,0 +1,11 @@
+{
+  "run_id": "maas-last3-20261025T211353Z",
+  "case_id": "552bb58bb215d410a605914283392a5550df9688-pr793-review5583503415",
+  "reviewed_commit": "d297cff533c9af43dd7b641979b140b3cf4dd5fa",
+  "landed_commit": "552bb58bb215d410a605914283392a5550df9688",
+  "repository": "canonical/maas",
+  "model": "openrouter/z-ai/glm-5.3-flash",
+  "attempt_id": "feaa8a9a38804e98b1ff55fa62dabe8c",
+  "review_status": "failed",
+  "export_status": "succeeded"
+}

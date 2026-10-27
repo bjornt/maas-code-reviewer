@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "case_id": "b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792-review5583045598",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T22:45:50Z",
+  "reviewers": [
+    {
+      "key": "gemini-3.1-pro-preview",
+      "label": "gemini-3.1-pro-preview (original)"
+    },
+    {
+      "key": "github-copilot/claude-opus-5",
+      "label": "github-copilot/claude-opus-5"
+    },
+    {
+      "key": "github-copilot/gemini-3.8-flash",
+      "label": "github-copilot/gemini-3.8-flash"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+      "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"
+    },
+    {
+      "key": "openrouter/z-ai/glm-5.3",
+      "label": "openrouter/z-ai/glm-5.3"
+    }
+  ],
+  "issues": [
+    {
+      "summary": "Vendor Mermaid JS; default CDN load breaks offline and CSP-hardened docs",
+      "detail": "docs/conf.py:354 enables sphinxcontrib.mermaid with defaults (mermaid_output_format='raw'), so the new diagram in docs/explanation/security.md imports mermaid.esm.min.mjs (and D3) from cdn.jsdelivr.net at page-view time. The snap ships docs built offline (MAAS_OFFLINE_DOCS=true make html, snap/snapcraft.yaml offline-docs part) where the diagram stays blank, and hardened/FIPS region controllers serve them under script-src 'self' 'sha256-...' (src/maasserver/templates/http/regiond.nginx.conf.template:65), blocking both the CDN fetch and the injected inline module script. Vendor the bundle under docs/_static and set mermaid_use_local/d3_use_local (following the docs/_static/fonts precedent), or pre-render to SVG; rendering in the snap-served build should be confirmed before merge since CI only runs make html.",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Install mermaid-cli or pre-render diagram for non-HTML (PDF) builds",
+      "detail": "For any builder other than HTML, sphinxcontrib-mermaid shells out to mmdc (mermaid-cli, Node + puppeteer), but .readthedocs.yaml declares formats: [pdf, htmlzip] and neither the RTD config nor REQPDFPACKS (docs/Makefile:16-17) installs Node/mermaid-cli, so the PDF build emits 'command mmdc cannot be run' and drops the diagram — or fails outright under sphinx.fail_on_warning. CI only runs make html, so this will not be caught. Add the upstream-documented RTD post_install npm install of @mermaid-js/mermaid-cli (plus puppeteer config and mermaid_params), pre-render the diagram as an image, or wrap the fence in a {only} html block.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Delete pre-existing snapd snapshots that survive snap remove --purge",
+      "detail": "docs/how-to-guides/decommission-maas.md:44: --purge only suppresses the automatic snapshot taken at removal; snapshots created earlier by snap save maas — which docs/how-to-guides/back-up-maas.md explicitly instructs readers to create — survive under /var/lib/snapd/snapshots and contain the full MAAS data directory, i.e. secrets. Add a snap saved / sudo snap forget <set-id> cleanup step and extend the verification step to check that no MAAS snapshots remain, otherwise the guide's stated goal of leaving no data behind is not met.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Remove the maas-test-db snap when decommissioning non-production installs",
+      "detail": "docs/how-to-guides/decommission-maas.md 'Remove the controllers' only removes the maas snap. POC/non-production deployments use the maas-test-db snap (see docs/how-to-guides/back-up-maas.md, which dumps from /var/snap/maas-test-db/common/postgres/sockets), whose data directory holds the MAAS database and credentials and is never removed, so MAAS data survives. Add sudo snap remove maas-test-db --purge where applicable.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Rotate BMC credentials and the rack/region shared secret on decommission",
+      "detail": "docs/how-to-guides/decommission-maas.md:35 'Revoke access' omits the two credential classes the new 'Inherent risks' section in explanation/security.md calls highest value: BMC credentials and the rack/region shared secret. Both existed in the database and in every retained backup, so they must be rotated on the hardware, not just deleted from MAAS — e.g. change the BMC credentials of every managed machine and treat the MAAS shared secret as compromised if backups are kept.",
+      "kind": "security",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "config-vault cannot delete Vault secrets; link Vault-side deletion steps",
+      "detail": "docs/how-to-guides/decommission-maas.md:58-59 links the maas config-vault CLI reference for deleting Vault secrets and the AppRole, but config-vault only provides configure/migrate/status subcommands (src/maasserver/management/commands/config_vault.py:226-263). Deletion is a Vault-side operation (e.g. vault kv delete, vault auth disable approle); link the HashiCorp Vault documentation or drop the CLI-reference link so it does not imply config-vault handles cleanup.",
+      "kind": "documentation",
+      "severity": "medium",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "State expected error output of post-removal verification commands",
+      "detail": "docs/how-to-guides/decommission-maas.md:47-51: after a successful purge, snap list maas prints 'error: no matching snaps installed' and exits non-zero, and ls /var/snap/maas/ fails with 'No such file or directory' — these errors are the success condition. As written the step reads as if it should produce output, so readers may mistake the errors for a failed uninstallation; document the expected output.",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/claude-opus-5", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Add PostgreSQL drop commands and postgresql snap removal to decommission",
+      "detail": "docs/how-to-guides/decommission-maas.md:58: the PostgreSQL bullet is not actionable — give commands such as sudo -u postgres dropdb maas and sudo -u postgres dropuser maas, and note that the PostgreSQL server may itself be the postgresql snap installed by the install guide, which must also be removed or sanitized if dedicated to MAAS.",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Add maas-openfga to the security architecture components and diagram",
+      "detail": "docs/explanation/security.md:51: the security architecture omits the maas-openfga service (src/maasopenfga, shipped in the snap) even though the Fine-grained authorization section below depends on it. It is a distinct process with its own PostgreSQL schema and a security-relevant trust boundary; add it to the diagram and component list, or state explicitly that it is internal to the region controller.",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Cover region controller deletion in the decommission guide",
+      "detail": "docs/how-to-guides/decommission-maas.md:39 'Remove the controllers' only covers deleting rack controllers from MAAS; region controllers — including the common region+rack install and multiple region controllers in HA deployments — are never deleted from MAAS before the snap is removed.",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Add Temporal to the architecture diagram or state it is simplified",
+      "detail": "docs/explanation/security.md:51: the component list adds Temporal (server on the region controller, MAAS Agent on each rack controller connecting to it), but the Mermaid diagram omits it, leaving the trust-boundary picture incomplete relative to the text. Add Temporal/Agent nodes to the 'MAAS control plane' subgraph or state that the diagram is simplified.",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": ["openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Consider bumping sphinxcontrib-mermaid pin from 2.0.2 to 2.1.1",
+      "detail": "docs/requirements.txt:23 pins sphinxcontrib-mermaid==2.0.2 (verified compatible: Python >=3.10, deps sphinx/jinja2/pyyaml, works with sphinx==7.4.7). 2.0.3 fixed local JS module imports on root-level pages and deferred rendering of diagrams hidden in unopened tabs, and 2.1.x adds a global mermaid_config option; consider bumping to the current 2.1.1.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Verify the #manage-api-keys anchor resolves in the built docs",
+      "detail": "docs/how-to-guides/decommission-maas.md:33 links to /how-to-guides/enhance-maas-security.md#manage-api-keys; verify that myst_heading_anchors = 4 slugification generates the expected anchor for the '### Manage API Keys' heading without case mismatch or missing-target warnings during the Sphinx build.",
+      "kind": "question",
+      "severity": "low",
+      "reviewers": ["github-copilot/gemini-3.8-flash"]
+    }
+  ]
+}

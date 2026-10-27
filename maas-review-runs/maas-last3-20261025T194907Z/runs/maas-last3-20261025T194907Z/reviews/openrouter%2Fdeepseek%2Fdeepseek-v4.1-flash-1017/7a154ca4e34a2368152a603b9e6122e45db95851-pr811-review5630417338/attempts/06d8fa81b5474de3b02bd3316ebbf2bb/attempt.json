@@ -1,0 +1,11 @@
+{
+  "run_id": "maas-last3-20261025T194907Z",
+  "case_id": "7a154ca4e34a2368152a603b9e6122e45db95851-pr811-review5630417338",
+  "reviewed_commit": "4403f4780c1b85f2d23b2c4156039ae208a00603",
+  "landed_commit": "7a154ca4e34a2368152a603b9e6122e45db95851",
+  "repository": "canonical/maas",
+  "model": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+  "attempt_id": "06d8fa81b5474de3b02bd3316ebbf2bb",
+  "review_status": "succeeded",
+  "export_status": "succeeded"
+}

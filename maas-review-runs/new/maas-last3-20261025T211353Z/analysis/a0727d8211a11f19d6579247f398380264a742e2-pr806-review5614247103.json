@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "case_id": "a0727d8211a11f19d6579247f398380264a742e2-pr806-review5614247103",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T22:44:30Z",
+  "reviewers": [
+    {
+      "key": "gemini-3.1-pro-preview",
+      "label": "gemini-3.1-pro-preview (original)"
+    },
+    {
+      "key": "github-copilot/claude-opus-5",
+      "label": "github-copilot/claude-opus-5"
+    },
+    {
+      "key": "github-copilot/gemini-3.8-flash",
+      "label": "github-copilot/gemini-3.8-flash"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4-pro-0813",
+      "label": "openrouter/deepseek/deepseek-v4-pro-0813"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+      "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"
+    },
+    {
+      "key": "openrouter/moonshotai/kimi-k3",
+      "label": "openrouter/moonshotai/kimi-k3"
+    },
+    {
+      "key": "openrouter/z-ai/glm-5.3",
+      "label": "openrouter/z-ai/glm-5.3"
+    },
+    {
+      "key": "openrouter/z-ai/glm-5.3-flash",
+      "label": "openrouter/z-ai/glm-5.3-flash"
+    }
+  ],
+  "issues": [
+    {
+      "summary": "Revert or repoint iptables link: wiki.ubuntu.com/IptablesHowTo is a 404",
+      "detail": "docs/reference/configuration-guides/logging.md:16 replaces the help.ubuntu.com/community/IptablesHowTo URL with https://wiki.ubuntu.com/IptablesHowTo, which returns HTTP 404 (no IptablesHowTo page exists on wiki.ubuntu.com). gemini-3.1-pro-preview, deepseek-v4-pro-0813 and kimi-k3 report the original help.ubuntu.com URL still resolves and ask for a revert; claude-opus-5, deepseek-v4.1-flash-1017, glm-5.3 and glm-5.3-flash verified the old URL now 301s to the same dead page (legacy wiki content never migrated), so the link was already broken and should instead point at a live target (e.g. the Ubuntu Server firewall/security docs, the iptables manpage, or netfilter.org).",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": [
+        "gemini-3.1-pro-preview",
+        "github-copilot/claude-opus-5",
+        "github-copilot/gemini-3.8-flash",
+        "openrouter/deepseek/deepseek-v4-pro-0813",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/moonshotai/kimi-k3",
+        "openrouter/z-ai/glm-5.3",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Fix same-class maas.io 404 at deploy-dpus-without-bmc.md:18",
+      "detail": "The maas.io/docs migration is incomplete: docs/how-to-guides/deploy-dpus-without-bmc.md:18 still links https://maas.io/docs/how-to-work-with-tags#heading--automatic-tags, which redirects to canonical.com/maas/docs/stable/how-to-guides/work-with-tags/ and returns 404 (verified live). Convert it to a root-relative internal link like the one added in deploy-dpus.md.",
+      "kind": "scope",
+      "severity": "medium",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/z-ai/glm-5.3",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Fix stale Full_Disk_Encryption link at docs/explanation/security.md:110",
+      "detail": "Same-class breakage outside the diff: docs/explanation/security.md:110 links https://help.ubuntu.com/community/Full_Disk_Encryption_Howto_2019, which redirects to wiki.ubuntu.com and 404s (legacy wiki content not migrated). Worth fixing if this PR aims to close out stale links.",
+      "kind": "scope",
+      "severity": "medium",
+      "reviewers": [
+        "github-copilot/claude-opus-5"
+      ]
+    },
+    {
+      "summary": "Run docs 'make linkcheck'; it flags the iptables 404 and gates this PR",
+      "detail": "docs/Makefile:108 provides 'make linkcheck' (sphinx linkcheck; linkcheck_ignore in docs/conf.py does not cover these hosts). It reports the wiki.ubuntu.com/IptablesHowTo 404 as [broken] and exits 1, so it would have flagged the regression before merge and will fail CI as-is; it is the cheapest verification for a link-only PR.",
+      "kind": "testing",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Drop redundant 'MAAS Documentation -' prefix on now-internal link",
+      "detail": "docs/how-to-guides/deploy-dpus.md:425: since the link is now an internal doc reference (/how-to-guides/manage-machines.md), the 'MAAS Documentation \\- ' prefix and escaped hyphen in the link text are redundant; simplify to '[How to Manage Machines](/how-to-guides/manage-machines.md)'.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "gemini-3.1-pro-preview",
+        "github-copilot/claude-opus-5"
+      ]
+    },
+    {
+      "summary": "Restore trailing two-space break dropped on deploy-dpus.md:425",
+      "detail": "The edited line in docs/how-to-guides/deploy-dpus.md lost the trailing two-space hard line-break that the surrounding 'Additional Resources' list items kept. Harmless for rendering in a list, but worth normalizing for consistency.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/z-ai/glm-5.3"
+      ]
+    },
+    {
+      "summary": "Tidy UFW link that silently redirects to UFW_development",
+      "detail": "The adjacent unchanged UFW link on logging.md:16 (https://wiki.ubuntu.com/UncomplicatedFirewall) only resolves by silently redirecting to the UFW_development page; it could be updated to a canonical target in the same pass as the iptables fix.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "openrouter/z-ai/glm-5.3"
+      ]
+    },
+    {
+      "summary": "Leave join-our-forum.md maas.io URL: form prefill, not navigation",
+      "detail": "The remaining maas.io occurrence in join-our-forum.md is only a Google-Form prefill parameter, not a navigation link, so it is not affected by the maas.io -> canonical.com/maas redirect and can be left out of this PR's scope.",
+      "kind": "scope",
+      "severity": "low",
+      "reviewers": [
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    }
+  ]
+}

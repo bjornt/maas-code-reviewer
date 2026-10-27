@@ -1,0 +1,16 @@
+{
+  "model_name": "openrouter/deepseek/deepseek-v4-pro-0813",
+  "agent_name": "omp",
+  "agent_version": "18.12.2",
+  "tokens_thinking": null,
+  "tokens_input": 36278,
+  "tokens_output": 2556,
+  "tokens_cache_read": 39652,
+  "tokens_cache_write": null,
+  "tokens_total": 78486,
+  "cost": 0.032591198,
+  "cost_currency": "USD",
+  "agents_md_read": true,
+  "diff_lines": 16,
+  "diff_size_bytes": 659
+}

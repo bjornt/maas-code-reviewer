@@ -1,0 +1,12 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nThe new endpoint is minimal and follows existing handler/response patterns (the 403-via-middleware, 404, and 422 paths are all covered by tests and the ValidationException\u2192422 mapping is confirmed). Two substantive concerns: (1) the endpoint authenticates the client cert but never authorizes it \u2014 the RequireClientCertMiddleware only stores request.scope[\"client_cn\"] and no handler compares it against {system_id}, so any enrolled agent can enumerate another rack controller's DHCP/network configuration; (2) the wire contract is built directly on service-layer stdlib dataclasses (VlanData/SubnetData/\u2026), so the public JSON schema is coupled to internal DTO renames. Minor: one line exceeds the project's 79-char width.",
+  "inline_comments": {
+    "src/maasapiserver/v3/api/internal/handlers/agent.py": {
+      "212": "Authorization gap: RequireClientCertMiddleware only checks that a client_cn exists (see v3/middlewares/client_certificate.py:38) and stores it in request.scope, but it is never compared to {system_id}. Any enrolled agent can GET /agents/<other-system-id>/dhcp-data and read another rack's subnets, DNS/ntp servers, gateway IPs and HA peer IPs. Consider binding the scope CN to system_id here (or in the middleware) before returning cross-controller DHCP data.",
+      "215": "Style: this line is 89 characters, exceeding the 79-char width configured in pyproject.toml ([tool.ruff] line-length = 79). E501 is ignored by lint, but AGENTS.md requires 79 chars."
+    },
+    "src/maasapiserver/v3/api/internal/models/responses/agent.py": {
+      "73": "Maintainability: the response fields reuse service-layer DTOs (VlanData, SubnetData, IPRangeData, InterfaceData, KeaHAConfig) directly. This couples the public API/JSON contract to internal maasservicelayer dataclasses \u2014 renaming any DTO field silently changes the wire schema. Other responses (e.g. interfaces.py LinkResponse) define their own Pydantic response types; consider mirroring that here."
+    }
+  }
+}

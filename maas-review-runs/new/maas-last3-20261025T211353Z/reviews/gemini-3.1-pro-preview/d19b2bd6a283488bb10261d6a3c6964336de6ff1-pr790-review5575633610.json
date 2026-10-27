@@ -1,0 +1,15 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one — suggestions may be\n> incorrect, please verify before acting.\n\n\nThe `DHCPService` implementation adds important and comprehensive data collection for Kea DHCP configuration. However, there is a systemic and critical performance issue with N+1 database queries. Many repository queries (`get_for_interfaces`, `get_by_id`, `get_many`, `get_for_nodes`) are awaited inside `for` loops (and sometimes nested loops), heavily impacting event-loop performance and increasing latency significantly. Since a rack controller may have multiple interfaces, subnets, and static IPs, this design should be changed to use bulk queries (fetching all necessary related models before the loop) or SQL JOINs whenever possible.\n\nThere is also a logic concern where `HA` configurations might not be retrieved correctly if the subnet belongs to a relay VLAN, as relay VLANs do not inherently hold the target's primary/secondary rack controller identifiers.",
+  "inline_comments": {
+    "src/maasservicelayer/services/dhcp.py": {
+      "145": "N+1 query: `vlans_service.get_many` is awaited inside a loop over `vlans.values()`. Consider extracting all VLAN IDs and using a single `with_relay_vlan_id_in` query, if available, or fetch them concurrently.",
+      "256": "Logic error: If `subnet` is on a relay VLAN, `vlan` here is the relay VLAN. Relay VLANs usually don't have `primary_rack_id` or `secondary_rack_id` set, but DHCP service relies on the target VLAN's HA pair. You likely need to traverse `vlan.relay_vlan_id` to get the base VLAN for the HA configuration, similar to what is done in `_get_boot_rack_controller_ips` on line 649.",
+      "414": "Severe N+1 query problem: This loop queries `get_for_interfaces` per interface. Inside it, `get_by_id` and `get_many` are further invoked per IP. Since `_get_best_interface_with_ip_on_vlan` is called per subnet (and multiple times during HA evaluation), this causes exponential database queries. Fetch all relevant interfaces, subnets, and IPs in batch outside of this method or before the loops.",
+      "550": "N+1 query: Awaiting `get_for_ip` inside a loop over `ips`. Batch querying for all required IPs using a unified condition would prevent executing a query for every IP address.",
+      "560": "N+1 query: `get_parents` is called iteratively over `interfaces`. Use a bulk lookup to fetch the parents of all interfaces at once.",
+      "625": "N+1 query: Looping over `addresses` and individually querying `get_by_id` for Subnets and VLANs.",
+      "653": "N+1 query: Iterating over `rack_id`s and making sequential requests for nodes and static IP addresses.",
+      "699": "N+1 query: Nested iteration over `dns_servers` and `regions_by_id.values()`, triggering queries for nodes and subnets. Batch these evaluations to avoid database round trips in tight loops."
+    }
+  }
+}

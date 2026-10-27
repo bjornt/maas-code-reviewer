@@ -1,0 +1,2 @@
+`make_RackController` automatically creates an interface with a random subnet cidr (see `make_ip4_or_6_network`)
+when no subnet is passed. This can overlap with subnets in tests created with pre-defined cidrs. This ensures that the first interface created is the one required by the test.

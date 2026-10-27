@@ -1,0 +1,16 @@
+{
+  "model_name": "openrouter/z-ai/glm-5.3",
+  "agent_name": "omp",
+  "agent_version": "18.12.2",
+  "tokens_thinking": null,
+  "tokens_input": 32639,
+  "tokens_output": 38265,
+  "tokens_cache_read": 334656,
+  "tokens_cache_write": null,
+  "tokens_total": 405560,
+  "cost": 0.08225264900000001,
+  "cost_currency": "USD",
+  "agents_md_read": true,
+  "diff_lines": 248,
+  "diff_size_bytes": 12140
+}

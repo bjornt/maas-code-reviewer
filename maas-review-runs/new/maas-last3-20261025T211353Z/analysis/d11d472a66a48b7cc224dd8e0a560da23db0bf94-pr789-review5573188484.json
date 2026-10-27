@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "case_id": "d11d472a66a48b7cc224dd8e0a560da23db0bf94-pr789-review5573188484",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T22:44:04Z",
+  "reviewers": [
+    {
+      "key": "gemini-3.1-pro-preview",
+      "label": "gemini-3.1-pro-preview (original)"
+    },
+    {
+      "key": "github-copilot/claude-opus-5",
+      "label": "github-copilot/claude-opus-5"
+    },
+    {
+      "key": "github-copilot/gemini-3.8-flash",
+      "label": "github-copilot/gemini-3.8-flash"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4-pro-0813",
+      "label": "openrouter/deepseek/deepseek-v4-pro-0813"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+      "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"
+    },
+    {
+      "key": "openrouter/z-ai/glm-5.3",
+      "label": "openrouter/z-ai/glm-5.3"
+    },
+    {
+      "key": "openrouter/z-ai/glm-5.3-flash",
+      "label": "openrouter/z-ai/glm-5.3-flash"
+    }
+  ],
+  "issues": [
+    {
+      "summary": "Sentinel 0 makes explicit burst=0/conn=0 unreachable, contradicting commit",
+      "detail": "if_missing=0 (src/maasserver/config.py:335,341; src/provisioningserver/config.py:902,908) makes an explicitly configured 0 indistinguishable from unset, and the `or 60` / `or 100` fallbacks (src/maasserver/regiondservices/http.py:140-141; src/provisioningserver/rackdservices/http.py:255-256) silently rewrite it to the default. NGINX's burst=0 (reject excess instead of queueing) therefore cannot be configured, contradicting the commit message's claim that it 'stays configurable'; min=0 now loudly accepts a value that is then silently replaced. Suggested fixes: use a non-colliding sentinel (None or -1) with an explicit check, keep min=1 to reject 0, or correct the commit message and docs.",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": [
+        "gemini-3.1-pro-preview",
+        "github-copilot/claude-opus-5",
+        "github-copilot/gemini-3.8-flash",
+        "openrouter/deepseek/deepseek-v4-pro-0813",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/z-ai/glm-5.3",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Rack validates with Number not Int; fractional values break NGINX config",
+      "detail": "src/provisioningserver/config.py:902,908 uses formencode `Number(min=0)`, which accepts floats (e.g. 10.5), while the region side uses `Int`. The fractional value is interpolated uncoerced into the rack template (src/provisioningserver/rackdservices/http.py:255-256) as `burst=10.5;` / `limit_conn api_conn 10.5;`, which nginx rejects, breaking the rack proxy reload. This also falsifies the commit message's claim that 'both are validated with Int'; use Int for both options (or coerce with int() at the read site as setup_dns.py:60 does for the BIND counterparts).",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": [
+        "gemini-3.1-pro-preview",
+        "github-copilot/claude-opus-5",
+        "github-copilot/gemini-3.8-flash",
+        "openrouter/deepseek/deepseek-v4-pro-0813",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/z-ai/glm-5.3",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Docs wrongly claim empty api_rate_limit_rate turns off limiting when hardened",
+      "detail": "security-hardening.md states 'leaving it empty turns off both rate and connection limiting', but when hardening is active the empty value falls back to the hardening default 20r/s (src/maasserver/regiondservices/http.py:125), so limiting stays on and hardened deployments have no way to disable it via this key. Hardened setups that had explicitly emptied it to disable throttling will be silently re-throttled after this change. Rephrase, e.g. 'when hardening is not active, leaving it empty turns off limiting; when hardening is active, the defaults above always apply'.",
+      "kind": "documentation",
+      "severity": "medium",
+      "reviewers": [
+        "gemini-3.1-pro-preview",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/z-ai/glm-5.3",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Upgrade behavior change needs a release note and doc coverage",
+      "detail": "Unhardened deployments that were being (unintentionally) rate-limited by the previous defaults will silently stop being limited unless api_rate_limit_rate is set; operators relying on that should be told. Related gaps worth documenting: setting only api_rate_limit_burst or api_conn_limit does nothing because limiting is gated on api_rate_limit_rate (so pre-existing burst/conn values become no-ops), and deployments that explicitly wrote api_rate_limit_rate=20r/s keep limiting after upgrade since only truly absent keys flip to off.",
+      "kind": "documentation",
+      "severity": "medium",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "New tests never exercise the changed if_missing config defaults",
+      "detail": "The new tests construct http._Configuration directly (src/maasserver/regiondservices/tests/test_http.py:200) or fake ClusterConfiguration values (src/provisioningserver/rackdservices/tests/test_http_binding.py:131), so they would pass even if the if_missing defaults had not changed — the actual regression being fixed. Add config-level assertions opening RegionConfiguration/ClusterConfiguration on an empty fixture and asserting the new defaults (\"\"/0/0).",
+      "kind": "testing",
+      "severity": "medium",
+      "reviewers": [
+        "openrouter/deepseek/deepseek-v4.1-flash-1017"
+      ]
+    },
+    {
+      "summary": "Magic fallback literals 20r/s/60/100 duplicated across both services and docs",
+      "detail": "The hardening-default literals now appear in both config.py docstrings, both http.py fallbacks, the docs table, and the tests; region and rack can drift. Hoist them into one shared constant set alongside the other hardening defaults.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017"
+      ]
+    },
+    {
+      "summary": "Stale test_http_hardening.py docstring says limits apply regardless of hardening",
+      "detail": "src/provisioningserver/rackdservices/tests/test_http_hardening.py still documents 'Rate/burst/conn limits apply with defaults regardless of hardening', which is now wrong after this change and should be updated.",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": [
+        "openrouter/deepseek/deepseek-v4.1-flash-1017"
+      ]
+    },
+    {
+      "summary": "Rack http.py rebinds api_rate_limit_rate in place, obscuring sentinel resolution",
+      "detail": "src/provisioningserver/rackdservices/http.py:239 reassigns the same variable inside the try block, making the raw config value and the effective value easy to conflate; a distinct name (as done region-side with rate_limit_rate) keeps them separable.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5"
+      ]
+    }
+  ]
+}

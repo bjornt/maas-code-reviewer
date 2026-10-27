@@ -1,0 +1,11 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one — suggestions may be\n> incorrect, please verify before acting.\n\n\nThank you for updating the documentation links. Most of the changes are correct and accurately reflect Canonical's current web properties and documentation locations (such as the migration to `canonical.com` domain structures). However, one of the updates actually introduces a broken link to the `iptables` documentation. Please see the inline comments for details.",
+  "inline_comments": {
+    "docs/how-to-guides/deploy-dpus.md": {
+      "425": "Since this link now points to an internal page within the documentation repository, you might consider simplifying the link text to just `[How to Manage Machines](/how-to-guides/manage-machines.md)` to avoid redundancy with the 'MAAS Documentation \\-' prefix."
+    },
+    "docs/reference/configuration-guides/logging.md": {
+      "16": "The previous URL for the `iptables` documentation (`https://help.ubuntu.com/community/IptablesHowTo`) was actually correct. The Ubuntu Community Help Wiki is hosted at `help.ubuntu.com/community/`, whereas `wiki.ubuntu.com` is generally reserved for Ubuntu development, teams, and specs. There is no `IptablesHowTo` page on `wiki.ubuntu.com`, so this change will result in a broken link. Please revert this specific URL change."
+    }
+  }
+}

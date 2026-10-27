@@ -1,0 +1,4 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nThe implementation of the `GET /agents/{system_id}/dhcp-data` endpoint and its corresponding response model and tests is well-structured and aligns cleanly with the existing internal API patterns. The test coverage is comprehensive, exercising success, client certificate enforcement, 404, and 422 scenarios.",
+  "inline_comments": {}
+}

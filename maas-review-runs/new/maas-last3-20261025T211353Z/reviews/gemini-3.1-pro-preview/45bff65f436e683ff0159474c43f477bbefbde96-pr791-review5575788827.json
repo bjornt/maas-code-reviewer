@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one — suggestions may be\n> incorrect, please verify before acting.\n\n\nThis is a great fix for the intermittent test failures caused by random subnet collisions. By explicitly defining the subnet and wiring it correctly to both the rack controller and the `StaticIPAddress`, we avoid creating overlapping or mismatched networks. The test changes look solid and well-reasoned.",
+  "inline_comments": {
+    "src/maasserver/api/tests/test_discoveries.py": {
+      "130": "Optional: If `rack.boot_interface` or `rack.get_boot_interface()` is available, it might be slightly more concise than fetching the first interface from the configuration set, but this approach is perfectly fine."
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nThe change cleanly implements disabling NGINX rate and connection limits by default when hardening is not active, while preserving explicit configuration overrides and hardening defaults. The commit message and docstrings mention that `0` is supported for `api_rate_limit_burst` (to reject excess requests immediately rather than queuing), but using `or 60` / `or 100` prevents configuring `0` for burst or connection limits.",
+  "inline_comments": {
+    "src/maasserver/config.py": {
+      "334": "The commit description mentions that an unset/sentinel value is intended so that `burst=0` (rejecting excess requests without queueing) remains configurable. However, because `0` is used as the unconfigured sentinel (`if_missing=0`) and services use `configuration.api_rate_limit_burst or 60`, an explicit setting of `0` cannot be distinguished from unset and is coerced to `60`.",
+      "340": "Since `api_conn_limit` uses `0` as the unconfigured default and `http.py` evaluates `configuration.api_conn_limit or 100`, setting `api_conn_limit = 0` in configuration is overwritten with `100`. Furthermore, `limit_conn` in NGINX requires a strictly positive integer, so `0` would be invalid syntax if ever passed through. Consider updating the description or clarifying the docstring."
+    },
+    "src/maasserver/regiondservices/http.py": {
+      "140": "Using `configuration.api_rate_limit_burst or 60` evaluates truthiness, which coerces `0` to `60`. If `0` is intended to be a valid burst value (as described in the commit message: 'so a burst of 0 (reject excess requests instead of queueing them) stays configurable'), this prevents users from setting burst to 0. If `0` is meant to be the sentinel for default fallback, `None` would be needed as the sentinel instead, or the commit description should be updated.",
+      "141": "Similarly, `configuration.api_conn_limit or 100` treats `0` as falsy and falls back to `100`. If `0` is purely a sentinel meaning 'use default', this is functional, but explicit `0` cannot be passed to NGINX (NGINX `limit_conn` also requires a value > 0)."
+    },
+    "src/provisioningserver/config.py": {
+      "899": "The commit message notes that 'both are validated with Int so a fractional value cannot reach the NGINX config', but `ClusterConfiguration` uses `Number(min=0, if_missing=0)` rather than `Int(min=0, if_missing=0)`. `formencode.validators.Number` accepts floats (e.g. `10.5`), which could produce invalid NGINX syntax like `burst=10.5` or `limit_conn api_conn 10.5;`. Consider using `Int` instead of `Number` for consistency with `RegionConfiguration`."
+    },
+    "src/provisioningserver/rackdservices/http.py": {
+      "255": "Because `0` is falsy, `api_rate_limit_burst or 60` falls back to `60` when `api_rate_limit_burst` is set to `0`. If configuring a burst of `0` is supported, this prevents that configuration.",
+      "256": "Evaluating `api_conn_limit or 100` replaces `0` with `100`. If `0` is only meant as the unconfigured sentinel, this works, but prevents explicitly specifying `0`."
+    }
+  }
+}

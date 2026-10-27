@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one — suggestions may be\n> incorrect, please verify before acting.\n\n\nOverall, the new security documentation is well-structured and aligns with SSDLC requirements. The Mermaid integration is set up properly for the architecture diagram, and the decommissioning steps are thorough. The links (including dynamically generated CLI reference docs like `config-vault`) are correctly referenced. I have one minor suggestion regarding the uninstallation verification steps to prevent potential user confusion, but otherwise this looks great.",
+  "inline_comments": {
+    "docs/how-to-guides/decommission-maas.md": {
+      "47": "It might be helpful to mention that running `snap list maas` and `ls /var/snap/maas/` will return errors (e.g. `error: no matching snaps installed` and `No such file or directory`) if the removal was successful. Without this note, users might mistakenly think the commands failing indicates that the uninstallation failed."
+    }
+  }
+}

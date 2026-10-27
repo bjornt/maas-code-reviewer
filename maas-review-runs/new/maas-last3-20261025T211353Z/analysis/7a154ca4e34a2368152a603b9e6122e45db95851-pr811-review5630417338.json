@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "case_id": "7a154ca4e34a2368152a603b9e6122e45db95851-pr811-review5630417338",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T22:45:34Z",
+  "reviewers": [
+    {
+      "key": "gemini-3.1-pro-preview",
+      "label": "gemini-3.1-pro-preview (original)"
+    },
+    {
+      "key": "github-copilot/claude-opus-5",
+      "label": "github-copilot/claude-opus-5"
+    },
+    {
+      "key": "github-copilot/gemini-3.8-flash",
+      "label": "github-copilot/gemini-3.8-flash"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4-pro-0813",
+      "label": "openrouter/deepseek/deepseek-v4-pro-0813"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+      "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"
+    },
+    {
+      "key": "openrouter/z-ai/glm-5.3",
+      "label": "openrouter/z-ai/glm-5.3"
+    },
+    {
+      "key": "openrouter/z-ai/glm-5.3-flash",
+      "label": "openrouter/z-ai/glm-5.3-flash"
+    }
+  ],
+  "issues": [
+    {
+      "summary": "Fix dead FDE link: new wiki.ubuntu.com URL returns HTTP 404",
+      "detail": "docs/explanation/security.md:110 now points to https://wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019, which returns HTTP 404; the old help.ubuntu.com/community URL redirects to that same missing page, so the host swap fixes nothing. Suggested live target: https://documentation.ubuntu.com/security/security-features/storage/encryption-full-disk; `make linkcheck` (docs pre-commit hook) fails on the current URL.",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": [
+        "gemini-3.1-pro-preview",
+        "github-copilot/claude-opus-5",
+        "github-copilot/gemini-3.8-flash",
+        "openrouter/deepseek/deepseek-v4-pro-0813",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/z-ai/glm-5.3"
+      ]
+    },
+    {
+      "summary": "Correct the proselint rationale: no check flags U+2019 apostrophes",
+      "detail": "The stated 'proselint compliant' goal does not hold: stock proselint has no rule against curly apostrophes, and its only quote check (typography.symbols.curly_quotes) prefers curly quotes and instead flags straight double quotes such as those at manage-machine-groups.md:430. Repo tooling (docs/_scripts/generate_cli_docs.py fix_curly_quotes) also normalizes toward curly quotes, i.e. the opposite direction of this PR.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/z-ai/glm-5.3",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Avoid mixed typography: curly double quotes remain beside straight apostrophes",
+      "detail": "Only U+2019 was converted; U+201C/U+201D remain on the same edited lines (manage-machine-groups.md:424,437; use-cases-server-lifecycle-management.md:19,28; what-maas-shouldn-t-do.md:46,50), leaving mixed typography within single sentences. Pick one convention and apply it to apostrophes, double quotes, and dashes together.",
+      "kind": "style",
+      "severity": "medium",
+      "reviewers": [
+        "gemini-3.1-pro-preview",
+        "github-copilot/claude-opus-5",
+        "openrouter/deepseek/deepseek-v4-pro-0813",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/z-ai/glm-5.3",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Complete the sweep: most docs files still use curly apostrophes",
+      "detail": "deploying-machines.md got only the URL edit and still has U+2019 at lines 19, 27, 33, 42, 62, 80, and ~36 other docs files (plus the Canonical style guide) still use curly apostrophes, so the converted files diverge from the rest of the corpus and the sweep is inconsistent even within files the PR touches.",
+      "kind": "style",
+      "severity": "medium",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/z-ai/glm-5.3",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Add enforcement: repo runs no proselint check, so style will drift",
+      "detail": "Nothing in the repo runs proselint: docs CI (test-docs in .github/workflows/ci.yaml) runs pymarkdownlnt + Vale + make html, and no proselint config exists. Without an enforceable rule (Vale rule or pre-commit hook), the converted convention is unverifiable and will drift back.",
+      "kind": "testing",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/z-ai/glm-5.3"
+      ]
+    },
+    {
+      "summary": "Split unrelated link changes out of this typography PR",
+      "detail": "The two URL swaps (deploying-machines.md:40 juju.is -> canonical.com/juju, security.md:110) are unrelated to the stated proselint/typography goal; keep them in a separate commit so the punctuation diff stays mechanically reviewable.",
+      "kind": "scope",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Fix pre-existing typos on edited lines in use-cases doc",
+      "detail": "Lines already edited in use-cases-server-lifecycle-management.md contain pre-existing typos worth fixing in the same pass: line 71 stray '.\u2013' ('in 1-2 years.\u2013 and tooling'), line 15 'MAAS.(as referenced' missing space after the period, line 31 'installations. and its' lowercase sentence start.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "openrouter/z-ai/glm-5.3"
+      ]
+    },
+    {
+      "summary": "Add the reformat commit to .git-blame-ignore-revs",
+      "detail": "If the repo-wide quote normalization lands, register the reformat commit in .git-blame-ignore-revs so git blame stays usable.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "openrouter/z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "summary": "Spot-check rendered HTML output for apostrophe consistency",
+      "detail": "docs/conf.py:322 myst_enable_extensions does not include smartquotes; worth one spot-check of `make html` output that rendered apostrophes still look consistent with neighbouring pages.",
+      "kind": "question",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5"
+      ]
+    }
+  ]
+}

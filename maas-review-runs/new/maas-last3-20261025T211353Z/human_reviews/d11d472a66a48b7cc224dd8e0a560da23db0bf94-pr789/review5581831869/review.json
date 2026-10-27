@@ -1,0 +1,8 @@
+{
+  "general_comment": "LGTM with a question",
+  "inline_comments": {
+    "src/maasserver/regiondservices/http.py": {
+      "142": "why not the same as above? Most probably there is a special usage of `0` comparing to unset. Right?\n\n```suggestion\n            \"api_rate_limit_burst\": burst or 60,\n```"
+    }
+  }
+}

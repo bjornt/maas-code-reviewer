@@ -1,0 +1,8 @@
+{
+  "general_comment": "minor request",
+  "inline_comments": {
+    ".github/workflows/lp-bug-update.yaml": {
+      "24": "Could you use the same approach as above and create a CLOSING_KEYWORDS for all the keywords?"
+    }
+  }
+}

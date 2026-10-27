@@ -1,0 +1,16 @@
+{
+  "model_name": "github-copilot/gemini-3.8-flash",
+  "agent_name": "omp",
+  "agent_version": "18.12.2",
+  "tokens_thinking": null,
+  "tokens_input": 77591,
+  "tokens_output": 626,
+  "tokens_cache_read": 254707,
+  "tokens_cache_write": null,
+  "tokens_total": 332924,
+  "cost": 0.079643775,
+  "cost_currency": "USD",
+  "agents_md_read": true,
+  "diff_lines": 78,
+  "diff_size_bytes": 4829
+}

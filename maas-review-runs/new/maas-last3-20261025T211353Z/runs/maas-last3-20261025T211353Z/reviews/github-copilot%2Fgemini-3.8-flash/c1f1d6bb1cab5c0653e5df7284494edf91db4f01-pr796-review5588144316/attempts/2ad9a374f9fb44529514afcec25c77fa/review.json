@@ -1,0 +1,15 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nOverall, centralizing the mock setup in `create_services_mock()` significantly reduces boilerplate and mock duplication across the test suite.\n\nTwo key areas need attention:\n1. In `src/tests/fixtures/__init__.py`, `create_services_mock()` uses `Mock(ServiceCollectionV3)` as the container and `Mock(service_class)` for each service attribute. Because `Mock` is synchronous by default, calling async service methods creates standard `Mock` return values rather than awaitable coroutines (unless `spec_set` or `AsyncMock` is used for coroutine methods). This is also why `RuntimeWarning` filter warnings had to be added in `base.py`. Additionally, `Mock(ServiceCollectionV3)` as a container mock allows arbitrary nonexistent attributes to be accessed on `services_mock` unless `spec_set=True` or `create_autospec` is used.\n2. The PR description notes: \"Also improve the `AsyncOpenFGAClientMock` to make it possible to pass pool permissions.\" However, `AsyncOpenFGAClientMock` in `src/tests/maasapiserver/fixtures/app.py` was not updated to handle pool permissions (e.g., `can_edit_machines_in_pool`, `can_view_machines_in_pool`, or `list_pools_with_*`), which still require manual `AsyncMock(OpenFGAClient)` mocking in tests like `test_machines.py` and `test_resource_pools.py`.",
+  "inline_comments": {
+    "src/tests/fixtures/__init__.py": {
+      "66": "`create_services_mock` instantiates `Mock(service_class)` using `Mock` rather than `AsyncMock` (or `create_autospec(service_class)`). For services whose methods are async coroutines, this results in synchronous mock calls unless overridden per test, which causes unawaited coroutine warnings when endpoints execute service methods directly.",
+      "71": "`Mock(ServiceCollectionV3)` allows dynamically creating arbitrary attributes on `services_mock` if a nonexistent service name is misspelled in a test. Consider using `spec_set=ServiceCollectionV3` or validating against `ServiceCollectionV3.__annotations__` so typos fail fast."
+    },
+    "src/tests/maasapiserver/fixtures/app.py": {
+      "108": "Type hinting `services_mock: Mock` correctly reflects the mock object type. If possible, consider typing it as `Mock | ServiceCollectionV3` or using a `Protocol` to retain IDE autocompletion for service attributes while indicating it is a mock."
+    },
+    "src/tests/maasapiserver/v3/api/public/handlers/base.py": {
+      "39": "Suppressing `'RuntimeWarning: coroutine .* was never awaited'` across test methods works around unawaited mock coroutines, but it also risks silencing genuine bugs where production handlers forget to `await` async service methods. Addressing whether service mocks return coroutines (e.g. via `AsyncMock` for async methods in `create_services_mock`) would allow removing these broad warning filters."
+    }
+  }
+}

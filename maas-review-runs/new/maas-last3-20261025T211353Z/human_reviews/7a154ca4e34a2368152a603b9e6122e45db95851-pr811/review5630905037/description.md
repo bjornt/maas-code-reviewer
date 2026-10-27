@@ -1,0 +1,1 @@
+The PR updates some documentation files to be `proselint` compliant.

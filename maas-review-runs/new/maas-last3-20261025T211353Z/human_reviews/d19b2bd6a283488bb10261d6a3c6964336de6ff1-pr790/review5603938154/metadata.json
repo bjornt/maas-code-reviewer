@@ -1,0 +1,62 @@
+{
+  "author": "wyattrees",
+  "author_id": 25443786,
+  "base_sha": "bb09b483f0f810b8f29a17a71b6a03959d90cbf8",
+  "description_source": "latest fetched PR body; NOT the review-time body",
+  "description_updated_at": "2026-10-21T20:23:57Z",
+  "diff_source": "git diff of merge-base(landed first parent, review head) to review head",
+  "diff_status": "collected",
+  "head_sha": "8ae306af8f7425e9728beaab0d9f270a54b743cf",
+  "is_pr_author": true,
+  "landed_commit": "d19b2bd6a283488bb10261d6a3c6964336de6ff1",
+  "pr_number": 790,
+  "published_review": {
+    "_links": {
+      "html": {
+        "href": "https://github.com/canonical/maas/pull/790#pullrequestreview-5603938154"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/canonical/maas/pulls/790"
+      }
+    },
+    "author_association": "CONTRIBUTOR",
+    "body": "",
+    "commit_id": "8ae306af8f7425e9728beaab0d9f270a54b743cf",
+    "copilot_code_review_effort": null,
+    "html_url": "https://github.com/canonical/maas/pull/790#pullrequestreview-5603938154",
+    "id": 5603938154,
+    "is_copilot_code_review": false,
+    "node_id": "PRR_kwDOBSgIKM8AAAABTgVPag",
+    "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/790",
+    "state": "COMMENTED",
+    "submitted_at": "2026-10-21T17:52:30Z",
+    "user": {
+      "avatar_url": "https://avatars.githubusercontent.com/u/25443786?u=6b6c8cd6ec72251b69b3756ff197b345f4e2f358&v=4",
+      "events_url": "https://api.github.com/users/wyattrees/events{/privacy}",
+      "followers_url": "https://api.github.com/users/wyattrees/followers",
+      "following_url": "https://api.github.com/users/wyattrees/following{/other_user}",
+      "gists_url": "https://api.github.com/users/wyattrees/gists{/gist_id}",
+      "gravatar_id": "",
+      "html_url": "https://github.com/wyattrees",
+      "id": 25443786,
+      "login": "wyattrees",
+      "node_id": "MDQ6VXNlcjI1NDQzNzg2",
+      "organizations_url": "https://api.github.com/users/wyattrees/orgs",
+      "received_events_url": "https://api.github.com/users/wyattrees/received_events",
+      "repos_url": "https://api.github.com/users/wyattrees/repos",
+      "site_admin": false,
+      "starred_url": "https://api.github.com/users/wyattrees/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/wyattrees/subscriptions",
+      "type": "User",
+      "url": "https://api.github.com/users/wyattrees",
+      "user_view_type": "public"
+    }
+  },
+  "repository": "canonical/maas",
+  "review_id": 5603938154,
+  "review_submitted_at": "2026-10-21T17:52:30Z",
+  "review_url": "https://github.com/canonical/maas/pull/790#pullrequestreview-5603938154",
+  "state": "COMMENTED",
+  "unsupported_inline_comment_count": 0,
+  "unsupported_inline_comments": []
+}

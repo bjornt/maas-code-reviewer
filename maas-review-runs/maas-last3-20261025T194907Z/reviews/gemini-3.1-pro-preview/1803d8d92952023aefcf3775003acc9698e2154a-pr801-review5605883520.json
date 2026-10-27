@@ -1,0 +1,4 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one — suggestions may be\n> incorrect, please verify before acting.\n\n\nThe implementation of the new agent DHCP data endpoint looks solid. The integration with the service layer and the mapping to the response model are straightforward and well-tested. Security is correctly enforced via client certificates as shown in the test suite. The test coverage correctly validates success and failure paths (e.g., 403, 404, 422). I found no bugs or major issues.\n\nGreat work overall!",
+  "inline_comments": {}
+}

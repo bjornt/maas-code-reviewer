@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nDocs-only link refresh. I verified the external targets: https://ubuntu.com/enterprise-store/docs/ (live, replaces documentation.ubuntu.com/enterprise-store), https://docs.cloud-init.io/ (live), https://canonical.com/maas (maas.io redirects there), and https://canonical.com/multipass (multipass.run redirects there) all resolve. The new internal link in docs/how-to-guides/deploy-dpus.md (`/how-to-guides/manage-machines.md`) matches the repository's dominant site-root convention and the file exists. One regression: the iptables link in docs/reference/configuration-guides/logging.md now points to a 404. No code, security, or performance impact.",
+  "inline_comments": {
+    "docs/reference/configuration-guides/logging.md": {
+      "16": "This new target 404s: https://wiki.ubuntu.com/IptablesHowTo does not exist on the migrated Ubuntu wiki (Special:Search for \"iptables\" returns only /UFW and /UFW_development), and the legacy help.ubuntu.com/community/IptablesHowTo now redirects there, so the link remains broken. The sibling UFW link on this line works only because wiki.ubuntu.com/UncomplicatedFirewall redirects to /UFW_development. Point iptables at a live authoritative source instead, e.g. https://ubuntu.com/server/docs/how-to/security/firewalls (which documents iptables/ufw and firewall logging), or drop the link."
+    }
+  }
+}

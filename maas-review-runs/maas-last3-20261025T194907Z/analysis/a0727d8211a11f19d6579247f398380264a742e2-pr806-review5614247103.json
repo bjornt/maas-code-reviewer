@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "case_id": "a0727d8211a11f19d6579247f398380264a742e2-pr806-review5614247103",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T20:45:00Z",
+  "reviewers": [
+    {"key": "gemini-3.1-pro-preview", "label": "gemini-3.1-pro-preview (original)"},
+    {"key": "github-copilot/claude-opus-5", "label": "github-copilot/claude-opus-5"},
+    {"key": "openrouter/deepseek/deepseek-v4.1-flash-1017", "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"}
+  ],
+  "issues": [
+    {
+      "summary": "Replace iptables link in logging.md; new wiki.ubuntu.com URL is a 404",
+      "detail": "docs/reference/configuration-guides/logging.md:16 changes the iptables link to https://wiki.ubuntu.com/IptablesHowTo, which is a dead page. gemini-3.1-pro-preview says the old help.ubuntu.com/community/IptablesHowTo URL was correct and asks to revert; claude-opus-5 and deepseek-v4.1-flash-1017 verified the old URL now redirects to the same 404 and propose a live replacement (e.g. https://documentation.ubuntu.com/server/how-to/security/firewalls/ or the netfilter packet-filtering HOWTO).",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Fix 'Secure your deployment with HTTP' to HTTPS in air-gapped guide",
+      "detail": "docs/how-to-guides/set-up-air-gapped-maas.md:18 (just above the edited line 20) tells readers to secure the Enterprise Store deployment with HTTP; for a store serving snaps to restricted networks this should read HTTPS. Out of the diff but in the same section.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Fix dead maas.io tags-doc link in deploy-dpus-without-bmc.md:18",
+      "detail": "Not in this diff but the same class of breakage: docs/how-to-guides/deploy-dpus-without-bmc.md:18 links to https://maas.io/docs/how-to-work-with-tags, which redirects to canonical.com/maas/docs/stable/how-to-guides/work-with-tags/ and 404s; the in-repo equivalent is /how-to-guides/manage-machine-groups.md#manage-tags-in-maas.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Run make linkcheck; it is not bypassed for wiki.ubuntu.com",
+      "detail": "linkcheck_ignore in docs/conf.py is nearly empty and does not exempt wiki.ubuntu.com, and make -C docs linkcheck is wired as a pre-commit hook (docs/.sphinx/.pre-commit-config.yaml:11), so the introduced 404 would be flagged; running linkcheck on this branch is the cheap verification for a link-refresh PR.",
+      "kind": "testing",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Simplify manage-machines link text; drop stale escaped hyphen",
+      "detail": "docs/how-to-guides/deploy-dpus.md:425 now points at an internal page (/how-to-guides/manage-machines.md), so the 'MAAS Documentation \\-' prefix is redundant and the escaped hyphen only existed for the old external title; e.g. '[Manage machines](/how-to-guides/manage-machines.md)' is clearer.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Normalize trailing double-space hard breaks in deploy-dpus.md list",
+      "detail": "docs/how-to-guides/deploy-dpus.md:425 lost its trailing two-space hard break while sibling lines 426-428 keep theirs; harmless inside a list but inconsistent, normalize all four.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Link enterprise-store how-to page instead of docs landing page",
+      "detail": "docs/how-to-guides/set-up-air-gapped-maas.md:20 links https://ubuntu.com/enterprise-store/docs/ (verified 200, and the old URL already 301s here); https://ubuntu.com/enterprise-store/docs/how-to is closer to the offline/air-gapped procedure being described.",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Fix dead maas.io URL embedded in join-our-forum.md form prefill",
+      "detail": "Out of this diff: docs/uncategorized/join-our-forum.md:3 embeds a dead maas.io/docs URL as a Google Form prefill value; cosmetic only, but the same class of stale link this PR is cleaning up.",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    }
+  ]
+}

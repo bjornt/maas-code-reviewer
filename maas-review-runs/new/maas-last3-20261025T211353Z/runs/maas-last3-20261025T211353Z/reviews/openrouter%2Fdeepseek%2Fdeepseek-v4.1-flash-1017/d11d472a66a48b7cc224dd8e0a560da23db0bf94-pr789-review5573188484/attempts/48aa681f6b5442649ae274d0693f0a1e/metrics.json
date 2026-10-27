@@ -1,0 +1,16 @@
+{
+  "model_name": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+  "agent_name": "omp",
+  "agent_version": "18.12.2",
+  "tokens_thinking": null,
+  "tokens_input": 94523,
+  "tokens_output": 35360,
+  "tokens_cache_read": 1551712,
+  "tokens_cache_write": null,
+  "tokens_total": 1681595,
+  "cost": 0.0560694204,
+  "cost_currency": "USD",
+  "agents_md_read": true,
+  "diff_lines": 248,
+  "diff_size_bytes": 12140
+}

@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "case_id": "c1f1d6bb1cab5c0653e5df7284494edf91db4f01-pr796-review5588144316",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T22:05:00Z",
+  "reviewers": [
+    {
+      "key": "gemini-3.1-pro-preview",
+      "label": "gemini-3.1-pro-preview (original)"
+    },
+    {
+      "key": "github-copilot/claude-opus-5",
+      "label": "github-copilot/claude-opus-5"
+    },
+    {
+      "key": "github-copilot/gemini-3.8-flash",
+      "label": "github-copilot/gemini-3.8-flash"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4-pro-0813",
+      "label": "openrouter/deepseek/deepseek-v4-pro-0813"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+      "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"
+    },
+    {
+      "key": "openrouter/z-ai/glm-5.3",
+      "label": "openrouter/z-ai/glm-5.3"
+    }
+  ],
+  "issues": [
+    {
+      "summary": "Remove dead pool-permission setup in test_machines auth-only fixture",
+      "detail": "In TestMachinesApi.endpoints_with_authentication_only (test_machines.py:211-215) the list_pools_* return values are configured on services_mock.openfga_tuples.get_client.return_value, but the consuming test calls mocked_api_client_user_with_permissions() which rebinds that return_value to a fresh AsyncOpenFGAClientMock(set()) (fixtures/app.py:199), discarding the setup. The handler then gets False from AsyncOpenFGAClientMock.__getattr__, set(view_access_pools) in machines.py raises TypeError -> 500, and the test passes only because it asserts status not in (401, 403), so the endpoint is never exercised as intended.",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4-pro-0813", "openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Fix unawaited-coroutine warnings at the source instead of filtering them",
+      "detail": "The @pytest.mark.filterwarnings('ignore:coroutine .* was never awaited') markers in base.py suppress a signal that also fires when a handler genuinely forgets to await an async service call; reviewers suggest fixing the mock setup (e.g. giving async service methods plain return values or always installing AsyncOpenFGAClientMock) so the filters can be removed. deepseek-v4.1-flash-1017 also notes pyproject only escalates BytesWarning, so the filter is otherwise unnecessary; glm-5.3 advises keeping any such filter limited to these deliberately shallow tests.",
+      "kind": "testing",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "github-copilot/gemini-3.8-flash", "openrouter/deepseek/deepseek-v4-pro-0813", "openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Use typing.get_type_hints instead of raw ServiceCollectionV3.__annotations__",
+      "detail": "create_services_mock (src/tests/fixtures/__init__.py:66-71) iterates raw __annotations__, which silently becomes strings if 'from __future__ import annotations' is added to maasservicelayer/services/__init__.py (Mock would then be specced on a str), skips base-class annotations, and raises TypeError for non-class annotations (Optional, ClassVar, Annotated). typing.get_type_hints(ServiceCollectionV3) is the robust equivalent; gemini-3.1-pro-preview also suggests passing Mock(spec=service_class) explicitly for clarity.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4-pro-0813", "openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Awaiting list_pools_* on sync get_client's MagicMock raises TypeError",
+      "detail": "OpenFGATupleService.get_client is synchronous, so fga_client in the test_machines.py fixture (line 211) is a generic MagicMock; its list_pools_with_view_machines_access/list_pools_with_view_available_machines_access return plain lists, not coroutines, and the handler's 'await' would raise TypeError even if the setup were not overwritten. Fix by using an AsyncMock/AsyncOpenFGAClientMock client.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["gemini-3.1-pro-preview", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Deliver or drop the promised AsyncOpenFGAClientMock pool-permission support",
+      "detail": "The PR description says AsyncOpenFGAClientMock was improved 'to make it possible to pass pool permissions', but the class in src/tests/maasapiserver/fixtures/app.py is unchanged: __getattr__ still returns a bool (item in self._permissions) for list_pools_with_view_machines_access / list_pools_with_view_available_machines_access, so handlers doing set(await fga_client.list_pools_...) break. Either land the improvement or drop the claim.",
+      "kind": "scope",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "github-copilot/gemini-3.8-flash", "openrouter/deepseek/deepseek-v4-pro-0813", "openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Update create_app_with_mocks helper signatures to accept Mock",
+      "detail": "All fixtures/tests now pass the Mock returned by create_services_mock(), but create_app_with_mocks and create_internal_app_with_mocks (src/tests/maasapiserver/fixtures/app.py:41 and :84) still annotate mocked_services: ServiceCollectionV3, so mypy will complain at every call site; update the hints (e.g. Mock | ServiceCollectionV3 or Any).",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["gemini-3.1-pro-preview", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Document loss of AttributeError strictness for unconfigured services",
+      "detail": "Previously Mock(ServiceCollectionV3) raised AttributeError for services a test had not explicitly mocked, failing loudly when a handler touched an unexpected dependency; now every service resolves to a default (truthy) MagicMock, so handlers run deeper and tests can pass on unconfigured mocks. The new get_one/get_by_id -> None pins in test_ipranges.py:77 and test_resource_pools.py auth-only fixtures exist only because of this shift; reviewers ask to document the contract (e.g. in the commit body or next to endpoints_with_authentication_only in base.py).",
+      "kind": "testing",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Wrap test_machines.py:215 to satisfy ruff line-length 79",
+      "detail": "The added line 'fga_client.list_pools_with_view_available_machines_access.return_value = []' (test_machines.py:215) is 83 characters; pyproject.toml sets ruff line-length = 79 and lint runs ruff format --check over src/tests/, so CI lint will fail unless the line is wrapped (or removed per the dead-code issue).",
+      "kind": "style",
+      "severity": "medium",
+      "reviewers": ["openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Create service mocks lazily to avoid ~70-85 spec'd Mocks per test",
+      "detail": "create_services_mock eagerly instantiates a spec'd Mock for every annotated service for each test requesting services_mock, and Mock(spec=cls) introspects dir(cls) and classifies async methods per class, adding per-test overhead where children were previously created lazily on access. Consider lazy creation (e.g. a Mock subclass building Mock(service_class) on first attribute access).",
+      "kind": "performance",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4-pro-0813", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Pass sets, not bare enum members, to AsyncOpenFGAClientMock",
+      "detail": "AsyncOpenFGAClientMock declares permissions: set[MAASResourceEntitlement] | None, but request-model tests (e.g. models/requests/test_ipranges.py:296/353) pass a bare StrEnum member, so every 'in' check degrades to a substring test (both has_permission_on_maas and the __getattr__ fallback), risking silent false positives. Wrap in a set or normalize in __init__; pre-existing but adjacent to this change.",
+      "kind": "correctness",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Correct the base.py comment explaining the unawaited-coroutine warning",
+      "detail": "The added comment attributes the warning to 'accessing methods/fields of objects returned by a service method'; reviewers note the precise cause is that a coroutine created by calling a mocked async service method (or a method on an AsyncMock return value, since AsyncMock children are themselves AsyncMock) is garbage-collected without being awaited, and ask that the comment be reworded so readers keep the right mental model. gemini-3.1-pro-preview separately offers a Pydantic/AsyncMock-inspection explanation of the mechanism.",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Use AsyncMock/create_autospec so async service methods stay awaitable",
+      "detail": "gemini-3.8-flash asserts create_services_mock's plain Mock(service_class) makes async service methods synchronous mocks, producing unawaited-coroutine warnings, and suggests AsyncMock or create_autospec. Note: other reviewers (deepseek-v4.1-flash-1017, glm-5.3) verified Mock(spec=cls) auto-detects async def methods as AsyncMock children, so this claim may be unfounded.",
+      "kind": "correctness",
+      "severity": "low",
+      "reviewers": ["github-copilot/gemini-3.8-flash"]
+    },
+    {
+      "summary": "Use spec_set so misspelled service attributes fail fast",
+      "detail": "Mock(ServiceCollectionV3) uses plain spec, so a test accessing a misspelled or nonexistent service name still gets a dynamically created attribute instead of an error; consider spec_set=ServiceCollectionV3 or validating attribute names against ServiceCollectionV3.__annotations__ so typos fail fast (fixtures/__init__.py:71).",
+      "kind": "correctness",
+      "severity": "low",
+      "reviewers": ["github-copilot/gemini-3.8-flash"]
+    },
+    {
+      "summary": "Move auth-only mock setup out of the endpoints data fixture",
+      "detail": "TestIPRangesApi.endpoints_with_authentication_only (test_ipranges.py:77) now mutates services_mock although the base class documents the fixture as 'return a list of endpoints'; consider an explicit overridable hook such as setup_mocks_for_authentication_only(services_mock) so the data fixture stays a data fixture and the intent is clear.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Type services_mock as Mock | ServiceCollectionV3 or a Protocol",
+      "detail": "Typing the fixture as plain Mock is accurate but loses IDE autocompletion for service attributes; a union type or a Protocol describing the service attributes would retain completion while indicating the object is a mock (fixtures/app.py:108).",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/gemini-3.8-flash"]
+    },
+    {
+      "summary": "Document that class-level annotations are the contract for mocking",
+      "detail": "A service added to ServiceCollectionV3.produce() without a class-level annotation is silently absent from create_services_mock's output and fails later with AttributeError on the specced parent; a short comment stating the annotation is the contract would prevent confusion (fixtures/__init__.py:66).",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Drop the stray blank line added in test_switches.py",
+      "detail": "A blank line was added after the copyright header in src/tests/maasapiserver/v3/api/public/handlers/test_switches.py:4, unrelated to this change.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    }
+  ]
+}

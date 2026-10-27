@@ -1,0 +1,62 @@
+{
+  "author": "skatsaounis",
+  "author_id": 4290399,
+  "base_sha": "bfeb69a932befd282dc202017c2d22c6c32ab0c4",
+  "description_source": "latest fetched PR body; NOT the review-time body",
+  "description_updated_at": "2026-10-20T14:44:48Z",
+  "diff_source": "git diff of merge-base(landed first parent, review head) to review head",
+  "diff_status": "collected",
+  "head_sha": "255f550cbb1a7c5962804aebcf23fed651d897ff",
+  "is_pr_author": false,
+  "landed_commit": "d11d472a66a48b7cc224dd8e0a560da23db0bf94",
+  "pr_number": 789,
+  "published_review": {
+    "_links": {
+      "html": {
+        "href": "https://github.com/canonical/maas/pull/789#pullrequestreview-5581831869"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/canonical/maas/pulls/789"
+      }
+    },
+    "author_association": "MEMBER",
+    "body": "LGTM with a question",
+    "commit_id": "255f550cbb1a7c5962804aebcf23fed651d897ff",
+    "copilot_code_review_effort": null,
+    "html_url": "https://github.com/canonical/maas/pull/789#pullrequestreview-5581831869",
+    "id": 5581831869,
+    "is_copilot_code_review": false,
+    "node_id": "PRR_kwDOBSgIKM8AAAABTLP-vQ",
+    "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/789",
+    "state": "APPROVED",
+    "submitted_at": "2026-10-20T07:16:56Z",
+    "user": {
+      "avatar_url": "https://avatars.githubusercontent.com/u/4290399?u=50659565335b943faa6e62c05119702c91dc9216&v=4",
+      "events_url": "https://api.github.com/users/skatsaounis/events{/privacy}",
+      "followers_url": "https://api.github.com/users/skatsaounis/followers",
+      "following_url": "https://api.github.com/users/skatsaounis/following{/other_user}",
+      "gists_url": "https://api.github.com/users/skatsaounis/gists{/gist_id}",
+      "gravatar_id": "",
+      "html_url": "https://github.com/skatsaounis",
+      "id": 4290399,
+      "login": "skatsaounis",
+      "node_id": "MDQ6VXNlcjQyOTAzOTk=",
+      "organizations_url": "https://api.github.com/users/skatsaounis/orgs",
+      "received_events_url": "https://api.github.com/users/skatsaounis/received_events",
+      "repos_url": "https://api.github.com/users/skatsaounis/repos",
+      "site_admin": false,
+      "starred_url": "https://api.github.com/users/skatsaounis/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/skatsaounis/subscriptions",
+      "type": "User",
+      "url": "https://api.github.com/users/skatsaounis",
+      "user_view_type": "public"
+    }
+  },
+  "repository": "canonical/maas",
+  "review_id": 5581831869,
+  "review_submitted_at": "2026-10-20T07:16:56Z",
+  "review_url": "https://github.com/canonical/maas/pull/789#pullrequestreview-5581831869",
+  "state": "APPROVED",
+  "unsupported_inline_comment_count": 0,
+  "unsupported_inline_comments": []
+}

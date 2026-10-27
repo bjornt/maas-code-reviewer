@@ -1,0 +1,307 @@
+{
+  "commits": [
+    {
+      "cases": [
+        "7a154ca4e34a2368152a603b9e6122e45db95851-pr811-review5630417338"
+      ],
+      "human_reviews": [
+        "human_reviews/7a154ca4e34a2368152a603b9e6122e45db95851-pr811/review5630905037"
+      ],
+      "landed_commit": "7a154ca4e34a2368152a603b9e6122e45db95851",
+      "pull_requests": [
+        {
+          "cases": [
+            "7a154ca4e34a2368152a603b9e6122e45db95851-pr811-review5630417338"
+          ],
+          "human_comment_count": 1,
+          "human_discussion": "human_reviews/7a154ca4e34a2368152a603b9e6122e45db95851-pr811/discussion.json",
+          "human_reviews": [
+            "human_reviews/7a154ca4e34a2368152a603b9e6122e45db95851-pr811/review5630905037"
+          ],
+          "pr_number": 811,
+          "skipped_reviews": [],
+          "status": "collected"
+        }
+      ],
+      "status": "collected"
+    },
+    {
+      "cases": [
+        "1803d8d92952023aefcf3775003acc9698e2154a-pr801-review5605883520"
+      ],
+      "human_reviews": [
+        "human_reviews/1803d8d92952023aefcf3775003acc9698e2154a-pr801/review5606746524",
+        "human_reviews/1803d8d92952023aefcf3775003acc9698e2154a-pr801/review5606788567",
+        "human_reviews/1803d8d92952023aefcf3775003acc9698e2154a-pr801/review5616118016"
+      ],
+      "landed_commit": "1803d8d92952023aefcf3775003acc9698e2154a",
+      "pull_requests": [
+        {
+          "cases": [
+            "1803d8d92952023aefcf3775003acc9698e2154a-pr801-review5605883520"
+          ],
+          "human_comment_count": 2,
+          "human_discussion": "human_reviews/1803d8d92952023aefcf3775003acc9698e2154a-pr801/discussion.json",
+          "human_reviews": [
+            "human_reviews/1803d8d92952023aefcf3775003acc9698e2154a-pr801/review5606746524",
+            "human_reviews/1803d8d92952023aefcf3775003acc9698e2154a-pr801/review5606788567",
+            "human_reviews/1803d8d92952023aefcf3775003acc9698e2154a-pr801/review5616118016"
+          ],
+          "pr_number": 801,
+          "skipped_reviews": [],
+          "status": "collected"
+        }
+      ],
+      "status": "collected"
+    },
+    {
+      "cases": [
+        "a0727d8211a11f19d6579247f398380264a742e2-pr806-review5614247103"
+      ],
+      "human_reviews": [
+        "human_reviews/a0727d8211a11f19d6579247f398380264a742e2-pr806/review5614278004",
+        "human_reviews/a0727d8211a11f19d6579247f398380264a742e2-pr806/review5614734509"
+      ],
+      "landed_commit": "a0727d8211a11f19d6579247f398380264a742e2",
+      "pull_requests": [
+        {
+          "cases": [
+            "a0727d8211a11f19d6579247f398380264a742e2-pr806-review5614247103"
+          ],
+          "human_comment_count": 1,
+          "human_discussion": "human_reviews/a0727d8211a11f19d6579247f398380264a742e2-pr806/discussion.json",
+          "human_reviews": [
+            "human_reviews/a0727d8211a11f19d6579247f398380264a742e2-pr806/review5614278004",
+            "human_reviews/a0727d8211a11f19d6579247f398380264a742e2-pr806/review5614734509"
+          ],
+          "pr_number": 806,
+          "skipped_reviews": [],
+          "status": "collected"
+        }
+      ],
+      "status": "collected"
+    },
+    {
+      "cases": [
+        "c1f1d6bb1cab5c0653e5df7284494edf91db4f01-pr796-review5588144316"
+      ],
+      "human_reviews": [
+        "human_reviews/c1f1d6bb1cab5c0653e5df7284494edf91db4f01-pr796/review5602491085"
+      ],
+      "landed_commit": "c1f1d6bb1cab5c0653e5df7284494edf91db4f01",
+      "pull_requests": [
+        {
+          "cases": [
+            "c1f1d6bb1cab5c0653e5df7284494edf91db4f01-pr796-review5588144316"
+          ],
+          "human_comment_count": 0,
+          "human_discussion": "human_reviews/c1f1d6bb1cab5c0653e5df7284494edf91db4f01-pr796/discussion.json",
+          "human_reviews": [
+            "human_reviews/c1f1d6bb1cab5c0653e5df7284494edf91db4f01-pr796/review5602491085"
+          ],
+          "pr_number": 796,
+          "skipped_reviews": [],
+          "status": "collected"
+        }
+      ],
+      "status": "collected"
+    },
+    {
+      "cases": [
+        "d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790-review5575633610"
+      ],
+      "human_reviews": [
+        "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5602893580",
+        "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5603812146",
+        "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5603938154",
+        "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5604128316",
+        "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5604244898",
+        "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5604978741"
+      ],
+      "landed_commit": "d19b2bd6a283488bb10261d6a3c6964336de6ff1",
+      "pull_requests": [
+        {
+          "cases": [
+            "d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790-review5575633610"
+          ],
+          "human_comment_count": 11,
+          "human_discussion": "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/discussion.json",
+          "human_reviews": [
+            "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5602893580",
+            "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5603812146",
+            "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5603938154",
+            "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5604128316",
+            "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5604244898",
+            "human_reviews/d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790/review5604978741"
+          ],
+          "pr_number": 790,
+          "skipped_reviews": [],
+          "status": "collected"
+        }
+      ],
+      "status": "collected"
+    },
+    {
+      "cases": [
+        "b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792-review5583045598"
+      ],
+      "human_reviews": [
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5585035818",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5587658803",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5588027480",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5588056839",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5588104068",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5588113481",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5588148056",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5598186450",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5600285609",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5600299189",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5600305725",
+        "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5600529747"
+      ],
+      "landed_commit": "b0337fc488b0ad13a59b3021e9e16b17115d062e",
+      "pull_requests": [
+        {
+          "cases": [
+            "b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792-review5583045598"
+          ],
+          "human_comment_count": 25,
+          "human_discussion": "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/discussion.json",
+          "human_reviews": [
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5585035818",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5587658803",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5588027480",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5588056839",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5588104068",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5588113481",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5588148056",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5598186450",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5600285609",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5600299189",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5600305725",
+            "human_reviews/b0337fc488b0ad13a59b3021e9e16b17115d062e-pr792/review5600529747"
+          ],
+          "pr_number": 792,
+          "skipped_reviews": [],
+          "status": "collected"
+        }
+      ],
+      "status": "collected"
+    },
+    {
+      "cases": [
+        "bb09b483f0f810b8f29a17a71b6a03959d90cbf8-pr645-review5164257458"
+      ],
+      "human_reviews": [
+        "human_reviews/bb09b483f0f810b8f29a17a71b6a03959d90cbf8-pr645/review5584550113",
+        "human_reviews/bb09b483f0f810b8f29a17a71b6a03959d90cbf8-pr645/review5585025877",
+        "human_reviews/bb09b483f0f810b8f29a17a71b6a03959d90cbf8-pr645/review5587543579"
+      ],
+      "landed_commit": "bb09b483f0f810b8f29a17a71b6a03959d90cbf8",
+      "pull_requests": [
+        {
+          "cases": [
+            "bb09b483f0f810b8f29a17a71b6a03959d90cbf8-pr645-review5164257458"
+          ],
+          "human_comment_count": 1,
+          "human_discussion": "human_reviews/bb09b483f0f810b8f29a17a71b6a03959d90cbf8-pr645/discussion.json",
+          "human_reviews": [
+            "human_reviews/bb09b483f0f810b8f29a17a71b6a03959d90cbf8-pr645/review5584550113",
+            "human_reviews/bb09b483f0f810b8f29a17a71b6a03959d90cbf8-pr645/review5585025877",
+            "human_reviews/bb09b483f0f810b8f29a17a71b6a03959d90cbf8-pr645/review5587543579"
+          ],
+          "pr_number": 645,
+          "skipped_reviews": [],
+          "status": "collected"
+        }
+      ],
+      "status": "collected"
+    },
+    {
+      "cases": [
+        "45bff65f436e683ff0159474c43f477bbefbde96-pr791-review5575788827"
+      ],
+      "human_reviews": [
+        "human_reviews/45bff65f436e683ff0159474c43f477bbefbde96-pr791/review5583210388"
+      ],
+      "landed_commit": "45bff65f436e683ff0159474c43f477bbefbde96",
+      "pull_requests": [
+        {
+          "cases": [
+            "45bff65f436e683ff0159474c43f477bbefbde96-pr791-review5575788827"
+          ],
+          "human_comment_count": 1,
+          "human_discussion": "human_reviews/45bff65f436e683ff0159474c43f477bbefbde96-pr791/discussion.json",
+          "human_reviews": [
+            "human_reviews/45bff65f436e683ff0159474c43f477bbefbde96-pr791/review5583210388"
+          ],
+          "pr_number": 791,
+          "skipped_reviews": [],
+          "status": "collected"
+        }
+      ],
+      "status": "collected"
+    },
+    {
+      "cases": [
+        "d11d472a66a48b7cc224dd8e0a560da23db0bf94-pr789-review5573188484"
+      ],
+      "human_reviews": [
+        "human_reviews/d11d472a66a48b7cc224dd8e0a560da23db0bf94-pr789/review5581831869",
+        "human_reviews/d11d472a66a48b7cc224dd8e0a560da23db0bf94-pr789/review5585329275"
+      ],
+      "landed_commit": "d11d472a66a48b7cc224dd8e0a560da23db0bf94",
+      "pull_requests": [
+        {
+          "cases": [
+            "d11d472a66a48b7cc224dd8e0a560da23db0bf94-pr789-review5573188484"
+          ],
+          "human_comment_count": 2,
+          "human_discussion": "human_reviews/d11d472a66a48b7cc224dd8e0a560da23db0bf94-pr789/discussion.json",
+          "human_reviews": [
+            "human_reviews/d11d472a66a48b7cc224dd8e0a560da23db0bf94-pr789/review5581831869",
+            "human_reviews/d11d472a66a48b7cc224dd8e0a560da23db0bf94-pr789/review5585329275"
+          ],
+          "pr_number": 789,
+          "skipped_reviews": [],
+          "status": "collected"
+        }
+      ],
+      "status": "collected"
+    },
+    {
+      "cases": [
+        "552bb58bb215d410a605914283392a5550df9688-pr793-review5583503415"
+      ],
+      "human_reviews": [
+        "human_reviews/552bb58bb215d410a605914283392a5550df9688-pr793/review5585011381"
+      ],
+      "landed_commit": "552bb58bb215d410a605914283392a5550df9688",
+      "pull_requests": [
+        {
+          "cases": [
+            "552bb58bb215d410a605914283392a5550df9688-pr793-review5583503415"
+          ],
+          "human_comment_count": 0,
+          "human_discussion": "human_reviews/552bb58bb215d410a605914283392a5550df9688-pr793/discussion.json",
+          "human_reviews": [
+            "human_reviews/552bb58bb215d410a605914283392a5550df9688-pr793/review5585011381"
+          ],
+          "pr_number": 793,
+          "skipped_reviews": [],
+          "status": "collected"
+        }
+      ],
+      "status": "collected"
+    }
+  ],
+  "schema_version": 2,
+  "selection": {
+    "count": 10,
+    "ordering": "newest-first, first-parent history",
+    "original_model": "gemini-3.1-pro-preview",
+    "ref": "master",
+    "repository": "canonical/maas",
+    "resolved_head": "7a154ca4e34a2368152a603b9e6122e45db95851"
+  }
+}

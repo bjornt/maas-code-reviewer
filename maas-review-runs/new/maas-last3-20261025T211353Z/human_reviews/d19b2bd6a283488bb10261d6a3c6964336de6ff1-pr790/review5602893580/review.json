@@ -1,0 +1,11 @@
+{
+  "general_comment": " number of questions and some nitpicks",
+  "inline_comments": {
+    "src/maasservicelayer/services/dhcp.py": {
+      "320": "Nit: _get_ha_config raises an error if both primary and secondary rack id are missing, meaning that peer_rack_id will for sure be not a None. This check seems redundant",
+      "328": "Nit: Same here, _get_ha_config loads both racks through cached_node so I don't see how peer_rack could ever be none",
+      "532": "Since _chached_ips_for_interface can theoretically take a list of interface ids, wouldn't it make sense to extract this call to outside the loop and avoid single quiries for each interface?",
+      "987": "In the legacy code the maas url comes from the regiond.conf I believe. Is reading from the database the intented behavior?"
+    }
+  }
+}

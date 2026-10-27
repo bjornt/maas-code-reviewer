@@ -1,0 +1,14 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one — suggestions may be\n> incorrect, please verify before acting.\n\n\nThe change cleanly implements the intended behavior: disabling NGINX rate/connection limits by default in unhardened deployments while correctly applying defaults when hardening is active or limits are explicitly configured. The sentinel pattern logic is consistent.\n\nThere are a couple of edge cases around the choice of sentinels and potential configuration validation, mostly regarding the inability to specify a burst limit of `0`. I have left some inline comments with suggestions for clarity and robustness.",
+  "inline_comments": {
+    "docs/reference/configuration-guides/security-hardening.md": {
+      "262": "The phrase \"leaving it empty turns off both rate and connection limiting\" could be misinterpreted. If hardening is active, leaving it empty will apply the hardening default of `20r/s` instead of turning limiting off. Consider rephrasing for clarity, for example: \n\"...leaving it empty applies the defaults above when hardening is active, and turns off limiting otherwise.\""
+    },
+    "src/maasserver/config.py": {
+      "334": "By using `0` as the sentinel for the default `60`, users are unable to explicitly configure a burst of `0`. In NGINX, a burst of `0` is the default behavior and a valid use-case (it means excess requests are rejected immediately rather than queued).\n\nIf you want to support a burst of `0`, consider using a negative sentinel like `-1` (with `min=-1`) or checking if `Int` supports `None` (e.g., `if_missing=None`). If a burst of `0` is not a use-case MAAS intends to support, this is fine as-is."
+    },
+    "src/provisioningserver/config.py": {
+      "902": "As with `RegionConfiguration`, using `0` as a sentinel prevents configuring a burst of `0`.\n\nAlso, consider replacing `Number` with `Int` here (imported from `formencode.validators`) to match `maasserver/config.py`. `Number` accepts floats (e.g., `60.5`), which would result in invalid NGINX configuration for `burst` and `limit_conn`, as NGINX requires integers."
+    }
+  }
+}

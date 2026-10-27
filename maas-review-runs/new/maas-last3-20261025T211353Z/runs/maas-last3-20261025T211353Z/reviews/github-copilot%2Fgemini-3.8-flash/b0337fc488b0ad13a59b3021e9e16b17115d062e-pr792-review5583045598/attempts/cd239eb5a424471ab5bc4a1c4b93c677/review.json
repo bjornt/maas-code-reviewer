@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nOverall, this is a clean and well-structured addition to the MAAS security and decommissioning documentation. It provides clear architecture overview diagrams and operational guidance.",
+  "inline_comments": {
+    "docs/how-to-guides/decommission-maas.md": {
+      "33": "The anchor link `#manage-api-keys` does not exist in `docs/how-to-guides/enhance-maas-security.md` because the heading in that document is `### Manage API Keys` (which generates the slug `#manage-api-keys` depending on anchor generation, but in MyST heading anchor slugification with case sensitivity or heading level targets, check if it matches). In `enhance-maas-security.md`, the section is under `## Manage users` -> `### Manage API Keys` (slug: `#manage-api-keys`). Verify that `myst_heading_anchors = 4` generates the expected anchor without case mismatch or missing target warnings during Sphinx doc builds."
+    }
+  }
+}

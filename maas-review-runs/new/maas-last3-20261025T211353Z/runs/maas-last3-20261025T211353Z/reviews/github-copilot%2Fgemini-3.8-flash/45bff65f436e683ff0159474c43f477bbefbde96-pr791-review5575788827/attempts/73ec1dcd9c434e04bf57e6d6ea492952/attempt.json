@@ -1,0 +1,11 @@
+{
+  "run_id": "maas-last3-20261025T211353Z",
+  "case_id": "45bff65f436e683ff0159474c43f477bbefbde96-pr791-review5575788827",
+  "reviewed_commit": "1c29c04020d18f97fb7af31144b7c972185f7597",
+  "landed_commit": "45bff65f436e683ff0159474c43f477bbefbde96",
+  "repository": "canonical/maas",
+  "model": "github-copilot/gemini-3.8-flash",
+  "attempt_id": "73ec1dcd9c434e04bf57e6d6ea492952",
+  "review_status": "succeeded",
+  "export_status": "succeeded"
+}

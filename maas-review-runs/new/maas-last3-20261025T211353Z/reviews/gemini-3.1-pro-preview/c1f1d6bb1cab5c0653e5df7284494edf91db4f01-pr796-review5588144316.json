@@ -1,0 +1,17 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one — suggestions may be\n> incorrect, please verify before acting.\n\n\nGreat refactoring! Removing the boilerplate `Mock` assignments cleans up the tests significantly. I've left a few comments to improve type safety against future changes (e.g. `__annotations__` vs `get_type_hints`) and pointed out a bug where a generic `Mock` is used instead of an `AsyncMock`, which will cause `TypeError`s during test execution. Finally, make sure to update `create_app_with_mocks` type hints to accept the `Mock` type so mypy doesn't complain.",
+  "inline_comments": {
+    "src/tests/fixtures/__init__.py": {
+      "67": "Relying directly on `__annotations__` is risky because if someone later adds `from __future__ import annotations` to the `services` module, `service_class` will be a string rather than a class, breaking `Mock(service_class)`. It's safer to use `typing.get_type_hints(ServiceCollectionV3).items()`.\n\nAlso, consider passing the argument explicitly as `Mock(spec=service_class)` for clarity."
+    },
+    "src/tests/maasapiserver/fixtures/app.py": {
+      "108": "Since `services_mock` has been typed as `Mock` in all the fixtures and tests, passing it here will cause `mypy` to complain because `create_app_with_mocks` expects `ServiceCollectionV3`. Consider updating the type hint to `Mock | ServiceCollectionV3` or `Any`. Same for `create_internal_app_with_mocks` below."
+    },
+    "src/tests/maasapiserver/v3/api/public/handlers/base.py": {
+      "40": "Suppressing this is a reasonable workaround for auth tests. For context, this happens because the handler expects a Pydantic model but gets an `AsyncMock` from the mocked service. When FastAPI/Pydantic tries to inspect or serialize the `AsyncMock`, it accesses properties that generate new coroutines which are never awaited."
+    },
+    "src/tests/maasapiserver/v3/api/public/handlers/test_machines.py": {
+      "211": "`get_client` is a synchronous method, so its `return_value` (`fga_client`) is a generic `Mock`. This means `fga_client.list_pools...()` will return the list `[]` synchronously, not as a coroutine. When the handler attempts to `await` it, the test will crash with `TypeError: object list can't be used in 'await' expression`.\n\nFix this by explicitly creating an `AsyncMock`:\n```python\nfrom unittest.mock import AsyncMock\n\nfga_client = AsyncMock()\nfga_client.list_pools_with_view_machines_access.return_value = []\nfga_client.list_pools_with_view_available_machines_access.return_value = []\nservices_mock.openfga_tuples.get_client.return_value = fga_client\n```"
+    }
+  }
+}

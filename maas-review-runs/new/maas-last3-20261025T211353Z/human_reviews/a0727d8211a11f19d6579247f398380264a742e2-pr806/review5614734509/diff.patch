@@ -1,0 +1,78 @@
+diff --git a/docs/how-to-guides/deploy-dpus.md b/docs/how-to-guides/deploy-dpus.md
+index d57b40a16..547724398 100644
+--- a/docs/how-to-guides/deploy-dpus.md
++++ b/docs/how-to-guides/deploy-dpus.md
+@@ -422,7 +422,7 @@ curl -k -u $BMC_USER:$BMC_PASS https://$BMC_IP/redfish/v1/Systems/Bluefield
+ 
+ ## Additional Resources
+ 
+-- [MAAS Documentation \- How to Manage Machines](https://maas.io/docs/how-to-manage-machines)  
++- [How to Manage Machines](/how-to-guides/manage-machines.md)
+ - [NVIDIA BlueField Documentation](https://docs.nvidia.com/networking/category/bluefieldsw)  
+ - [BlueField BSP Documentation](https://docs.nvidia.com/networking/display/bluefieldbsp491)  
+ - [Building Custom Images with packer-maas](https://github.com/canonical/packer-maas/tree/main/ubuntu)
+diff --git a/docs/how-to-guides/set-up-air-gapped-maas.md b/docs/how-to-guides/set-up-air-gapped-maas.md
+index a923dd515..b1d5a5d26 100644
+--- a/docs/how-to-guides/set-up-air-gapped-maas.md
++++ b/docs/how-to-guides/set-up-air-gapped-maas.md
+@@ -17,7 +17,7 @@ To manage snaps in an air-gapped setup, use the Enterprise Store. This  eliminat
+ 2. Secure your deployment with HTTP.
+ 3. Populate the store with snaps needed for your MAAS environment.
+ 
+-For detailed guidance, see the [official documentation](https://documentation.ubuntu.com/enterprise-store).
++For detailed guidance, see the [official documentation](https://ubuntu.com/enterprise-store/docs/).
+ 
+ ## Local package update
+ 
+diff --git a/docs/reference/configuration-guides/cloud-init.md b/docs/reference/configuration-guides/cloud-init.md
+index 4ae571472..e7ae9491e 100644
+--- a/docs/reference/configuration-guides/cloud-init.md
++++ b/docs/reference/configuration-guides/cloud-init.md
+@@ -4,7 +4,7 @@ Cloud-init is a powerful part of the MAAS customization suite.  This article wal
+ 
+ ## What is cloud-init?
+ 
+-Cloud-init automatically configures machines after bootup. It can create users, install software, and set up networking. When you're using MAAS, cloud-init can ensure that each machine is ready to use when deployed. If you're relatively new to cloud-init, we recommend you consult [the cloud-init documentation](https://cloudinit.readthedocs.io/en/latest/) before trying these examples.
++Cloud-init automatically configures machines after bootup. It can create users, install software, and set up networking. When you're using MAAS, cloud-init can ensure that each machine is ready to use when deployed. If you're relatively new to cloud-init, we recommend you consult [the cloud-init documentation](https://docs.cloud-init.io/) before trying these examples.
+ 
+ ## Basic cloud-init configurations for MAAS
+ 
+diff --git a/docs/reference/configuration-guides/logging.md b/docs/reference/configuration-guides/logging.md
+index af9a59a6e..e37f290cb 100644
+--- a/docs/reference/configuration-guides/logging.md
++++ b/docs/reference/configuration-guides/logging.md
+@@ -13,7 +13,7 @@ You can also account for user activities with audit logs.
+ 
+ ## Firewall logs
+ 
+-Ubuntu's UncomplicatedFirewall ([UFW](https://wiki.ubuntu.com/UncomplicatedFirewall)) serves as a front-end for [iptables](https://help.ubuntu.com/community/IptablesHowTo). To secure your MAAS setup, regularly review logs located in `/var/log/ufw*`.
++Ubuntu's UncomplicatedFirewall ([UFW](https://wiki.ubuntu.com/UncomplicatedFirewall)) serves as a front-end for [iptables](https://wiki.ubuntu.com/IptablesHowTo). To secure your MAAS setup, regularly review logs located in `/var/log/ufw*`.
+ 
+ Find red flags in UFW and iptables logs by looking for key patterns:
+ 
+diff --git a/docs/tutorial.md b/docs/tutorial.md
+index 2971db89b..9cb1e552b 100644
+--- a/docs/tutorial.md
++++ b/docs/tutorial.md
+@@ -149,7 +149,7 @@ You may also want to try using a local copy of MAAS with real hardware, which is
+ 
+ If you're brave, you can try that in your homelab, with some simple, off-the-shelf NUCs or mini-PCs, using the instructions found [in this GitHub repository](https://github.com/canonical/maas-hw-tutorial).
+ 
+-Learn more at: <https://maas.io>
++Learn more at: <https://canonical.com/maas>
+ 
+ ## More tutorials
+ 
+diff --git a/docs/tutorials/harden-a-maas-test-controller.md b/docs/tutorials/harden-a-maas-test-controller.md
+index 6c0acd0f1..cae54402e 100644
+--- a/docs/tutorials/harden-a-maas-test-controller.md
++++ b/docs/tutorials/harden-a-maas-test-controller.md
+@@ -10,7 +10,7 @@ Use a disposable virtual machine. Do not follow this tutorial on a production MA
+ 
+ ## What you need
+ 
+-- A computer that can run [Multipass](https://multipass.run), with at least 4 GB of free memory and 20 GB of free disk space.
++- A computer that can run [Multipass](https://canonical.com/multipass), with at least 4 GB of free memory and 20 GB of free disk space.
+ - An internet connection.
+ 
+ ## Create a test machine

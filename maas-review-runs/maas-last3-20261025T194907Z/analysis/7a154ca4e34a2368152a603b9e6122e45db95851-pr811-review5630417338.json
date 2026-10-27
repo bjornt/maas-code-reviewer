@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "case_id": "7a154ca4e34a2368152a603b9e6122e45db95851-pr811-review5630417338",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T22:17:15Z",
+  "reviewers": [
+    {"key": "gemini-3.1-pro-preview", "label": "gemini-3.1-pro-preview (original)"},
+    {"key": "github-copilot/claude-opus-5", "label": "github-copilot/claude-opus-5"},
+    {"key": "openrouter/deepseek/deepseek-v4.1-flash-1017", "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"}
+  ],
+  "issues": [
+    {
+      "summary": "Revert or fix the dead wiki.ubuntu.com full-disk-encryption link",
+      "detail": "docs/explanation/security.md:110 changes the FDE link from help.ubuntu.com/community/... to https://wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019, which returns HTTP 404 (the relaunched Ubuntu wiki did not migrate legacy Community Help pages). The URL is not in linkcheck_ignore, so `make -C docs linkcheck` flags it; two reviewers suggest the maintained https://documentation.ubuntu.com/security/security-features/storage/encryption-full-disk page instead.",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Correct the inverted proselint rationale or restate the PR",
+      "detail": "No proselint check flags the U+2019 apostrophe; proselint's only quote rule (typography.symbols.curly_quotes) demands curly quotes over straight double quotes, and the repo lints docs with Vale/pymarkdownlnt, not proselint. The repo's own doc generators (fix_curly_quotes in docs/_scripts/generate_cli_docs.py and docs/usr/tools/generate.py) convert straight quotes to curly, so these apostrophe edits are a house-style choice, not lint compliance — restate the PR or drop it.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Complete the partial apostrophe conversion across docs",
+      "detail": "docs/explanation/deploying-machines.md retains U+2019 apostrophes at lines 19, 27, 33, 42 and 80 (one in the paragraph right after the edited line), and ~36 other files under docs/ still use curly apostrophes. Because smartquotes is not in myst_enable_extensions (docs/conf.py:322), source punctuation publishes verbatim, so the site will render mixed straight/curly apostrophes; do one scripted repo-wide sweep or revert.",
+      "kind": "style",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Convert remaining curly double quotes to one consistent style",
+      "detail": "Curly double quotes remain at manage-machine-groups.md:425, 429 and 437 (\u201cdeploy only machines with SSDs\u201d, \u201cbig buckets\u201d, \u201cfault domains.\u201d), use-cases-server-lifecycle-management.md:19 and 28, and what-maas-shouldn-t-do.md:46 and 50; manage-machine-groups.md:430 already uses straight double quotes, leaving three quoting styles in one section.",
+      "kind": "style",
+      "severity": "medium",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Split the two unrelated URL changes into a separate commit",
+      "detail": "The PR is described as proselint/apostrophe cleanup but also rewrites juju.is to canonical.com/juju (deploying-machines.md:40, verified live) and the FDE link in security.md; the link churn is unrelated scope and should be reviewed on its own in a separate docs commit.",
+      "kind": "scope",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Fix broken sentences on lines this PR touches in use-cases file",
+      "detail": "use-cases-server-lifecycle-management.md:31 has the broken sentence \"...very large supercomputing installations. and its bare-metal focus...\" (period should be a comma); line 15 has \"in MAAS.(as referenced by\" (stray period, missing space); line 71 has a stray period before the dash in \"in 1-2 years.\u2013 and tooling\". Worth fixing while those lines are already being edited.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Run docs linkcheck in CI; workflow only runs lint-md and html",
+      "detail": ".github/workflows/ci.yaml (docs job) runs only `make lint-md` and `make html` — no linkcheck and no vale — so broken links like the wiki.ubuntu.com 404 are not caught in CI even though `make linkcheck` (docs/Makefile) detects them.",
+      "kind": "testing",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    }
+  ]
+}

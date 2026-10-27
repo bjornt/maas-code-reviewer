@@ -1,0 +1,20 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one — suggestions may be\n> incorrect, please verify before acting.\n\n\nThe updates nicely convert smart/curly apostrophes to straight apostrophes (`'`), which will resolve many of the `proselint` warnings. However, the PR missed converting the curly double quotes (`“` and `”`) to straight double quotes (`\"`) across several files. To fully satisfy `proselint`, you should also replace those curly double quotes. Additionally, there's a link update in `docs/explanation/security.md` that changes `help.ubuntu.com/community/...` to `wiki.ubuntu.com/...`, which might result in a broken link.",
+  "inline_comments": {
+    "docs/explanation/security.md": {
+      "110": "This changes the URL domain from `help.ubuntu.com/community` to `wiki.ubuntu.com`. The community documentation wiki has traditionally lived at `help.ubuntu.com/community/...`. Changing the domain to `wiki.ubuntu.com` will likely result in a broken link or a redirect error. Please verify that the new URL actually resolves correctly before making this change."
+    },
+    "docs/how-to-guides/manage-machine-groups.md": {
+      "425": "You've correctly replaced the curly apostrophe in `don't`, but there are still curly double quotes here around `“deploy only machines with SSDs”` and `“commission all nodes tagged gpu.”`. These should be changed to straight quotes (`\"`) for `proselint` compliance.",
+      "429": "Similarly, the curly quotes around `“big buckets”` were missed. Please update them to straight quotes.",
+      "437": "Curly quotes remain around `“fault domains.”`"
+    },
+    "docs/uncategorized/use-cases-server-lifecycle-management.md": {
+      "19": "Curly quotes remain around `“hardware testing at scale on freshly provisioned machines”`.",
+      "28": "Curly quotes remain around `“elastic HPC cluster.”`"
+    },
+    "docs/uncategorized/what-maas-shouldn-t-do.md": {
+      "46": "The curly quotes around `“just work.”` should also be replaced with straight quotes (`\"`)."
+    }
+  }
+}

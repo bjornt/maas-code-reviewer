@@ -1,0 +1,8 @@
+{
+  "general_comment": "",
+  "inline_comments": {
+    "src/maasapiserver/v3/api/internal/handlers/agent.py": {
+      "198": "I believe this should be dhcp_data to match snake case conventions "
+    }
+  }
+}

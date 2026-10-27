@@ -1,0 +1,118 @@
+diff --git a/.github/workflows/ci.yaml b/.github/workflows/ci.yaml
+index f0bcb66f8..edcd653b5 100644
+--- a/.github/workflows/ci.yaml
++++ b/.github/workflows/ci.yaml
+@@ -163,6 +163,26 @@ jobs:
+           PR_BODY_ENV: ${{ github.event.pull_request.body }}
+           PR_TITLE_ENV: ${{ github.event.pull_request.title }}
+ 
++      - name: Verify Launchpad bug reference in description
++        run: |
++          PR_BODY="$PR_BODY_ENV"
++
++          # Same keywords as the lp-bug-update workflow.
++          CLOSING_KEYWORDS='close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved'
++          if grep -qiP "\b(?:$CLOSING_KEYWORDS)\b.*lp:" <<< "$PR_BODY"; then
++            if ! grep -qiP "\b(?:$CLOSING_KEYWORDS)\b.*lp:\s*#[0-9]+" <<< "$PR_BODY"; then
++              echo "Error: PR description contains a closing keyword but no valid Launchpad bug reference."
++              echo "Expected syntax for Launchpad bug reference is LP: #<number>."
++              exit 1
++            fi
++
++            echo "Launchpad bug reference found in the description."
++          else
++            echo "No closing keyword found. Skipping Launchpad bug reference check."
++          fi
++        env:
++          PR_BODY_ENV: ${{ github.event.pull_request.body }}
++
+   test-python:
+     needs: changes
+     runs-on: ubuntu-24.04
+diff --git a/.github/workflows/lp-bug-update.yaml b/.github/workflows/lp-bug-update.yaml
+index 163571657..1cfb3ef83 100644
+--- a/.github/workflows/lp-bug-update.yaml
++++ b/.github/workflows/lp-bug-update.yaml
+@@ -8,6 +8,7 @@ on:
+ 
+ permissions:
+   contents: read
++  pull-requests: read
+ 
+ jobs:
+   update-launchpad-bug:
+@@ -19,10 +20,13 @@ jobs:
+         env:
+           GITHUB_EVENT_JSON: ${{ toJson(github.event) }}
+         run: |
+-          MESSAGES=$(jq -r '.commits[].message' <<< "$GITHUB_EVENT_JSON")
+-          BUG_ID=$(echo "$MESSAGES" \
+-            | grep -oiP '\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\b.*LP:\s*\K[0-9]+' \
+-            | head -1 || true)
++          CLOSING_KEYWORDS='close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved'
++          while IFS=$'\t' read -r commit_sha commit_message; do
++            BUG_ID=$(grep -oiP "\b(?:$CLOSING_KEYWORDS)\b.*lp:\s*#\K[0-9]+" <<< "$commit_message" | head -1 || true)
++            if [ -n "$BUG_ID" ]; then
++              break
++            fi
++          done < <(jq -r '.commits[] | [.id, .message] | @tsv' <<< "$GITHUB_EVENT_JSON")
+ 
+           if [ -z "$BUG_ID" ]; then
+             echo "No Launchpad bug ID found."
+@@ -31,6 +35,26 @@ jobs:
+ 
+           echo "Launchpad bug ID found: $BUG_ID"
+           echo "bug_id=$BUG_ID" >> "$GITHUB_OUTPUT"
++          echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
++
++      - name: Find pull request or commit link
++        id: fix-link
++        if: steps.extract-bug.outputs.bug_id != ''
++        env:
++          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++          COMMIT_SHA: ${{ steps.extract-bug.outputs.commit_sha }}
++        run: |
++          PR_URL=$(curl --silent --show-error --fail \
++            -H "Accept: application/vnd.github+json" \
++            -H "Authorization: Bearer $GH_TOKEN" \
++            -H "X-GitHub-Api-Version: 2026-03-10" \
++            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$COMMIT_SHA/pulls" \
++            | jq -r '[.[] | select(.merged_at != null)][0].html_url // empty' \
++            || true)
++
++          FIX_URL="${PR_URL:-$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$COMMIT_SHA}"
++          echo "fix_url=$FIX_URL" >> "$GITHUB_OUTPUT"
++          echo "Fix link: $FIX_URL"
+ 
+       - name: Checkout code
+         if: steps.extract-bug.outputs.bug_id != ''
+@@ -54,4 +78,5 @@ jobs:
+           LANDER_LP_ACCESS_TOKEN_SECRET: ${{ secrets.LANDER_LP_ACCESS_TOKEN_SECRET }}
+           BUG_ID: ${{ steps.extract-bug.outputs.bug_id }}
+           BRANCH: ${{ github.ref_name }}
++          FIX_URL: ${{ steps.fix-link.outputs.fix_url }}
+         run: python3 utilities/mark_lp_bug_fix_committed.py
+diff --git a/utilities/mark_lp_bug_fix_committed.py b/utilities/mark_lp_bug_fix_committed.py
+index ae8e85b85..edae17ed9 100644
+--- a/utilities/mark_lp_bug_fix_committed.py
++++ b/utilities/mark_lp_bug_fix_committed.py
+@@ -9,6 +9,7 @@ access_token = os.environ["LANDER_LP_ACCESS_TOKEN"]
+ access_token_secret = os.environ["LANDER_LP_ACCESS_TOKEN_SECRET"]
+ bug_id = os.environ["BUG_ID"]
+ branch = os.environ["BRANCH"]
++fix_url = os.environ["FIX_URL"]
+ 
+ credentials = Credentials(consumer_key)
+ credentials.access_token = AccessToken(access_token, access_token_secret)
+@@ -45,6 +46,11 @@ for task in bug.bug_tasks:
+         print(
+             f"Updated LP:#{bug_id}: updated status from '{previous_status}' to 'Fix Committed'"
+         )
++        bug.newMessage(
++            content=f"Fix included in {fix_url}",
++            send_notifications=False,
++        )
++        print(f"Added fix link to LP:#{bug_id}: {fix_url}")
+         updated = True
+         break
+ if not updated:

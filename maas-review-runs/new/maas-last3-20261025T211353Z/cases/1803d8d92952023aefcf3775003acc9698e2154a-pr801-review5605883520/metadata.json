@@ -1,0 +1,20 @@
+{
+  "base_sha": "d19b2bd6a283488bb10261d6a3c6964336de6ff1",
+  "description_source": "latest fetched PR body; NOT the review-time body",
+  "description_updated_at": "2026-10-22T15:15:11Z",
+  "description_url": "https://github.com/canonical/maas/pull/801",
+  "diff_source": "git diff of merge-base(landed first parent, review head) to review head",
+  "duplicate_inline_comments": "joined in comment-ID order with a markdown horizontal rule",
+  "general_comment_source": "verbatim published review body, including marker/preamble",
+  "head_sha": "5e54416a4007799d7f42f4469edb72b9fa055240",
+  "landed_commit": "1803d8d92952023aefcf3775003acc9698e2154a",
+  "original_model": "gemini-3.1-pro-preview",
+  "original_model_source": "operator label; not verified per review by GitHub",
+  "pr_number": 801,
+  "repository": "canonical/maas",
+  "review_id": 5605883520,
+  "review_submitted_at": "2026-10-21T20:35:43Z",
+  "review_url": "https://github.com/canonical/maas/pull/801#pullrequestreview-5605883520",
+  "unsupported_inline_comment_count": 0,
+  "unsupported_inline_comments": []
+}

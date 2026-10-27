@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "case_id": "d19b2bd6a283488bb10261d6a3c6964336de6ff1-pr790-review5575633610",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T22:44:25Z",
+  "reviewers": [
+    {
+      "key": "gemini-3.1-pro-preview",
+      "label": "gemini-3.1-pro-preview (original)"
+    },
+    {
+      "key": "github-copilot/claude-opus-5",
+      "label": "github-copilot/claude-opus-5"
+    },
+    {
+      "key": "github-copilot/gemini-3.8-flash",
+      "label": "github-copilot/gemini-3.8-flash"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4-pro-0813",
+      "label": "openrouter/deepseek/deepseek-v4-pro-0813"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+      "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"
+    },
+    {
+      "key": "openrouter/z-ai/glm-5.3",
+      "label": "openrouter/z-ai/glm-5.3"
+    }
+  ],
+  "issues": [
+    {
+      "summary": "Restrict HA address candidates to STICKY/AUTO on the exact VLAN",
+      "detail": "dhcp.py:542 `_get_ip_address_for_rack_controller` reuses `_get_best_interface_with_ip_on_vlan`, whose candidate pool admits relay-VLAN matches and DISCOVERED-only interfaces; the strict `ip_subnet.vlan_id == vlan.id` check then runs only on the one selected interface, so `_get_ha_config` can raise ValidationException where legacy `get_ip_address_for_rack_controller` would have picked a different interface with a usable address.",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Resolve host-reservation node via NodeConfig, not current_config_id",
+      "detail": "dhcp.py:666 `_make_interface_hostname` looks up the node with `NodeClauseFactory.with_node_config_id` (matches `Node.current_config_id` only) and asserts non-None; `get_for_ip` returns interfaces linked to historical NodeConfig rows, so the lookup can legitimately return None and turn the whole DHCP payload into an AssertionError/500. Legacy used `interface.node_config.node`, which cannot miss; degrade to the `unknown-<id>-<name>` fallback or resolve through the NodeConfig->node relation.",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Count configured_ip_versions even when best interface has no VLAN",
+      "detail": "dhcp.py:263 `configured_ip_versions.add(...)` sits inside the `iface.vlan_id is not None` guard, but `Interface.vlan_id` is nullable, so a best interface without a VLAN silently drops every subnet of that address family from the payload. Legacy only checks `interface is not None`; move the add out of the guard.",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Key KeaHAConfig by vlan_id and ip_version",
+      "detail": "models/dhcp.py KeaHAConfig (used at dhcp.py:273) carries only rack system IDs and IPs; the agent cannot associate a failover peer with the subnets/pools it configures, and two HA VLANs sharing a rack pair produce indistinguishable entries. Legacy names peers `failover-vlan-%d` per VLAN and family; add `vlan_id` and `ip_version`.",
+      "kind": "correctness",
+      "severity": "high",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Batch the per-subnet/per-interface/per-IP queries in interface selection",
+      "detail": "`_get_best_interface_with_ip_on_vlan` (dhcp.py:414/422/433) runs one `get_for_interfaces` per interface plus `subnets.get_by_id` and an `ipranges.get_many` used only for `len()` per IP, and is invoked once per subnet and again per HA peer rack via `_get_ip_address_for_rack_controller` (which also refetches peer interfaces/NTP uncached). Legacy prefetched this; batch IP fetches, precompute a subnet_id->dynamic-range-count map, and memoize per (vlan.id, ip_version).",
+      "kind": "performance",
+      "severity": "high",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4-pro-0813", "openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Add joins to StaticIPAddressClauseFactory.with_interface_enabled",
+      "detail": "repositories/staticipaddress.py:106/107 `with_interface_enabled` references `InterfaceTable.c.enabled` without declaring joins (unlike `with_interface_ids`); it only works because `get_for_nodes` happens to join InterfaceTable, and used with plain `get_many` it silently emits a cross join or unresolved-column error. Add the InterfaceIPAddressTable/InterfaceTable join chain.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4-pro-0813", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Replace asserts on DB-derived values with explicit exceptions",
+      "detail": "dhcp.py uses `assert` for database-derived invariants (e.g. `ip_subnet`/`subnet`/`vlan`/`node` is not None at lines ~431-432, 665, 681-696, 712-726). Asserts are stripped under `python -O` and otherwise surface as a bare AssertionError/500, unlike the ValidationException used elsewhere in the file; raise an explicit exception or handle None.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4-pro-0813", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Mark bond parents seen only after emitting, and scope dedupe per subnet",
+      "detail": "dhcp.py:603/607 `_get_dhcp_host_reservations` adds `parent.id` to `seen_interfaces` before the `parent.mac_address == interface.mac_address` check, so a same-MAC parent is permanently marked seen although legacy skipped it unmarked, suppressing a legitimate entry when the parent later appears directly addressed; the single set shared across all subnets also makes multi-homed devices emit reservations only for the first subnet encountered.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "github-copilot/gemini-3.8-flash"]
+    },
+    {
+      "summary": "Filter unconfigured address families before per-subnet work",
+      "detail": "dhcp.py:344/472 the `configured_ip_versions` family filter runs only after all per-subnet computation, wasting host-reservation, DNS-resolution and HA/NTP queries on subnets about to be dropped; worse, `_get_ha_config` can raise for a dual-stack HA VLAN where controllers lack an address in a family that would have been discarded. Derive configured families first and skip those subnets in the loop.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Traverse to the base VLAN for HA config on relay VLANs",
+      "detail": "dhcp.py:256 when a subnet sits on a relay VLAN, the `vlan` used for HA is the relay VLAN, which normally has no `primary_rack_id`/`secondary_rack_id`; HA configuration should follow `vlan.relay_vlan_id` to the base VLAN, as `_get_boot_rack_controller_ips` already does at line ~649.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["gemini-3.1-pro-preview"]
+    },
+    {
+      "summary": "Batch interface, parent and node lookups in host reservations",
+      "detail": "dhcp.py:550-592 `_get_dhcp_host_reservations` awaits `interfaces_service.get_for_ip` per IP, `get_parents` per bond interface, and a node query per emitted host in `_make_interface_hostname`; collect interfaces and parents in bulk and cache node lookups by node_config_id.",
+      "kind": "performance",
+      "severity": "medium",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/gemini-3.8-flash", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Batch the nested DNS-server x region-controller queries",
+      "detail": "dhcp.py:699/747 `_get_alt_region_ips_for_dns` issues `get_for_nodes` inside a nested loop over `dns_servers` and all region controllers, producing O(servers x regions) round trips; fetch region IPs in one grouped query and consider caching `find_best_subnet_for_ip` results.",
+      "kind": "performance",
+      "severity": "medium",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/gemini-3.8-flash", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Exclude dhcp_interfaces entries for subnets later filtered out",
+      "detail": "dhcp.py:386 `dhcp_interfaces` is mutated inside the per-subnet loop, so interfaces are included in the payload even for subnets subsequently removed when their IP version is not in `configured_ip_versions` (lines ~472-476).",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["github-copilot/gemini-3.8-flash"]
+    },
+    {
+      "summary": "Avoid broadcast_address on IPv6 subnets",
+      "detail": "dhcp.py:467 `subnet.cidr.broadcast_address` is emitted unconditionally; the reviewer notes broadcast addresses are only defined for IPv4 and this will raise on IPv6 subnets.",
+      "kind": "correctness",
+      "severity": "medium",
+      "reviewers": ["github-copilot/gemini-3.8-flash"]
+    },
+    {
+      "summary": "Reconcile duplicate DHCP payload models with the temporal worker",
+      "detail": "models/dhcp.py:68 duplicates `DHCPDataForAgent`/`SubnetData`/`VlanData`/`InterfaceData`/`IPRangeData`/`HostReservationData` already defined in `maastemporalworker/workflow/dhcp.py` with incompatible fields (e.g. HostReservationData there carries subnet_id/domain); nothing in this PR migrates that activity, so two divergent shapes of the same agent payload now coexist. State or perform the cutover.",
+      "kind": "scope",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Use str | None instead of empty-string gateway_ip/next_server sentinel",
+      "detail": "models/dhcp.py:45 `SubnetData.gateway_ip: str` uses \"\" as the no-gateway sentinel (and `next_server` likewise), while `Subnet.gateway_ip` is `IPvAnyAddress | None`; the sentinel forces every consumer to special-case it. Use `str | None`.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Reuse default_dns_servers for the top-level ntp_servers expression",
+      "detail": "dhcp.py:370/374 the top-level `ntp_servers` (non-external path) recomputes verbatim the expression already stored in `default_dns_servers` (same rack_ips filter and dedupe); reuse the variable so the two copies cannot silently drift.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4-pro-0813", "openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Hoist the seen_regions check above the get_for_nodes query",
+      "detail": "dhcp.py:794/797 in `_get_alt_region_ips_for_dns` the `(region.id, server.version) in seen_regions` early-exit is evaluated after the `get_for_nodes` await, so already-seen regions still issue a query per DNS server. Move the check above the query.",
+      "kind": "performance",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4-pro-0813", "openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Fetch relayed VLANs in one relay_vlan_id IN query",
+      "detail": "dhcp.py:145/150 relayed VLANs are discovered with one `vlans_service.get_many(with_relay_vlan_id(...))` per active VLAN inside a loop; collapse to a single `relay_vlan_id IN (...)` lookup after the dict is built (legacy prefetched `vlan.relay_vlans`).",
+      "kind": "performance",
+      "severity": "low",
+      "reviewers": ["gemini-3.1-pro-preview", "github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Batch per-rack node and address queries in _get_boot_rack_controller_ips",
+      "detail": "dhcp.py:653 `_get_boot_rack_controller_ips` loops over rack IDs issuing sequential `nodes_service.get_by_id` and `staticipaddress_service.get_for_nodes` queries; fetch the racks and their addresses in bulk.",
+      "kind": "performance",
+      "severity": "low",
+      "reviewers": ["gemini-3.1-pro-preview"]
+    },
+    {
+      "summary": "Batch subnet/vlan lookups in _get_ntp_servers_for_rack",
+      "detail": "dhcp.py:625 `_get_ntp_servers_for_rack` loops over addresses awaiting `subnets_service.get_by_id` and `vlans_service.get_by_id` one at a time; fetch the referenced subnets and VLANs in bulk.",
+      "kind": "performance",
+      "severity": "low",
+      "reviewers": ["gemini-3.1-pro-preview"]
+    },
+    {
+      "summary": "Memoize per-subnet source-address and hostname DNS resolution",
+      "detail": "dhcp.py:829 `_get_default_dns_servers_for_subnet` runs once per subnet and each call performs `get_source_address` plus `resolve_hostname` on a worker thread, though the result depends only on (maas_server_host, ip_version); memoize for the duration of the request.",
+      "kind": "performance",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Copy external_ntp instead of aliasing one list everywhere",
+      "detail": "dhcp.py:304 `external_ntp` is assigned by reference into every `SubnetData.ntp_servers` and the top-level `ntp_servers`, so all entries alias the same list; use `list(external_ntp)` to avoid surprising mutation aliasing in consumers.",
+      "kind": "correctness",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Drop the redundant refetch of the best interface's addresses",
+      "detail": "dhcp.py:483 after the candidate loop, `get_for_interfaces([best_interface.id])` refetches addresses already loaded and stored as element [1] of the candidate tuples (which is otherwise never read); use the stored list or drop it from the tuple.",
+      "kind": "performance",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Remove the redundant Python sort of ipranges",
+      "detail": "dhcp.py:181 `ipranges.sort(key=lambda iprange: iprange.id)` duplicates the `order_by=[OrderByClause(IPRangeTable.c.id)]` already applied by QuerySpec.enrich_stmt; keep one, not both.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Remove the unreachable peer_rack_id None check",
+      "detail": "dhcp.py:279 the `if peer_rack_id is None` branch is unreachable because `_get_ha_config` at line ~271 already raises when `vlan.primary_rack_id` is None; remove it or move validation before the `_get_ha_config` call.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Use a lean query in InterfaceRepository.get_parents",
+      "detail": "repositories/interfaces.py:136 `get_parents` builds on `_select_all_statement()`, which joins NodeConfig/Node/InterfaceIPAddress and aggregates links with GROUP BY, all discarded by callers that need only name/mac/type/created; select InterfaceTable joined to InterfaceRelationshipTable on parent_id directly, as `get_for_ip` does.",
+      "kind": "performance",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Add an ORDER BY to InterfaceRepository.get_parents",
+      "detail": "repositories/interfaces.py:140 `get_parents` has no ORDER BY, so result order is database-dependent; the DHCP service re-sorts by created, but the public repository method should be deterministic on its own (e.g. order by id).",
+      "kind": "correctness",
+      "severity": "low",
+      "reviewers": ["openrouter/deepseek/deepseek-v4-pro-0813"]
+    },
+    {
+      "summary": "Use self.interface_repository consistently in InterfacesService",
+      "detail": "services/interfaces.py:82/83 `get_parents` goes through `self.repository` while every other method in the class uses `self.interface_repository`; they are the same object, but the mixed accessor is easy to misread.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/z-ai/glm-5.3"]
+    },
+    {
+      "summary": "Annotate hosts_by_subnet so pyright can resolve the value type",
+      "detail": "dhcp.py:564 `hosts_by_subnet = {subnet_id: [] for subnet_id in subnet_ids}` leaves the value type unresolved for pyright; annotate as `dict[int, list[HostReservationData]]`.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Use the eq() helper in with_primary_or_secondary_rack_id",
+      "detail": "repositories/vlans.py:50 every other predicate in VlansClauseFactory uses the imported `eq(col, value)` helper; use `or_(eq(...), eq(...))` for consistency.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Assert observable results in DHCP service tests, not exact QuerySpecs",
+      "detail": "Some new tests (e.g. test_only_includes_owned_dhcp_vlans_and_managed_subnets) assert exact QuerySpec clause objects passed to mocked services rather than observable results, re-pinning the implementation and making refactors brittle.",
+      "kind": "testing",
+      "severity": "low",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    }
+  ]
+}

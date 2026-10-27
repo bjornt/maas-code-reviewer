@@ -1,0 +1,1 @@
+This `dhcp` feature service gathers data for Kea DHCP configuration, to later be served via the V3 API to the Agent Temporal worker.

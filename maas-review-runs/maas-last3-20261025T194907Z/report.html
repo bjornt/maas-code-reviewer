@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Review comparison — maas-last3-20261025T194907Z</title>
+<style>
+body { font-family: system-ui, sans-serif; line-height: 1.45; margin: 1.5rem auto;
+       max-width: 74rem; padding: 0 1rem; }
+h1, h2, h3 { line-height: 1.25; }
+h2 { margin-top: 2.5rem; border-bottom: 1px solid #888; padding-bottom: 0.2rem; }
+h3 { margin-bottom: 0.3rem; }
+h4, h5 { margin: 0.8rem 0 0.3rem; }
+p { margin: 0.4rem 0; }
+p.meta { color: #666; font-size: 0.9rem; }
+span.detail { color: #666; font-size: 0.9rem; }
+td.center { text-align: center; }
+table { border-collapse: collapse; margin: 0.8rem 0; font-size: 0.9rem; }
+th, td { border: 1px solid #888; padding: 0.3rem 0.6rem;
+         text-align: left; vertical-align: top; }
+th { background: rgba(127, 127, 127, 0.15); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.muted { color: #666; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere;
+      background: rgba(127, 127, 127, 0.12); padding: 0.75rem; border-radius: 4px; }
+details { margin: 0.5rem 0; }
+code { overflow-wrap: anywhere; }
+section.case { margin-top: 3rem; }
+</style>
+</head>
+<body>
+<h1>Review comparison — maas-last3-20261025T194907Z</h1>
+<p class="meta">
+repository canonical/maas · ref master · resolved head 7a154ca4e3 · original model gemini-3.1-pro-preview · corpus maas-last3-20261025T194907Z · 3 case(s) · run(s): maas-last3-20261025T194907Z · generated 2026-10-25 22:19:10Z
+</p>
+<p class="meta">Wall time is the invoke_agent span duration (or the span envelope when absent). Token usage and cost are harness estimates from metrics.json, not provider invoices. Historical timing, token, and cost data for original reviews was not collected.</p>
+<h2>Summary per model</h2>
+<table>
+<tr>
+<th>Model</th><th>Cases</th><th>Wall total</th><th>Wall mean</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Total tokens</th><th>Cost</th>
+</tr>
+<tr><td>github-copilot/claude-opus-5</td><td class="num">3/3</td><td class="num">8m 52s</td><td class="num">2m 57s</td><td class="num">92</td><td class="num">36,070</td><td class="num">2,068,812</td><td class="num">161,241</td><td class="num">2,266,215</td><td class="num">$2.9444</td></tr>
+<tr><td>openrouter/deepseek/deepseek-v4.1-flash-1017</td><td class="num">3/3</td><td class="num">7m 10s</td><td class="num">2m 23s</td><td class="num">514,765</td><td class="num">72,223</td><td class="num">4,046,894</td><td class="num">—</td><td class="num">4,633,882</td><td class="num">$0.1961</td></tr>
+</table>
+<h2>Cases</h2>
+<section class="case">
+<h3>
+<a href="https://github.com/canonical/maas/pull/811">PR #811</a>
+ · 7a154ca4e34a2368152a603b9e6122e45db95851-pr811-review5630417338
+</h3>
+<p class="meta"><a href="https://github.com/canonical/maas/pull/811#pullrequestreview-5630417338">review 5630417338</a> · submitted 2026-10-23T15:18:13Z · landed 7a154ca4e3 · reviewed head 4403f4780c · base 1803d8d929 · diff 350 lines / 73,850 bytes</p>
+<table>
+<tr>
+<th>Model</th><th>Status</th><th>Wall</th><th>Model calls</th><th>Tool calls</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Total tokens</th><th>Cost</th><th>Comments</th>
+</tr>
+<tr><td>gemini-3.1-pro-preview</td><td class="muted">collected</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num">7</td></tr>
+<tr><td>github-copilot/claude-opus-5</td><td>succeeded</td><td class="num">3m 12s</td><td class="num">18</td><td class="num">25</td><td class="num">36</td><td class="num">12,774</td><td class="num">1,018,616</td><td class="num">69,842</td><td class="num">1,101,268</td><td class="num">$1.2654</td><td class="num">5</td></tr>
+<tr><td>openrouter/deepseek/deepseek-v4.1-flash-1017</td><td>succeeded</td><td class="num">1m 40s</td><td class="num">25</td><td class="num">42</td><td class="num">266,360</td><td class="num">16,154</td><td class="num">984,064</td><td class="num">—</td><td class="num">1,266,578</td><td class="num">$0.1052</td><td class="num">3</td></tr>
+</table>
+<h4>Issues · classified by openrouter/moonshotai/kimi-k3</h4>
+<table>
+<tr><th>Issue</th><th>Kind</th><th>Severity</th><th>gemini-3.1-pro-preview (original)</th><th>github-copilot/claude-opus-5</th><th>openrouter/deepseek/deepseek-v4.1-flash-1017</th></tr>
+<tr><td><b>Revert or fix the dead wiki.ubuntu.com full-disk-encryption link</b><br><span class="detail">docs/explanation/security.md:110 changes the FDE link from help.ubuntu.com/community/... to https://wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019, which returns HTTP 404 (the relaunched Ubuntu wiki did not migrate legacy Community Help pages). The URL is not in linkcheck_ignore, so `make -C docs linkcheck` flags it; two reviewers suggest the maintained https://documentation.ubuntu.com/security/security-features/storage/encryption-full-disk page instead.</span></td><td>correctness</td><td>high</td><td class="center">✓</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Correct the inverted proselint rationale or restate the PR</b><br><span class="detail">No proselint check flags the U+2019 apostrophe; proselint&#x27;s only quote rule (typography.symbols.curly_quotes) demands curly quotes over straight double quotes, and the repo lints docs with Vale/pymarkdownlnt, not proselint. The repo&#x27;s own doc generators (fix_curly_quotes in docs/_scripts/generate_cli_docs.py and docs/usr/tools/generate.py) convert straight quotes to curly, so these apostrophe edits are a house-style choice, not lint compliance — restate the PR or drop it.</span></td><td>correctness</td><td>medium</td><td class="muted center">—</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Complete the partial apostrophe conversion across docs</b><br><span class="detail">docs/explanation/deploying-machines.md retains U+2019 apostrophes at lines 19, 27, 33, 42 and 80 (one in the paragraph right after the edited line), and ~36 other files under docs/ still use curly apostrophes. Because smartquotes is not in myst_enable_extensions (docs/conf.py:322), source punctuation publishes verbatim, so the site will render mixed straight/curly apostrophes; do one scripted repo-wide sweep or revert.</span></td><td>style</td><td>medium</td><td class="muted center">—</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Convert remaining curly double quotes to one consistent style</b><br><span class="detail">Curly double quotes remain at manage-machine-groups.md:425, 429 and 437 (“deploy only machines with SSDs”, “big buckets”, “fault domains.”), use-cases-server-lifecycle-management.md:19 and 28, and what-maas-shouldn-t-do.md:46 and 50; manage-machine-groups.md:430 already uses straight double quotes, leaving three quoting styles in one section.</span></td><td>style</td><td>medium</td><td class="center">✓</td><td class="center">✓</td><td class="muted center">—</td></tr>
+<tr><td><b>Split the two unrelated URL changes into a separate commit</b><br><span class="detail">The PR is described as proselint/apostrophe cleanup but also rewrites juju.is to canonical.com/juju (deploying-machines.md:40, verified live) and the FDE link in security.md; the link churn is unrelated scope and should be reviewed on its own in a separate docs commit.</span></td><td>scope</td><td>low</td><td class="muted center">—</td><td class="center">✓</td><td class="muted center">—</td></tr>
+<tr><td><b>Fix broken sentences on lines this PR touches in use-cases file</b><br><span class="detail">use-cases-server-lifecycle-management.md:31 has the broken sentence &quot;...very large supercomputing installations. and its bare-metal focus...&quot; (period should be a comma); line 15 has &quot;in MAAS.(as referenced by&quot; (stray period, missing space); line 71 has a stray period before the dash in &quot;in 1-2 years.– and tooling&quot;. Worth fixing while those lines are already being edited.</span></td><td>style</td><td>low</td><td class="muted center">—</td><td class="muted center">—</td><td class="center">✓</td></tr>
+<tr><td><b>Run docs linkcheck in CI; workflow only runs lint-md and html</b><br><span class="detail">.github/workflows/ci.yaml (docs job) runs only `make lint-md` and `make html` — no linkcheck and no vale — so broken links like the wiki.ubuntu.com 404 are not caught in CI even though `make linkcheck` (docs/Makefile) detects them.</span></td><td>testing</td><td>low</td><td class="muted center">—</td><td class="center">✓</td><td class="muted center">—</td></tr>
+</table>
+<h4>Reviews</h4>
+<details>
+<summary>Original review — gemini-3.1-pro-preview</summary>
+<p class="meta">collected with the case; no timing, token, or cost data</p>
+<h4>General comment</h4>
+<pre>[maas-code-reviewer review]
+
+&gt; LLM-generated review from https://github.com/canonical/maas-code-reviewer.
+&gt; Intended to assist a human reviewer, not replace one — suggestions may be
+&gt; incorrect, please verify before acting.
+
+
+The updates nicely convert smart/curly apostrophes to straight apostrophes (`&#x27;`), which will resolve many of the `proselint` warnings. However, the PR missed converting the curly double quotes (`“` and `”`) to straight double quotes (`&quot;`) across several files. To fully satisfy `proselint`, you should also replace those curly double quotes. Additionally, there&#x27;s a link update in `docs/explanation/security.md` that changes `help.ubuntu.com/community/...` to `wiki.ubuntu.com/...`, which might result in a broken link.</pre>
+<h4>Inline comments (7)</h4>
+<h5><code>docs/explanation/security.md</code></h5>
+<ul><li><b>line 110</b>: This changes the URL domain from `help.ubuntu.com/community` to `wiki.ubuntu.com`. The community documentation wiki has traditionally lived at `help.ubuntu.com/community/...`. Changing the domain to `wiki.ubuntu.com` will likely result in a broken link or a redirect error. Please verify that the new URL actually resolves correctly before making this change.</li></ul>
+<h5><code>docs/how-to-guides/manage-machine-groups.md</code></h5>
+<ul><li><b>line 425</b>: You&#x27;ve correctly replaced the curly apostrophe in `don&#x27;t`, but there are still curly double quotes here around `“deploy only machines with SSDs”` and `“commission all nodes tagged gpu.”`. These should be changed to straight quotes (`&quot;`) for `proselint` compliance.</li><li><b>line 429</b>: Similarly, the curly quotes around `“big buckets”` were missed. Please update them to straight quotes.</li><li><b>line 437</b>: Curly quotes remain around `“fault domains.”`</li></ul>
+<h5><code>docs/uncategorized/use-cases-server-lifecycle-management.md</code></h5>
+<ul><li><b>line 19</b>: Curly quotes remain around `“hardware testing at scale on freshly provisioned machines”`.</li><li><b>line 28</b>: Curly quotes remain around `“elastic HPC cluster.”`</li></ul>
+<h5><code>docs/uncategorized/what-maas-shouldn-t-do.md</code></h5>
+<ul><li><b>line 46</b>: The curly quotes around `“just work.”` should also be replaced with straight quotes (`&quot;`).</li></ul>
+</details>
+<details>
+<summary>Review — github-copilot/claude-opus-5</summary>
+<p class="meta">attempt 1c5ab8c3b4aa49b1aeeed9a6d8fb164d · succeeded · wall 3m 12s · started 2026-10-25 21:00:40Z · 18 model calls · 25 tool calls</p>
+<h4>General comment</h4>
+<pre>[maas-code-reviewer review]
+
+&gt; LLM-generated review from https://github.com/canonical/maas-code-reviewer.
+&gt; Intended to assist a human reviewer, not replace one — suggestions may be
+&gt; incorrect, please verify before acting.
+
+
+Docs-only change; no functional risk. Two substantive problems.
+
+1. The stated rationale is inverted. proselint has no check that flags the right single quotation mark `’`; the relevant check is `typography.symbols.curly_quotes`, whose message is literally `Use curly quotes “”, not straight quotes &quot;&quot;.` (verified in proselint `proselint/checks/typography/symbols.py`, pattern `\&quot;[\w\s\d]+\&quot;`). So converting `’` → `&#x27;` does not make these files proselint-compliant; it is a house-style choice, and it moves away from the direction this repo&#x27;s own generators take — `docs/_scripts/generate_cli_docs.py:106` and `docs/usr/tools/generate.py:110` are `fix_curly_quotes()` helpers that rewrite straight quotes *to* curly ones in generated docs. Either restate the PR as &quot;normalize apostrophes to ASCII&quot; or drop it.
+
+2. The change is not scoped. It also rewrites two URLs, one of which is dead: `https://wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019` returns HTTP 404 today (wiki.ubuntu.com is now a fresh MediaWiki instance whose banner states &quot;Legacy content may be unavailable and page links may have changed&quot;). Details inline. Note CI will not catch this: `.github/workflows/ci.yaml:238-243` runs only `make lint-md` and `make html` for docs — no `linkcheck`, no `vale`.
+
+Consistency: the conversion is partial across the doc set. 36 files under `docs/` still contain `’` (e.g. `docs/explanation/deploying-machines.md:19,27,33,42,52,80`, which this PR touches but leaves curly), and the touched files keep curly double quotes (`manage-machine-groups.md:424,428,437`, `what-maas-shouldn-t-do.md:46,50`). Because `smartquotes` is not in `myst_enable_extensions` (`docs/conf.py:322-327`), source punctuation is published verbatim — the site will now render mixed straight/curly apostrophes. If this normalization is wanted, do it in one scripted sweep over all of `docs/`; otherwise revert.
+
+Mechanics are otherwise clean: no content, link-text, or anchor changes beyond the two URLs, and no apostrophes inside code fences or inline code were touched.</pre>
+<h4>Inline comments (5)</h4>
+<h5><code>docs/explanation/deploying-machines.md</code></h5>
+<ul><li><b>line 40</b>: `https://canonical.com/juju` verified live, so this is harmless — but it is a URL change in a PR described as apostrophe normalization. Move it (and the security.md one) to a separate `docs:` commit so the link churn is reviewable on its own.</li></ul>
+<h5><code>docs/explanation/security.md</code></h5>
+<ul><li><b>line 110</b>: Broken link introduced. I fetched `https://wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019` — HTTP 404; the relaunched Ubuntu wiki does not carry this legacy page. The old `help.ubuntu.com/community/...` form is still the indexed, content-serving URL. Either revert this hunk or, better, point at a maintained page: `https://documentation.ubuntu.com/security/security-features/storage/encryption-full-disk` (verified live, covers LUKS/TPM FDE). Also unrelated to the proselint cleanup — split it out. `make linkcheck` (docs/Makefile) catches this class of error; CI does not run it.</li></ul>
+<h5><code>docs/how-to-guides/manage-machine-groups.md</code></h5>
+<ul><li><b>line 424</b>: This file is now fully ASCII-apostrophe but retains curly double quotes here and at 428/437 — and line 430 uses straight double quotes (`&quot;team A can only deploy machines in pool X.&quot;`), which is the character class proselint&#x27;s `curly_quotes` check targets. The result is three quoting styles in one section. Pick one convention and apply it to the whole file.</li></ul>
+<h5><code>docs/uncategorized/use-cases-server-lifecycle-management.md</code></h5>
+<ul><li><b>line 7</b>: `smartquotes` is not enabled in `myst_enable_extensions` (docs/conf.py:322), so this is a visible rendering change, not just a source change: this page will publish `&#x27;` while 36 other pages under docs/ still publish `’`. Worth a repo-wide sweep rather than per-file edits.</li></ul>
+<h5><code>docs/uncategorized/what-maas-shouldn-t-do.md</code></h5>
+<ul><li><b>line 3</b>: Same partial-conversion issue: apostrophes are now ASCII but curly double quotes remain at lines 46 and 50, so the page mixes typographic and ASCII punctuation.</li></ul>
+</details>
+<details>
+<summary>Review — openrouter/deepseek/deepseek-v4.1-flash-1017</summary>
+<p class="meta">attempt 06d8fa81b5474de3b02bd3316ebbf2bb · succeeded · wall 1m 40s · started 2026-10-25 21:00:37Z · 25 model calls · 42 tool calls</p>
+<h4>General comment</h4>
+<pre>[maas-code-reviewer review]
+
+&gt; LLM-generated review from https://github.com/canonical/maas-code-reviewer.
+&gt; Intended to assist a human reviewer, not replace one — suggestions may be
+&gt; incorrect, please verify before acting.
+
+
+Docs-only change: bulk conversion of U+2019 apostrophes to ASCII in five files plus two link swaps. The Juju link (canonical.com/juju) is live and already used in docs/how-to-guides/get-started/index.md, so that change is consistent. Two issues block a clean merge: (1) docs/explanation/security.md now points at https://wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019, which is a 404 — the new Ubuntu Wiki (MediaWiki 1.46.2) did not migrate the legacy Community Help pages, and the URL is not in `linkcheck_ignore` in docs/conf.py, so `make -C docs linkcheck` will flag it; (2) the apostrophe normalization is incomplete in docs/explanation/deploying-machines.md (5 U+2019 remain, including the paragraph immediately after the edited line), leaving mixed typography in a file the PR claims to normalize. Note also that this repo lints docs with Vale and pymarkdownlnt (docs/Makefile), not proselint; proselint&#x27;s only quote rule is `typography.symbols.curly_quotes`, which targets straight double quotes, not apostrophes, so the apostrophe edits are cosmetic rather than lint-driven. Small prose defects on lines touched by this PR in use-cases-server-lifecycle-management.md should be fixed in the same pass.</pre>
+<h4>Inline comments (3)</h4>
+<h5><code>docs/explanation/deploying-machines.md</code></h5>
+<ul><li><b>line 40</b>: Normalization is incomplete in this file: U+2019 apostrophes remain at lines 19 (`you’ve`), 27 and 33 (`machine’s`), 42 (`machine’s`, the very next paragraph), and 80 (`curtin’s`). This hunk changes one of six occurrences in the same file, so the result is mixed typography. Either convert the remaining five or drop this hunk and keep the file consistent.</li></ul>
+<h5><code>docs/explanation/security.md</code></h5>
+<ul><li><b>line 110</b>: This link is dead: https://wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019 returns HTTP 404, and a wiki search for the page title returns no results (the new Ubuntu Wiki at wiki.ubuntu.com did not migrate legacy Community Help content; archives live at github.com/ubuntu/wiki-archives). Since the URL is not covered by `linkcheck_ignore` in docs/conf.py, `make -C docs linkcheck` will report it as broken. Prefer a maintained target such as https://documentation.ubuntu.com/security/security-features/storage/encryption-full-disk/ (verified live), or link the archived page explicitly.</li></ul>
+<h5><code>docs/uncategorized/use-cases-server-lifecycle-management.md</code></h5>
+<ul><li><b>line 31</b>: This line still has a broken sentence on a line this PR rewrites: &quot;...very large supercomputing installations. and its bare-metal focus...&quot; should be one sentence (replace the period with a comma: &quot;installations, and its bare-metal focus&quot;). Two similar defects survive on other touched lines: line 15 has &quot;in MAAS.(as referenced by&quot; (missing space, stray period) and line 71 has &quot;in 1-2 years.– and tooling&quot; (stray period before the dash). Worth fixing while these lines are already being edited.</li></ul>
+</details>
+</section>
+<section class="case">
+<h3>
+<a href="https://github.com/canonical/maas/pull/806">PR #806</a>
+ · a0727d8211a11f19d6579247f398380264a742e2-pr806-review5614247103
+</h3>
+<p class="meta"><a href="https://github.com/canonical/maas/pull/806#pullrequestreview-5614247103">review 5614247103</a> · submitted 2026-10-22T12:38:56Z · landed a0727d8211 · reviewed head d253703f07 · base c1f1d6bb1c · diff 78 lines / 4,829 bytes</p>
+<table>
+<tr>
+<th>Model</th><th>Status</th><th>Wall</th><th>Model calls</th><th>Tool calls</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Total tokens</th><th>Cost</th><th>Comments</th>
+</tr>
+<tr><td>gemini-3.1-pro-preview</td><td class="muted">collected</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num">2</td></tr>
+<tr><td>github-copilot/claude-opus-5</td><td>succeeded</td><td class="num">1m 45s</td><td class="num">11</td><td class="num">17</td><td class="num">22</td><td class="num">6,357</td><td class="num">405,530</td><td class="num">52,687</td><td class="num">464,596</td><td class="num">$0.6911</td><td class="num">2</td></tr>
+<tr><td>openrouter/deepseek/deepseek-v4.1-flash-1017</td><td>succeeded</td><td class="num">1m 40s</td><td class="num">16</td><td class="num">28</td><td class="num">38,948</td><td class="num">10,762</td><td class="num">461,824</td><td class="num">—</td><td class="num">511,534</td><td class="num">$0.0122</td><td class="num">3</td></tr>
+</table>
+<h4>Issues · classified by openrouter/moonshotai/kimi-k3</h4>
+<table>
+<tr><th>Issue</th><th>Kind</th><th>Severity</th><th>gemini-3.1-pro-preview (original)</th><th>github-copilot/claude-opus-5</th><th>openrouter/deepseek/deepseek-v4.1-flash-1017</th></tr>
+<tr><td><b>Replace iptables link in logging.md; new wiki.ubuntu.com URL is a 404</b><br><span class="detail">docs/reference/configuration-guides/logging.md:16 changes the iptables link to https://wiki.ubuntu.com/IptablesHowTo, which is a dead page. gemini-3.1-pro-preview says the old help.ubuntu.com/community/IptablesHowTo URL was correct and asks to revert; claude-opus-5 and deepseek-v4.1-flash-1017 verified the old URL now redirects to the same 404 and propose a live replacement (e.g. https://documentation.ubuntu.com/server/how-to/security/firewalls/ or the netfilter packet-filtering HOWTO).</span></td><td>correctness</td><td>high</td><td class="center">✓</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Fix &#x27;Secure your deployment with HTTP&#x27; to HTTPS in air-gapped guide</b><br><span class="detail">docs/how-to-guides/set-up-air-gapped-maas.md:18 (just above the edited line 20) tells readers to secure the Enterprise Store deployment with HTTP; for a store serving snaps to restricted networks this should read HTTPS. Out of the diff but in the same section.</span></td><td>correctness</td><td>medium</td><td class="muted center">—</td><td class="muted center">—</td><td class="center">✓</td></tr>
+<tr><td><b>Fix dead maas.io tags-doc link in deploy-dpus-without-bmc.md:18</b><br><span class="detail">Not in this diff but the same class of breakage: docs/how-to-guides/deploy-dpus-without-bmc.md:18 links to https://maas.io/docs/how-to-work-with-tags, which redirects to canonical.com/maas/docs/stable/how-to-guides/work-with-tags/ and 404s; the in-repo equivalent is /how-to-guides/manage-machine-groups.md#manage-tags-in-maas.</span></td><td>correctness</td><td>medium</td><td class="muted center">—</td><td class="center">✓</td><td class="muted center">—</td></tr>
+<tr><td><b>Run make linkcheck; it is not bypassed for wiki.ubuntu.com</b><br><span class="detail">linkcheck_ignore in docs/conf.py is nearly empty and does not exempt wiki.ubuntu.com, and make -C docs linkcheck is wired as a pre-commit hook (docs/.sphinx/.pre-commit-config.yaml:11), so the introduced 404 would be flagged; running linkcheck on this branch is the cheap verification for a link-refresh PR.</span></td><td>testing</td><td>low</td><td class="muted center">—</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Simplify manage-machines link text; drop stale escaped hyphen</b><br><span class="detail">docs/how-to-guides/deploy-dpus.md:425 now points at an internal page (/how-to-guides/manage-machines.md), so the &#x27;MAAS Documentation \-&#x27; prefix is redundant and the escaped hyphen only existed for the old external title; e.g. &#x27;[Manage machines](/how-to-guides/manage-machines.md)&#x27; is clearer.</span></td><td>style</td><td>low</td><td class="center">✓</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Normalize trailing double-space hard breaks in deploy-dpus.md list</b><br><span class="detail">docs/how-to-guides/deploy-dpus.md:425 lost its trailing two-space hard break while sibling lines 426-428 keep theirs; harmless inside a list but inconsistent, normalize all four.</span></td><td>style</td><td>low</td><td class="muted center">—</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Link enterprise-store how-to page instead of docs landing page</b><br><span class="detail">docs/how-to-guides/set-up-air-gapped-maas.md:20 links https://ubuntu.com/enterprise-store/docs/ (verified 200, and the old URL already 301s here); https://ubuntu.com/enterprise-store/docs/how-to is closer to the offline/air-gapped procedure being described.</span></td><td>documentation</td><td>low</td><td class="muted center">—</td><td class="muted center">—</td><td class="center">✓</td></tr>
+<tr><td><b>Fix dead maas.io URL embedded in join-our-forum.md form prefill</b><br><span class="detail">Out of this diff: docs/uncategorized/join-our-forum.md:3 embeds a dead maas.io/docs URL as a Google Form prefill value; cosmetic only, but the same class of stale link this PR is cleaning up.</span></td><td>documentation</td><td>low</td><td class="muted center">—</td><td class="center">✓</td><td class="muted center">—</td></tr>
+</table>
+<h4>Reviews</h4>
+<details>
+<summary>Original review — gemini-3.1-pro-preview</summary>
+<p class="meta">collected with the case; no timing, token, or cost data</p>
+<h4>General comment</h4>
+<pre>[maas-code-reviewer review]
+
+&gt; LLM-generated review from https://github.com/canonical/maas-code-reviewer.
+&gt; Intended to assist a human reviewer, not replace one — suggestions may be
+&gt; incorrect, please verify before acting.
+
+
+Thank you for updating the documentation links. Most of the changes are correct and accurately reflect Canonical&#x27;s current web properties and documentation locations (such as the migration to `canonical.com` domain structures). However, one of the updates actually introduces a broken link to the `iptables` documentation. Please see the inline comments for details.</pre>
+<h4>Inline comments (2)</h4>
+<h5><code>docs/how-to-guides/deploy-dpus.md</code></h5>
+<ul><li><b>line 425</b>: Since this link now points to an internal page within the documentation repository, you might consider simplifying the link text to just `[How to Manage Machines](/how-to-guides/manage-machines.md)` to avoid redundancy with the &#x27;MAAS Documentation \-&#x27; prefix.</li></ul>
+<h5><code>docs/reference/configuration-guides/logging.md</code></h5>
+<ul><li><b>line 16</b>: The previous URL for the `iptables` documentation (`https://help.ubuntu.com/community/IptablesHowTo`) was actually correct. The Ubuntu Community Help Wiki is hosted at `help.ubuntu.com/community/`, whereas `wiki.ubuntu.com` is generally reserved for Ubuntu development, teams, and specs. There is no `IptablesHowTo` page on `wiki.ubuntu.com`, so this change will result in a broken link. Please revert this specific URL change.</li></ul>
+</details>
+<details>
+<summary>Review — github-copilot/claude-opus-5</summary>
+<p class="meta">attempt a1e7e62d28f44affa427c03accfeff5a · succeeded · wall 1m 45s · started 2026-10-25 21:02:50Z · 11 model calls · 17 tool calls</p>
+<h4>General comment</h4>
+<pre>[maas-code-reviewer review]
+
+&gt; LLM-generated review from https://github.com/canonical/maas-code-reviewer.
+&gt; Intended to assist a human reviewer, not replace one — suggestions may be
+&gt; incorrect, please verify before acting.
+
+
+Docs-only link refresh; five of six changes verified live. One regression: the iptables link in docs/reference/configuration-guides/logging.md now points at https://wiki.ubuntu.com/IptablesHowTo, which returns HTTP 404 (fetched directly; the old help.ubuntu.com/community/IptablesHowTo URL now 302s to that same 404, so the page is gone, not moved). Pick a live target instead.
+
+Verified working: https://docs.cloud-init.io/ (serves cloud-init 26.2 docs), https://canonical.com/multipass, https://ubuntu.com/enterprise-store/docs/ (documentation.ubuntu.com/enterprise-store redirects here, so the change follows the actual redirect), and docs/how-to-guides/manage-machines.md exists, so the root-relative link in deploy-dpus.md resolves and matches the dominant repo convention (e.g. decommission-maas.md:27, index.md:20).
+
+Not in this diff but the same class of breakage, worth folding in: docs/how-to-guides/deploy-dpus-without-bmc.md:18 still links to https://maas.io/docs/how-to-work-with-tags, which redirects to canonical.com/maas/docs/stable/how-to-guides/work-with-tags/ and 404s; the in-repo equivalent is /how-to-guides/manage-machine-groups.md#manage-tags-in-maas. docs/uncategorized/join-our-forum.md:3 embeds a dead maas.io/docs URL as a Google Form prefill value (cosmetic only).
+
+Note `linkcheck_ignore` in docs/conf.py is nearly empty, so `make linkcheck` would have caught the 404 above — running it on this branch is the cheap verification for this kind of PR.</pre>
+<h4>Inline comments (2)</h4>
+<h5><code>docs/how-to-guides/deploy-dpus.md</code></h5>
+<ul><li><b>line 425</b>: Target and style are right (root-relative .md matches the convention used across how-to-guides). Two nits while you&#x27;re here: the link text still reads like an external reference — &quot;MAAS Documentation \- How to Manage Machines&quot; — and carries an escaped hyphen that only existed for the old external title; `[Manage machines](/how-to-guides/manage-machines.md)` is clearer. Also this line lost its trailing two spaces while siblings 426-428 keep theirs; harmless inside a list, but normalize all four for consistency.</li></ul>
+<h5><code>docs/reference/configuration-guides/logging.md</code></h5>
+<ul><li><b>line 16</b>: Broken: https://wiki.ubuntu.com/IptablesHowTo returns HTTP 404 (verified by fetch). The legacy help.ubuntu.com/community/IptablesHowTo now redirects to this same 404, so the page was dropped in the wiki migration rather than relocated. Replace with a live target, e.g. https://documentation.ubuntu.com/server/how-to/security/firewalls/ (covers both iptables and ufw) or the upstream https://www.netfilter.org/documentation/HOWTO/packet-filtering-HOWTO.html. The UFW link on this line is fine — wiki.ubuntu.com/UncomplicatedFirewall redirects to the live UFW_development page.</li></ul>
+</details>
+<details>
+<summary>Review — openrouter/deepseek/deepseek-v4.1-flash-1017</summary>
+<p class="meta">attempt a80f3a3687fb4de0a7a66497a206779c · succeeded · wall 1m 40s · started 2026-10-25 21:04:26Z · 16 model calls · 28 tool calls</p>
+<h4>General comment</h4>
+<pre>[maas-code-reviewer review]
+
+&gt; LLM-generated review from https://github.com/canonical/maas-code-reviewer.
+&gt; Intended to assist a human reviewer, not replace one — suggestions may be
+&gt; incorrect, please verify before acting.
+
+
+Link-refresh-only PR. I verified each target live:
+
+- `https://ubuntu.com/enterprise-store/docs/` — 200 (markdown). Note the previous `documentation.ubuntu.com/enterprise-store` already 301s here, so this is forward-looking cleanup, not a fix of a broken link.
+- `https://docs.cloud-init.io/` — 200 (redirects to `/en/latest/`).
+- `https://canonical.com/maas` and `https://canonical.com/multipass` — 200.
+- `https://wiki.ubuntu.com/IptablesHowTo` — **HTTP 404**. The legacy MoinMoin content was retired when the new Ubuntu Wiki (MediaWiki) launched, and `help.ubuntu.com/community/IptablesHowTo` just redirects to this same 404. So `logging.md` is left broken; see the inline note for a verified replacement.
+- `/how-to-guides/manage-machines.md` (deploy-dpus.md) — valid: target exists and root-relative `.md` links are the established convention in this docs tree (e.g. `decommission-maas.md:27`, `how-to-guides/index.md:20-34`). `docs/conf.py` `linkcheck_ignore` does not cover `wiki.ubuntu.com`, so the `make -C docs linkcheck` pre-commit hook (docs/.sphinx/.pre-commit-config.yaml:11) would fail on the 404.
+
+No security or correctness concerns beyond the broken link; the remaining edits are cosmetic and safe.</pre>
+<h4>Inline comments (3)</h4>
+<h5><code>docs/how-to-guides/deploy-dpus.md</code></h5>
+<ul><li><b>line 425</b>: Internal target is correct (`docs/how-to-guides/manage-machines.md` exists and root-relative `.md` links match the tree&#x27;s convention). Minor: the escaped hyphen in `\-` is no longer needed for a plain link label, and this line dropped the trailing double-space hard break that lines 426-427 still carry — harmless in a list but inconsistent.</li></ul>
+<h5><code>docs/how-to-guides/set-up-air-gapped-maas.md</code></h5>
+<ul><li><b>line 20</b>: New target verified 200, but the old link already 301&#x27;d here, so nothing was broken. Two nits while you are in this section: step 2 above (line 18) says &quot;Secure your deployment with HTTP&quot; — for a store serving snaps to restricted networks this should read HTTPS; and linking the docs landing page is fine, but `https://ubuntu.com/enterprise-store/docs/how-to` is closer to the offline/air-gapped procedure being described.</li></ul>
+<h5><code>docs/reference/configuration-guides/logging.md</code></h5>
+<ul><li><b>line 16</b>: This URL is dead: `https://wiki.ubuntu.com/IptablesHowTo` returns HTTP 404 (verified), and the old `https://help.ubuntu.com/community/IptablesHowTo` now redirects to that same 404, so the change does not actually fix the reference. Use a live target instead, e.g. `https://documentation.ubuntu.com/server/how-to/security/firewalls/` (verified 200; it documents both iptables and ufw and the firewall log setup this section discusses). Note `make -C docs linkcheck` is a pre-commit hook here and `linkcheck_ignore` in docs/conf.py does not exempt `wiki.ubuntu.com`, so a 404 will be flagged.</li></ul>
+</details>
+</section>
+<section class="case">
+<h3>
+<a href="https://github.com/canonical/maas/pull/801">PR #801</a>
+ · 1803d8d92952023aefcf3775003acc9698e2154a-pr801-review5605883520
+</h3>
+<p class="meta"><a href="https://github.com/canonical/maas/pull/801#pullrequestreview-5605883520">review 5605883520</a> · submitted 2026-10-21T20:35:43Z · landed 1803d8d929 · reviewed head 5e54416a40 · base d19b2bd6a2 · diff 395 lines / 14,223 bytes</p>
+<table>
+<tr>
+<th>Model</th><th>Status</th><th>Wall</th><th>Model calls</th><th>Tool calls</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Total tokens</th><th>Cost</th><th>Comments</th>
+</tr>
+<tr><td>gemini-3.1-pro-preview</td><td class="muted">collected</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num">0</td></tr>
+<tr><td>github-copilot/claude-opus-5</td><td>succeeded</td><td class="num">3m 53s</td><td class="num">17</td><td class="num">24</td><td class="num">34</td><td class="num">16,939</td><td class="num">644,666</td><td class="num">38,712</td><td class="num">700,351</td><td class="num">$0.9879</td><td class="num">7</td></tr>
+<tr><td>openrouter/deepseek/deepseek-v4.1-flash-1017</td><td>succeeded</td><td class="num">3m 49s</td><td class="num">47</td><td class="num">83</td><td class="num">209,457</td><td class="num">45,307</td><td class="num">2,601,006</td><td class="num">—</td><td class="num">2,855,770</td><td class="num">$0.0787</td><td class="num">3</td></tr>
+</table>
+<h4>Issues · classified by openrouter/moonshotai/kimi-k3</h4>
+<table>
+<tr><th>Issue</th><th>Kind</th><th>Severity</th><th>gemini-3.1-pro-preview (original)</th><th>github-copilot/claude-opus-5</th><th>openrouter/deepseek/deepseek-v4.1-flash-1017</th></tr>
+<tr><td><b>Bind dhcp-data access to the authenticated agent&#x27;s rack</b><br><span class="detail">get_agent_dhcp_data takes system_id from the path with only mTLS for authorization (agent.py:212), so any enrolled agent can dump another rack&#x27;s DHCP inventory (host reservations with MACs/hostnames, HA rack IPs, DNS/NTP). The middleware already exposes the agent UUID as request.scope[&quot;client_cn&quot;]; reviewers suggest resolving CN -&gt; agent -&gt; rackcontroller_id -&gt; system_id and 403-ing mismatches, or documenting the flat-trust model explicitly.</span></td><td>security</td><td>high</td><td class="muted center">—</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Define explicit API response models instead of service-layer dataclasses</b><br><span class="detail">AgentDHCPDataResponse embeds maasservicelayer.models.dhcp dataclasses (VlanData, SubnetData, etc.) verbatim as the API schema (responses/agent.py:73), so a service-layer field rename silently becomes a breaking agent wire-protocol change, bypassing the three-tier split used elsewhere (e.g. responses/domains.py). Note pydantic v2 does not revalidate already-built stdlib dataclass instances, so the annotations only document, not enforce, the schema.</span></td><td>style</td><td>medium</td><td class="muted center">—</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Add ETag caching to the large polled dhcp-data payload</b><br><span class="detail">The 200 response declares no headers and sets no ETag, unlike /agents/{uuid}/config which uses OPENAPI_ETAG_HEADER (agent.py:201). Agents will poll this endpoint and its payload is large (ranges are duplicated under both ipranges and subnets[].pools); an ETag over the serialized DHCPDataForAgent would let agents skip unchanged configs.</span></td><td>performance</td><td>medium</td><td class="muted center">—</td><td class="center">✓</td><td class="muted center">—</td></tr>
+<tr><td><b>Declare the 403 response in the handler&#x27;s response map</b><br><span class="detail">RequireClientCertMiddleware can return 403 for this path, but the @handler responses dict (agent.py:201) only declares 200/404/422, so the OpenAPI schema understates the endpoint&#x27;s possible responses.</span></td><td>documentation</td><td>low</td><td class="muted center">—</td><td class="center">✓</td><td class="muted center">—</td></tr>
+<tr><td><b>Remove redundant explicit 422 response entry</b><br><span class="detail">maasapiserver.common.api.base.handler() already injects 422: ValidationErrorBodyResponse whenever responses is provided, so the explicit entry at agent.py:203 (and the ValidationErrorBodyResponse import) duplicates the default the sibling handlers rely on.</span></td><td>style</td><td>low</td><td class="muted center">—</td><td class="muted center">—</td><td class="center">✓</td></tr>
+<tr><td><b>Confirm intent behind dhcp-data having no consumer yet</b><br><span class="detail">Nothing under src/maasagent (or elsewhere) references /dhcp-data, so the PR adds unreferenced API surface; confirm a follow-up wires the agent to it or that a backend-only step is deliberate.</span></td><td>scope</td><td>low</td><td class="muted center">—</td><td class="muted center">—</td><td class="center">✓</td></tr>
+<tr><td><b>Settle route shape relative to sibling DHCP route before clients adopt it</b><br><span class="detail">The new route is /agents/{system_id}/dhcp-data while the sibling DHCP route is /agents/{system_id}/services/dhcp/config; not wrong, but the shape should be settled before the Go client is written against it.</span></td><td>style</td><td>low</td><td class="muted center">—</td><td class="muted center">—</td><td class="center">✓</td></tr>
+<tr><td><b>Drop no-op f-string wrapper around href construction</b><br><span class="detail">In AgentDHCPDataResponse.from_model (responses/agent.py:94), href=f&quot;{self_base_hyperlink.rstrip(&#x27;/&#x27;)}&quot; is equivalent to self_base_hyperlink.rstrip(&quot;/&quot;) and inconsistent with AgentConfigResponse.from_model and responses/domains.py:208.</span></td><td>style</td><td>low</td><td class="muted center">—</td><td class="center">✓</td><td class="muted center">—</td></tr>
+<tr><td><b>Remove client-certificate test that re-exercises global middleware</b><br><span class="detail">test_agent_dhcp_data_requires_client_certificate (test_agent.py:368) tests RequireClientCertMiddleware added by the app fixture, not the handler; that 403-on-missing-CN behavior is already covered in src/tests/maasapiserver/v3/middlewares/test_client_certificate.py. The test and the InjectTLSWithoutClientCert middleware can be dropped unless kept as a guard against an exemption-list regression, which would warrant a comment.</span></td><td>testing</td><td>low</td><td class="muted center">—</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Remove tautological pass-through assertions in from_model test</b><br><span class="detail">TestAgentDHCPDataResponse.test_from_model (responses test_agent.py:69) asserts plain field copying (response.vlans == dhcp_data.vlans, interfaces, ha_data) and a literal kind default; only hal_links.self.href (the rstrip handling) pins real behavior, and the handler test already covers the serialized payload.</span></td><td>testing</td><td>low</td><td class="muted center">—</td><td class="center">✓</td><td class="center">✓</td></tr>
+<tr><td><b>Parametrize the near-identical 404 and 422 handler tests</b><br><span class="detail">test_agent_dhcp_data_404 and test_agent_dhcp_data_422_when_rack_not_configured (test_agent.py:386) differ only in the mocked exception and expected status, both verifying the shared exception-middleware mapping; a single @pytest.mark.parametrize case would remove ~30 duplicated lines.</span></td><td>testing</td><td>low</td><td class="muted center">—</td><td class="center">✓</td><td class="muted center">—</td></tr>
+</table>
+<h4>Reviews</h4>
+<details>
+<summary>Original review — gemini-3.1-pro-preview</summary>
+<p class="meta">collected with the case; no timing, token, or cost data</p>
+<h4>General comment</h4>
+<pre>[maas-code-reviewer review]
+
+&gt; LLM-generated review from https://github.com/canonical/maas-code-reviewer.
+&gt; Intended to assist a human reviewer, not replace one — suggestions may be
+&gt; incorrect, please verify before acting.
+
+
+The implementation of the new agent DHCP data endpoint looks solid. The integration with the service layer and the mapping to the response model are straightforward and well-tested. Security is correctly enforced via client certificates as shown in the test suite. The test coverage correctly validates success and failure paths (e.g., 403, 404, 422). I found no bugs or major issues.
+
+Great work overall!</pre>
+<h4>Inline comments (0)</h4>
+<p class="meta">None.</p>
+</details>
+<details>
+<summary>Review — github-copilot/claude-opus-5</summary>
+<p class="meta">attempt b36ffc61c2424aad9d1fb7782a4c2483 · succeeded · wall 3m 53s · started 2026-10-25 21:00:32Z · 17 model calls · 24 tool calls</p>
+<h4>General comment</h4>
+<pre>[maas-code-reviewer review]
+
+&gt; LLM-generated review from https://github.com/canonical/maas-code-reviewer.
+&gt; Intended to assist a human reviewer, not replace one — suggestions may be
+&gt; incorrect, please verify before acting.
+
+
+Endpoint wiring is correct and consistent with the rest of `AgentHandler`: `services.dhcp` exists on `ServiceCollectionV3` (`src/maasservicelayer/services/__init__.py:279,658`), and the service raises exactly the `NotFoundException`/`ValidationException` mapped to the declared 404/422 (`src/maasservicelayer/services/dhcp.py:126-138`). No consumer exists yet for `/dhcp-data` (grep finds only the new code and tests), so the wire contract is still free to change — worth getting right now.
+
+Main concerns, in order:
+
+1. Authorization granularity. The handler trusts any valid client certificate and returns the full DHCP inventory of an arbitrary `system_id` (host reservations with MAC addresses and hostnames, HA rack IPs, DNS/NTP servers). `RequireClientCertMiddleware` only proves &quot;some enrolled agent&quot; and stores the agent UUID in `request.scope[&quot;client_cn&quot;]` (`src/maasapiserver/v3/middlewares/client_certificate.py:45`), which this handler ignores. `/agents/{uuid}/config` has the same gap, so this follows existing practice — but the new endpoint broadens what one compromised agent can enumerate across the whole fleet. Either bind CN -&gt; agent -&gt; `rackcontroller_id` -&gt; `system_id` and reject mismatches, or state the flat-trust model explicitly so it is a decision rather than an omission.
+
+2. Layering. `AgentDHCPDataResponse` embeds the service-layer stdlib dataclasses (`VlanData`, `SubnetData`, ...) directly as the response schema, unlike every other response module in this tree (e.g. `CNAMERecordResponse` in `responses/domains.py`), so any service-layer field rename silently changes the agent-facing payload. Note pydantic v2 does not revalidate already-constructed dataclass instances (pydantic/pydantic#5621), so these annotations provide schema text only, no validation.
+
+3. Caching. `/config` sets an `ETag` and declares `OPENAPI_ETAG_HEADER`; this endpoint, which agents will poll and whose payload is far larger (and duplicates every range under both `ipranges` and `subnets[].pools`), has neither.
+
+4. Tests. Coverage of the 200 path is good; the 403 case re-tests global middleware already covered by `src/tests/maasapiserver/v3/middlewares/test_client_certificate.py`, and several assertions only verify field copying, which AGENTS.md asks you to avoid.</pre>
+<h4>Inline comments (7)</h4>
+<h5><code>src/maasapiserver/v3/api/internal/handlers/agent.py</code></h5>
+<ul><li><b>line 201</b>: The 200 entry declares no headers, unlike `/agents/{uuid}/config` which declares `OPENAPI_ETAG_HEADER` and sets `response.headers[&quot;ETag&quot;]`. This payload is both the largest the agent fetches and the one it will poll; an ETag (e.g. hashing the serialized `DHCPDataForAgent`) would let agents skip unchanged configs. Also consider declaring 403 here, since `RequireClientCertMiddleware` can return it for this path.</li><li><b>line 212</b>: `system_id` is taken straight from the path with no check against the authenticated client. `RequireClientCertMiddleware` sets `request.scope[&quot;client_cn&quot;]` (the agent UUID) and nothing here consumes it, so any enrolled agent can dump another rack&#x27;s DHCP inventory — host reservations, MAC addresses, hostnames, HA rack IPs. Suggest resolving the agent from the CN and 403-ing when its `rackcontroller_id` does not map to `system_id`; if flat trust between agents is intentional, say so in the handler docstring.</li></ul>
+<h5><code>src/maasapiserver/v3/api/internal/models/responses/agent.py</code></h5>
+<ul><li><b>line 73</b>: These are `maasservicelayer.models.dhcp` dataclasses used verbatim as the API schema, which couples the agent wire format to the service layer — a field rename in `SubnetData` silently becomes a breaking protocol change, and the three-tier split used elsewhere in this package (e.g. `CNAMERecordResponse` in `responses/domains.py`) is bypassed. Also note pydantic v2 does not revalidate already-built stdlib dataclass instances, so these annotations only document the schema; they do not enforce it. Recommend explicit response models (or at minimum a comment stating the coupling is deliberate because the agent is the sole consumer).</li><li><b>line 94</b>: The f-string wrapper is a no-op: `href=self_base_hyperlink.rstrip(&quot;/&quot;)` is equivalent and matches `AgentConfigResponse.from_model` / `responses/domains.py:208`.</li></ul>
+<h5><code>src/tests/maasapiserver/v3/api/internal/handlers/test_agent.py</code></h5>
+<ul><li><b>line 368</b>: This exercises `RequireClientCertMiddleware` (added by the fixture at `src/tests/maasapiserver/fixtures/app.py:102`), not the handler, and the 403-on-missing-CN behaviour is already asserted in `src/tests/maasapiserver/v3/middlewares/test_client_certificate.py`. Per AGENTS.md (&quot;avoid trivial assertions&quot;, &quot;keep tests minimal&quot;) this and `InjectTLSWithoutClientCert` can be dropped — unless the intent is to guard against `/dhcp-data` being added to the middleware&#x27;s exemption list, in which case a comment saying so would help.</li><li><b>line 386</b>: The 404 and 422 tests differ only in the exception the mocked service raises and the expected status; both verify the shared exception middleware&#x27;s mapping rather than handler logic. Collapsing them into one `@pytest.mark.parametrize(&quot;error,status&quot;, ...)` case would remove ~30 duplicated lines.</li></ul>
+<h5><code>src/tests/maasapiserver/v3/api/internal/models/responses/test_agent.py</code></h5>
+<ul><li><b>line 69</b>: `response.vlans == dhcp_data.vlans`, `response.interfaces == ...`, `response.ha_data == ...` assert plain field copying, and `kind` asserts a literal default — all tautological. The only behaviour worth pinning here is `hal_links.self.href` (the `rstrip(&quot;/&quot;)` handling); consider keeping that assertion and dropping the rest, since the handler test already covers the serialized payload.</li></ul>
+</details>
+<details>
+<summary>Review — openrouter/deepseek/deepseek-v4.1-flash-1017</summary>
+<p class="meta">attempt 90732d51dcc34824815132d7c3ecd41d · succeeded · wall 3m 49s · started 2026-10-25 21:00:38Z · 47 model calls · 83 tool calls</p>
+<h4>General comment</h4>
+<pre>[maas-code-reviewer review]
+
+&gt; LLM-generated review from https://github.com/canonical/maas-code-reviewer.
+&gt; Intended to assist a human reviewer, not replace one — suggestions may be
+&gt; incorrect, please verify before acting.
+
+
+Adds a read-only internal endpoint `/agents/{system_id}/dhcp-data` that wraps `DHCPService.get_kea_dhcp_data_for_agent` in a HAL response, with 200/404/422 and an mTLS-required case. The handler/model/tests are consistent with existing internal agent handlers and I found no functional defect by inspection. Non-blocking points:
+
+- The response schema reuses `maasservicelayer.models.dhcp` dataclasses as field types (inline comment). It works with Pydantic v2, but it makes service DTOs the agent wire contract: renaming/removing/retyping a dataclass field silently changes the JSON and OpenAPI schema consumed by deployed agents.
+- Authorization is mTLS-only and `system_id` comes from the path (inline comment). That matches the documented design in `main.py` (&quot;internal endpoints ... rely on the fact that uvicorn is providing security on top&quot;) and the sibling `/agents/{system_id}/services/...` route, so it may be intended, but this payload exposes host reservations (MAC/IP/hostname) and HA topology for any rack, and the authenticated identity is available (`request.scope[&quot;client_cn&quot;]`, which is the agent UUID created in `enroll_agent`) to bind the request to one rack.
+- The explicit 422 entry duplicates what `maasapiserver.common.api.base.handler` already injects (inline comment); removing it also makes the `ValidationErrorBodyResponse` import unnecessary.
+- Nothing under `src/maasagent` (or elsewhere) references `/dhcp-data` yet, so this adds unreferenced API surface; confirm a follow-up wires the agent to it, or that a backend-only step is intentional.
+- Test value: `test_agent_dhcp_data_requires_client_certificate` re-exercises the pre-existing `RequireClientCertMiddleware` (already covered in `src/tests/maasapiserver/v3/middlewares/test_client_certificate.py`) rather than endpoint-specific authorization; it is a harmless guard against an accidental `/agents:enroll`-style exemption but should not be counted as coverage for the cross-rack read above. `TestAgentDHCPDataResponse.test_from_model` asserts pass-through values (`response.vlans == dhcp_data.vlans`); the handler-level JSON assertions are the meaningful ones.
+- Naming: the new route uses `.../dhcp-data` while the sibling DHCP route is `/agents/{system_id}/services/dhcp/config`; not wrong, but settle the shape before the Go client is written against it.
+
+I did not execute the test suite in this container; the above is from static inspection of the diff and surrounding code.</pre>
+<h4>Inline comments (3)</h4>
+<h5><code>src/maasapiserver/v3/api/internal/handlers/agent.py</code></h5>
+<ul><li><b>line 203</b>: `handler()` in `maasapiserver/common/api/base.py` already injects `422: {&quot;model&quot;: ValidationErrorBodyResponse}` whenever `responses` is provided, so this entry (and the corresponding import) is redundant; the sibling handlers in this file rely on that default.</li><li><b>line 212</b>: `system_id` is taken verbatim from the caller while the only authorization is mTLS, so any enrolled rack agent can fetch another rack&#x27;s DHCP data (host reservations, DNS/NTP, HA topology). This mirrors the existing `/agents/{system_id}/services/...` route, but note the caller&#x27;s identity is available: `enroll_agent` sets the client cert CN to the agent UUID, and the middleware exposes it as `request.scope[&quot;client_cn&quot;]`. If cross-rack reads are not intended, resolve the rack from that authenticated agent (agent -&gt; `rackcontroller_id` -&gt; node `system_id`) and reject mismatches, or drop the path parameter entirely.</li></ul>
+<h5><code>src/maasapiserver/v3/api/internal/models/responses/agent.py</code></h5>
+<ul><li><b>line 73</b>: These fields use service-layer dataclasses as the API response schema. Pydantic v2 validates/serializes stdlib dataclasses fine, but this couples the agent wire format (and generated OpenAPI) to `maasservicelayer.models.dhcp`: renaming, retyping, or removing a dataclass field changes the endpoint contract for already-deployed agents with no change in this file. Consider declaring explicit API-side response models here (or mapping field-by-field in `from_model`) so service refactors cannot silently break the agent protocol.</li></ul>
+</details>
+</section>
+</body>
+</html>

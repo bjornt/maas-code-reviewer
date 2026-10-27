@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nDocs-only link refresh. Five of six changes verified correct: the internal link in deploy-dpus.md matches the repo's root-relative convention and its target docs/how-to-guides/manage-machines.md exists; ubuntu.com/enterprise-store/docs/, docs.cloud-init.io/, canonical.com/maas, and canonical.com/multipass all resolve to the intended live pages. One regression: the logging.md change replaces a working help.ubuntu.com/community/IptablesHowTo link with wiki.ubuntu.com/IptablesHowTo, which returns HTTP 404 \u2014 the IptablesHowTo page lives only on the Community Help Wiki (help.ubuntu.com/community), not on wiki.ubuntu.com. That hunk should be reverted or pointed back at the help.ubuntu.com URL.",
+  "inline_comments": {
+    "docs/reference/configuration-guides/logging.md": {
+      "16": "The new URL https://wiki.ubuntu.com/IptablesHowTo returns HTTP 404 \u2014 wiki.ubuntu.com has no IptablesHowTo page. The page exists only on the Community Help Wiki at https://help.ubuntu.com/community/IptablesHowTo (the original URL, which is still live and titled \"IptablesHowTo - Community Help Wiki\"). This change turns a working link into a broken one; please revert to the help.ubuntu.com URL."
+    }
+  }
+}

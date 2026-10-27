@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nThis PR is almost entirely typographic normalization for proselint compliance: converting curly apostrophes (') to straight ASCII (') across five docs files, plus two link changes. The apostrophe conversions are correct and benign. One link change is fine (juju.is \u2192 canonical.com/juju is the current canonical Juju site), but the other introduces a broken link (see inline comment). Also note the normalization is incomplete: curly double quotation marks (e.g. \u201cdeploy only machines with SSDs\u201d in manage-machine-groups.md) are left intact, so if the goal is full proselint typography compliance these lines will still fail its curly_quotes check.",
+  "inline_comments": {
+    "docs/explanation/security.md": {
+      "110": "The new URL https://wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019 returns HTTP 404. The old Ubuntu community wiki content (help.ubuntu.com/community) was decommissioned, and the page Full_Disk_Encryption_Howto_2019 does not exist on the relaunched wiki.ubuntu.com (verified: fetching the URL 404s, and an on-wiki search for 'full disk encryption' returns no such page; the only related result is Security/FAQ). This change swaps one dead link for another 404 rather than fixing it. Consider linking to the actual new wiki page (e.g. Security/FAQ's FDE guidance) or upstream documentation instead."
+    }
+  }
+}

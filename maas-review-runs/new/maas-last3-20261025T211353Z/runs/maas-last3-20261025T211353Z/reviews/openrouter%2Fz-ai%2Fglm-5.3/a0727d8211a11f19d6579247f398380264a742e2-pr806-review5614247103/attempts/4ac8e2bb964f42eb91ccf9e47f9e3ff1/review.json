@@ -1,0 +1,23 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nDocs-only link refresh, low risk. I fetched every replacement URL live: https://ubuntu.com/enterprise-store/docs/ (serves the Enterprise Store documentation index), https://docs.cloud-init.io/ (current cloud-init docs home), https://canonical.com/maas and https://canonical.com/multipass (where maas.io and multipass.run now redirect), plus the internal /how-to-guides/manage-machines.md (target exists, and the root-absolute form matches the convention used throughout docs/, cf. docs/uncategorized/maas-documentation-style-guide.md 'Format hyperlinks as [text](/URL)'). Those five changes are correct. One blocker: the iptables replacement in logging.md points at https://wiki.ubuntu.com/IptablesHowTo, which returns 404 today - the page was never migrated to the new Ubuntu wiki (launched Nov 2025), and the old help.ubuntu.com/community URL redirects to exactly this dead target, so the diff hard-codes a still-broken link. Secondary: the maas.io/docs migration is incomplete - deploy-dpus-without-bmc.md:18 still uses https://maas.io/docs/how-to-work-with-tags#heading--automatic-tags, which now redirects to a 404 under canonical.com/maas/docs. No security concerns.",
+  "inline_comments": {
+    "docs/reference/configuration-guides/logging.md": {
+      "16": "This replacement does not fix the broken link: https://wiki.ubuntu.com/IptablesHowTo returns 404 (verified by direct fetch). The old https://help.ubuntu.com/community/IptablesHowTo now redirects to exactly this wiki.ubuntu.com/IptablesHowTo - the page was never migrated to the new Ubuntu wiki (announced Nov 2025, discourse.ubuntu.com/t/the-new-ubuntu-wiki-has-launched/88171; the new wiki banner itself warns 'Legacy content may be unavailable and page links may have changed'). So the change just hard-codes the redirect target of a dead link. Point at a resource that resolves instead: https://wiki.ubuntu.com/UFW (200) which links Canonical's official firewall guide at https://ubuntu.com/server/docs/how-to/security/firewalls/, or the iptables manpage at https://manpages.ubuntu.com/manpages/noble/man8/iptables.8.html. While here, note the adjacent unchanged UFW link https://wiki.ubuntu.com/UncomplicatedFirewall also silently redirects to UFW_development, so both could be tidied in one pass."
+    },
+    "docs/how-to-guides/deploy-dpus.md": {
+      "425": "Good change: /how-to-guides/manage-machines.md follows the repo's root-absolute internal-link convention used across docs/ and the target file exists. However, the maas.io/docs migration this PR is doing is incomplete: docs/how-to-guides/deploy-dpus-without-bmc.md:18 still links https://maas.io/docs/how-to-work-with-tags#heading--automatic-tags, which now redirects to https://canonical.com/maas/docs/stable/how-to-guides/work-with-tags/ -> 404 (verified live). Convert that one to an internal link too (tag management is covered by /how-to-guides/manage-machine-groups.md). Nit: the two trailing spaces used as a hard line-break on the neighbouring bullets were dropped on this line - no rendering impact in a list, just inconsistent."
+    },
+    "docs/how-to-guides/set-up-air-gapped-maas.md": {
+      "20": "Verified live: https://ubuntu.com/enterprise-store/docs/ serves the Enterprise Store (formerly Snap Store Proxy) documentation index, so this correctly replaces the old documentation.ubuntu.com/enterprise-store location. Good change."
+    },
+    "docs/reference/configuration-guides/cloud-init.md": {
+      "7": "Verified: https://docs.cloud-init.io/ is the current home of the cloud-init docs (the project moved off cloudinit.readthedocs.io) and resolves fine. Good change."
+    },
+    "docs/tutorial.md": {
+      "152": "Verified: https://canonical.com/maas resolves and is where https://maas.io now redirects, and it matches 'product_page': 'canonical.com/maas' already set in docs/conf.py, so the docs and product site stay consistent. Good change."
+    },
+    "docs/tutorials/harden-a-maas-test-controller.md": {
+      "13": "Verified: https://canonical.com/multipass resolves and is where https://multipass.run redirects now. Good change."
+    }
+  }
+}

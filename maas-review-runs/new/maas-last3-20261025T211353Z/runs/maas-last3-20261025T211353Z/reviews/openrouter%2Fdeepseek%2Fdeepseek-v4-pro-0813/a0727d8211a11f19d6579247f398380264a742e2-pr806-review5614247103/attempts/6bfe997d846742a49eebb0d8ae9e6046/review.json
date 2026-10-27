@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nDocumentation-only link update. Most targets resolve correctly: docs.cloud-init.io and canonical.com/maas (previously maas.io) are the current canonical homes, canonical.com/multipass is the live Multipass landing page, and ubuntu.com/enterprise-store/docs/ serves the Enterprise Store docs. The internal link /how-to-guides/manage-machines.md in deploy-dpus.md targets an existing file and matches the established internal-link convention used throughout the docs. However, one change in logging.md replaces a working URL with a broken one, which is directly contrary to the PR's stated goal of resolving broken references.",
+  "inline_comments": {
+    "docs/reference/configuration-guides/logging.md": {
+      "16": "The new URL https://wiki.ubuntu.com/IptablesHowTo returns HTTP 404 (confirmed by direct fetch). The 'IptablesHowTo' page lives on the Community Help Wiki at https://help.ubuntu.com/community/IptablesHowTo, not on wiki.ubuntu.com (which hosts e.g. /UncomplicatedFirewall). The original URL being replaced here was correct and still resolves, so this change introduces a broken link; revert it or point to the still-live help.ubuntu.com page."
+    }
+  }
+}

@@ -1,0 +1,249 @@
+diff --git a/docs/conf.py b/docs/conf.py
+index 0e7d37249..dd66858f4 100644
+--- a/docs/conf.py
++++ b/docs/conf.py
+@@ -351,6 +351,7 @@ extensions += [
+     "sphinx_ubuntu_images",
+     "sphinx_youtube_links",
+     "sphinxcontrib.cairosvgconverter",
++    "sphinxcontrib.mermaid",
+     "sphinx.ext.intersphinx",
+     "sphinx_sitemap",
+ ]
+diff --git a/docs/explanation/security.md b/docs/explanation/security.md
+index 3163b965f..f7b6ffae5 100644
+--- a/docs/explanation/security.md
++++ b/docs/explanation/security.md
+@@ -2,6 +2,73 @@
+ 
+ MAAS enforces strict access control and secure secret management to protect system integrity.
+ 
++## Reporting vulnerabilities
++
++MAAS follows the [Ubuntu disclosure policy](https://ubuntu.com/security/disclosure-policy). If you discover a security issue, see the [MAAS security policy](https://github.com/canonical/maas/blob/master/SECURITY.md) for how to report it.
++
++Because security fixes are included in regular MAAS releases, keeping your system up to date is the best way to stay protected. Check out [Supported MAAS versions](https://canonical.com/maas/docs/release-information/supported-maas-versions/) to see if your current version is still receiving updates.
++
++## Security architecture
++
++A MAAS deployment is made of region controllers, rack controllers, a PostgreSQL database, and the machines that MAAS manages. Each of these components sits on one side of a trust boundary, and every boundary is protected by its own security controls.
++
++```{mermaid}
++flowchart LR
++    subgraph EXT["External"]
++        USERS["Administrators, users<br/>and API clients"]
++        IDP["Identity provider<br/>(OIDC)"]
++        IMG["Image and package<br/>repositories"]
++    end
++
++    subgraph CP["MAAS control plane"]
++        REGION["Region controller<br/>(web UI and API)"]
++        DB[("PostgreSQL")]
++        VAULT[("Vault<br/>(optional)")]
++        RACK["Rack controller"]
++    end
++
++    subgraph PN["Provisioning network"]
++        MACHINES["Machines"]
++        BMC["BMCs"]
++    end
++
++    USERS -->|"HTTP or HTTPS"| REGION
++    IDP -->|"Single sign-on"| REGION
++    IMG -->|"Signed images"| REGION
++    REGION --> DB
++    REGION --> VAULT
++    RACK <-->|"RPC with shared secret"| REGION
++    RACK -->|"DHCP, TFTP and HTTP"| MACHINES
++    RACK -->|"Power drivers"| BMC
++```
++
++### Components
++
++* **Region controller**: serves the web UI and the API, and orchestrates the rest of MAAS. It also runs the Temporal server, which orchestrates MAAS workflows. See [Region controllers](/explanation/controllers.md#region-controllers).
++* **Rack controller**: provides DHCP, TFTP, HTTP boot, and power management to the machines on its fabrics. It also runs the MAAS Agent, which connects to the region controller. See [Rack controllers](/explanation/controllers.md#rack-controllers).
++* **PostgreSQL**: stores the state of MAAS, including credentials. See [PostgreSQL security](#postgresql-security).
++* **HashiCorp Vault**: optionally stores MAAS secrets outside the database. See [HashiCorp Vault](#hashicorp-vault).
++* **Load balancer**: optionally distributes web UI and API requests across region controllers, and can terminate TLS. See [Highly available API with HAProxy](/how-to-guides/manage-high-availability.md#highly-available-api-with-haproxy).
++* **Machines and BMCs**: the servers that MAAS commissions and deploys, and the baseboard management controllers that MAAS uses to power them on and off. See [The machine life cycle](/explanation/the-machine-life-cycle.md).
++
++### Access to the region controller
++
++Administrators, users, and API clients only interact with the region controller, through the web UI, the CLI, or the API. Users authenticate with a password, an API key, or [single sign-on](/how-to-guides/sso.md), and each request is authorized against the user's [entitlements](#fine-grained-authorization).
++
++By default, the web UI and the API use HTTP. To encrypt this traffic, [enable TLS](/how-to-guides/enhance-maas-security.md#use-tls-termination-maas-33). When TLS is enabled, the region controller still serves an internal HTTP endpoint for the rack controllers.
++
++### External services
++
++The region controller downloads boot images from image repositories and verifies them with a GPG keyring. See [Configure boot sources](/how-to-guides/manage-images.md#configure-boot-sources). When single sign-on is configured, the region controller also trusts an external OIDC identity provider to authenticate users.
++
++### Communication between controllers
++
++Rack controllers have no direct access to the database. They communicate with the region controller over RPC, authenticated with the [shared secret](#shared-secrets), and the MAAS Agent connects to the internal API of the region controller on port 5242.
++
++### Provisioning network
++
++Rack controllers boot machines over DHCP, TFTP, and HTTP, and control them through their BMCs with power drivers. Network boot protocols do not authenticate the machines, so keep the provisioning network isolated from untrusted networks. To restrict the ports that MAAS exposes, see [Manage network ports](/how-to-guides/enhance-maas-security.md#manage-network-ports).
++
+ ## TLS termination
+ 
+ SSL should be replaced with Transport Layer Security (TLS).  A TLS-terminated load balancer routes incoming Web UI and API requests across region controllers, reducing workload and latency.  Encryption and decryption occur at the edge of the network; in this case, right at the load balancer. TLS better ensures privacy and data integrity through symmetric cryptography and message authentication codes.
+@@ -69,6 +136,26 @@ MAAS enforces these entitlements on every request, so users cannot access machin
+ 
+ For the full permission model, the list of available entitlements, and CLI examples, see [User groups and entitlements](/how-to-guides/user-groups-and-entitlements.md).
+ 
++## Risks and recommended controls
++
++Some risks come from the way MAAS works, and MAAS cannot remove them on its own. You are responsible for the controls that reduce them.
++
++### Inherent risks
++
++* **Network boot is not authenticated.** DHCP, TFTP, and HTTP boot do not authenticate machines or controllers. Any device on the provisioning network can answer boot requests or impersonate a machine.
++* **Administrators have full control.** An administrator can manage every machine, user, and setting in MAAS, including the credentials that MAAS uses to power machines on and off.
++* **MAAS stores credentials.** The database, Vault, and the backups contain BMC credentials, API keys, and other secrets. Anyone who can read them and reach the MAAS API or the management network can control your machines.
++
++### Recommended controls
++
++* **Keep MAAS and its hosts up to date.** Use a [supported MAAS version](https://canonical.com/maas/docs/release-information/supported-maas-versions/). The MAAS snap is refreshed automatically to new point releases of its track (for example, from x.y.1 to x.y.2). Upgrading to a new version (for example, from x.6 to x.7) is manual, including when your version reaches the end of its support. Delaying updates might leave vulnerabilities unpatched. See [Upgrade MAAS](/how-to-guides/upgrade-maas.md).
++* **Use strong authentication.** Use [strong passwords](#strong-passwords). If you use [single sign-on](/how-to-guides/sso.md), enable multi-factor authentication in your identity provider.
++* **Limit privileges.** Keep the number of administrators small, and grant other users only the [entitlements](#fine-grained-authorization) they need.
++* **Enable TLS with a trusted certificate.** See [Enhance MAAS security](/how-to-guides/enhance-maas-security.md#use-tls-termination-maas-33).
++* **Back up MAAS and encrypt the backups.** Store them in a location with restricted access. See [Back up MAAS](/how-to-guides/back-up-maas.md).
++* **Isolate the provisioning network.** Restrict the ports that MAAS exposes with a [firewall](/how-to-guides/enhance-maas-security.md#manage-network-ports), and configure your switches to prevent DHCP and ARP spoofing.
++* **Restrict physical access** to the controllers and the machines that MAAS manages.
++
+ ## Security consulting
+ 
+ If you need help implementing MAAS security, please [contact us](/uncategorized/contact-us.md). We will be happy to assist you in arranging security consulting appropriate to your needs.
+diff --git a/docs/how-to-guides/decommission-maas.md b/docs/how-to-guides/decommission-maas.md
+new file mode 100644
+index 000000000..ca4e7b7de
+--- /dev/null
++++ b/docs/how-to-guides/decommission-maas.md
+@@ -0,0 +1,79 @@
++# Decommission MAAS
++
++This guide shows you how to remove MAAS from your environment without leaving data, credentials, or references behind.
++
++If your controllers run in virtual machines, you can delete the virtual machines instead of removing the snap and sanitizing their disks. The other steps still apply.
++
++:::{warning}
++This process erases all MAAS data. Back up any data that you need to keep before you start.
++:::
++
++## Before you begin
++
++You need:
++
++- Administrator access to MAAS.
++- `sudo` access to every region and rack controller, and to the PostgreSQL server.
++- Access to the external services that MAAS uses, such as Vault or your identity provider.
++
++Check the [supported MAAS versions](https://canonical.com/maas/docs/release-information/supported-maas-versions/). A version that reached the end of its support period no longer receives security updates.
++
++## Export your data
++
++Back up the MAAS database and configuration before you remove anything. Backups contain credentials, so encrypt them and store them in a location with restricted access. See [Back up MAAS](/how-to-guides/back-up-maas.md).
++
++## Release the machines
++
++Release every machine that MAAS manages, and erase its disks so that the next user cannot read the previous data. See [Release or remove machines](/how-to-guides/manage-machines.md#release-or-remove-machines).
++
++Releasing a DPU does not erase its disks. To bring a DPU to a clean state, redeploy it before you release it. See [Releasing a DPU](/how-to-guides/deploy-dpus.md#releasing-a-dpu).
++
++:::{warning}
++Releasing a machine only erases its disks when you select an erase option. MAAS does not delete any other data automatically.
++:::
++
++## Remove the controllers
++
++1. Delete the rack controllers from MAAS. See [Delete a rack controller](/how-to-guides/manage-high-availability.md#delete-a-rack-controller).
++
++2. On every controller, remove the MAAS snap. Use the `--purge` flag, or snapd keeps a snapshot of the MAAS data:
++
++   ```bash
++   sudo snap remove maas --purge
++   ```
++
++3. Confirm that MAAS is no longer installed and that its data directory does not exist:
++
++   ```bash
++   snap list maas
++   # expected output when the removal is complete
++   error: no matching snaps installed
++   ```
++
++   ```bash
++   ls /var/snap/maas/
++   # expected output when the removal is complete:
++   ls: cannot access '/var/snap/maas/': No such file or directory
++   ```
++
++## Delete data stored outside the controllers
++
++MAAS stores data in other services. Delete it from each one:
++
++- **PostgreSQL**: drop the MAAS database and the MAAS database user. This also deletes the API keys of all users.
++- **MAAS CLI**: on every computer where you used the MAAS CLI, remove the stored API key with `maas logout $PROFILE`.
++- **Vault**: see the [HashiCorp Vault documentation](https://developer.hashicorp.com/vault/docs/secrets/kv) for how to delete secrets permanently.
++- **Logging and monitoring**: delete the MAAS logs and metrics from your logging and monitoring systems.
++- **DNS**: remove any delegation to the MAAS DNS servers.
++- **Identity provider**: if you use [single sign-on](/how-to-guides/sso.md), remove the MAAS client.
++- **Certificate authority**: revoke the TLS certificate of MAAS.
++
++## Destroy and sanitize the data
++
++Deleted data remains readable on the disks, and someone with access to them can recover it. Follow your data destruction policy to erase or destroy the disks of the controllers, the PostgreSQL server, and the servers that store the backups.
++
++## Related topics
++
++- [Back up MAAS](/how-to-guides/back-up-maas.md)
++- [Release or remove machines](/how-to-guides/manage-machines.md#release-or-remove-machines)
++- [Security](/explanation/security.md)
+diff --git a/docs/how-to-guides/index.md b/docs/how-to-guides/index.md
+index 76bfd76e9..0bc178216 100644
+--- a/docs/how-to-guides/index.md
++++ b/docs/how-to-guides/index.md
+@@ -106,6 +106,7 @@ Protect your MAAS controllers and the machines they manage. Learn how to configu
+ * [Adopt FIPS mode on an existing deployment](/how-to-guides/adopt-fips-on-an-existing-deployment.md)
+ * [Manage trusted SSH host keys](/how-to-guides/manage-trusted-ssh-host-keys.md)
+ * [Deploy a FIPS kernel](/how-to-guides/deploy-a-fips-kernel.md)
++* [Decommission MAAS](/how-to-guides/decommission-maas.md)
+ 
+ ## Scale and optimize
+ 
+@@ -157,6 +158,7 @@ adopt-fips-on-an-existing-deployment
+ manage-trusted-ssh-host-keys
+ deploy-a-real-time-kernel
+ deploy-a-fips-kernel
++decommission-maas
+ deploy-dgx-machines
+ set-up-air-gapped-maas
+ script-maas-with-python
+diff --git a/docs/requirements.txt b/docs/requirements.txt
+index bc787f470..0b23e3bca 100644
+--- a/docs/requirements.txt
++++ b/docs/requirements.txt
+@@ -20,6 +20,7 @@ sphinx-roles==0.1.0
+ sphinx-terminal==1.0.3
+ sphinx-ubuntu-images==0.1.0
+ sphinx-youtube-links==0.1.0
++sphinxcontrib-mermaid==2.0.2
+ 
+ # Vale
+ rst2html==2020.7.4
+diff --git a/docs/uncategorized/report-a-bug.md b/docs/uncategorized/report-a-bug.md
+index 803d8040b..024a732d4 100644
+--- a/docs/uncategorized/report-a-bug.md
++++ b/docs/uncategorized/report-a-bug.md
+@@ -4,6 +4,10 @@ Bugs are inevitable in complex systems. A well-written bug report makes it faste
+ 
+ This page shows you how to prepare bug information, gather logs, and submit a Launchpad report that others can review and act on.
+ 
++```{important}
++Do not report security vulnerabilities in Launchpad. See [Reporting vulnerabilities](/explanation/security.md#reporting-vulnerabilities).
++```
++
+ ## Step 1 – Prepare your information
+ 
+ Before you open Launchpad, collect the essentials:

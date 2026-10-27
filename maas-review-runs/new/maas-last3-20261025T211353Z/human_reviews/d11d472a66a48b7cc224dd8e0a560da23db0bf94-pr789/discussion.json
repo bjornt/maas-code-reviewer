@@ -1,0 +1,152 @@
+{
+  "conversation_comments": [],
+  "landed_commit": "d11d472a66a48b7cc224dd8e0a560da23db0bf94",
+  "pr_author": "alexsander-souza",
+  "pr_number": 789,
+  "repository": "canonical/maas",
+  "review_comments": [
+    {
+      "_links": {
+        "html": {
+          "href": "https://github.com/canonical/maas/pull/789#discussion_r4322368970"
+        },
+        "pull_request": {
+          "href": "https://api.github.com/repos/canonical/maas/pulls/789"
+        },
+        "self": {
+          "href": "https://api.github.com/repos/canonical/maas/pulls/comments/4322368970"
+        }
+      },
+      "author_association": "MEMBER",
+      "body": "why not the same as above? Most probably there is a special usage of `0` comparing to unset. Right?\n\n```suggestion\n            \"api_rate_limit_burst\": burst or 60,\n```",
+      "commit_id": "255f550cbb1a7c5962804aebcf23fed651d897ff",
+      "copilot_code_review_sources": [],
+      "created_at": "2026-10-20T07:12:21Z",
+      "diff_hunk": "@@ -130,9 +138,9 @@ def _configure(self, configuration):\n             \"boot_resources_dir\": str(get_bootresource_store_path()),\n             \"hardening\": configuration.hardening_active,\n             \"fips_enabled\": is_fips_enabled(),\n-            \"api_rate_limit_rate\": configuration.api_rate_limit_rate,\n-            \"api_rate_limit_burst\": configuration.api_rate_limit_burst,\n-            \"api_conn_limit\": configuration.api_conn_limit,\n+            \"api_rate_limit_rate\": rate_limit_rate,\n+            \"api_rate_limit_burst\": 60 if burst is None else burst,",
+      "html_url": "https://github.com/canonical/maas/pull/789#discussion_r4322368970",
+      "id": 4322368970,
+      "is_copilot_code_review": false,
+      "line": 142,
+      "node_id": "PRRC_kwDOBSgIKM8AAAABAaIdyg",
+      "original_commit_id": "255f550cbb1a7c5962804aebcf23fed651d897ff",
+      "original_line": 142,
+      "original_position": 23,
+      "original_start_line": null,
+      "path": "src/maasserver/regiondservices/http.py",
+      "position": 23,
+      "pull_request_review_id": 5581831869,
+      "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/789",
+      "reactions": {
+        "+1": 0,
+        "-1": 0,
+        "confused": 0,
+        "eyes": 0,
+        "heart": 0,
+        "hooray": 0,
+        "laugh": 0,
+        "rocket": 0,
+        "total_count": 0,
+        "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4322368970/reactions"
+      },
+      "side": "RIGHT",
+      "start_line": null,
+      "start_side": null,
+      "subject_type": "line",
+      "updated_at": "2026-10-20T07:16:56Z",
+      "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4322368970",
+      "user": {
+        "avatar_url": "https://avatars.githubusercontent.com/u/4290399?v=4",
+        "events_url": "https://api.github.com/users/skatsaounis/events{/privacy}",
+        "followers_url": "https://api.github.com/users/skatsaounis/followers",
+        "following_url": "https://api.github.com/users/skatsaounis/following{/other_user}",
+        "gists_url": "https://api.github.com/users/skatsaounis/gists{/gist_id}",
+        "gravatar_id": "",
+        "html_url": "https://github.com/skatsaounis",
+        "id": 4290399,
+        "login": "skatsaounis",
+        "node_id": "MDQ6VXNlcjQyOTAzOTk=",
+        "organizations_url": "https://api.github.com/users/skatsaounis/orgs",
+        "received_events_url": "https://api.github.com/users/skatsaounis/received_events",
+        "repos_url": "https://api.github.com/users/skatsaounis/repos",
+        "site_admin": false,
+        "starred_url": "https://api.github.com/users/skatsaounis/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/skatsaounis/subscriptions",
+        "type": "User",
+        "url": "https://api.github.com/users/skatsaounis",
+        "user_view_type": "public"
+      }
+    },
+    {
+      "_links": {
+        "html": {
+          "href": "https://github.com/canonical/maas/pull/789#discussion_r4325206947"
+        },
+        "pull_request": {
+          "href": "https://api.github.com/repos/canonical/maas/pulls/789"
+        },
+        "self": {
+          "href": "https://api.github.com/repos/canonical/maas/pulls/comments/4325206947"
+        }
+      },
+      "author_association": "MEMBER",
+      "body": "yes, unset means \"use default\", zero means \"disable it\"",
+      "commit_id": "255f550cbb1a7c5962804aebcf23fed651d897ff",
+      "copilot_code_review_sources": [],
+      "created_at": "2026-10-20T13:00:12Z",
+      "diff_hunk": "@@ -130,9 +138,9 @@ def _configure(self, configuration):\n             \"boot_resources_dir\": str(get_bootresource_store_path()),\n             \"hardening\": configuration.hardening_active,\n             \"fips_enabled\": is_fips_enabled(),\n-            \"api_rate_limit_rate\": configuration.api_rate_limit_rate,\n-            \"api_rate_limit_burst\": configuration.api_rate_limit_burst,\n-            \"api_conn_limit\": configuration.api_conn_limit,\n+            \"api_rate_limit_rate\": rate_limit_rate,\n+            \"api_rate_limit_burst\": 60 if burst is None else burst,",
+      "html_url": "https://github.com/canonical/maas/pull/789#discussion_r4325206947",
+      "id": 4325206947,
+      "in_reply_to_id": 4322368970,
+      "is_copilot_code_review": false,
+      "line": 142,
+      "node_id": "PRRC_kwDOBSgIKM8AAAABAc1row",
+      "original_commit_id": "255f550cbb1a7c5962804aebcf23fed651d897ff",
+      "original_line": 142,
+      "original_position": 23,
+      "original_start_line": null,
+      "path": "src/maasserver/regiondservices/http.py",
+      "position": 23,
+      "pull_request_review_id": 5585329275,
+      "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/789",
+      "reactions": {
+        "+1": 0,
+        "-1": 0,
+        "confused": 0,
+        "eyes": 0,
+        "heart": 0,
+        "hooray": 0,
+        "laugh": 0,
+        "rocket": 0,
+        "total_count": 0,
+        "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4325206947/reactions"
+      },
+      "side": "RIGHT",
+      "start_line": null,
+      "start_side": null,
+      "subject_type": "line",
+      "updated_at": "2026-10-20T13:00:13Z",
+      "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4325206947",
+      "user": {
+        "avatar_url": "https://avatars.githubusercontent.com/u/61709370?v=4",
+        "events_url": "https://api.github.com/users/alexsander-souza/events{/privacy}",
+        "followers_url": "https://api.github.com/users/alexsander-souza/followers",
+        "following_url": "https://api.github.com/users/alexsander-souza/following{/other_user}",
+        "gists_url": "https://api.github.com/users/alexsander-souza/gists{/gist_id}",
+        "gravatar_id": "",
+        "html_url": "https://github.com/alexsander-souza",
+        "id": 61709370,
+        "login": "alexsander-souza",
+        "node_id": "MDQ6VXNlcjYxNzA5Mzcw",
+        "organizations_url": "https://api.github.com/users/alexsander-souza/orgs",
+        "received_events_url": "https://api.github.com/users/alexsander-souza/received_events",
+        "repos_url": "https://api.github.com/users/alexsander-souza/repos",
+        "site_admin": false,
+        "starred_url": "https://api.github.com/users/alexsander-souza/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/alexsander-souza/subscriptions",
+        "type": "User",
+        "url": "https://api.github.com/users/alexsander-souza",
+        "user_view_type": "public"
+      }
+    }
+  ]
+}

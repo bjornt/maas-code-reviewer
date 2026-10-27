@@ -1,0 +1,151 @@
+{
+  "conversation_comments": [],
+  "landed_commit": "1803d8d92952023aefcf3775003acc9698e2154a",
+  "pr_author": "wyattrees",
+  "pr_number": 801,
+  "repository": "canonical/maas",
+  "review_comments": [
+    {
+      "_links": {
+        "html": {
+          "href": "https://github.com/canonical/maas/pull/801#discussion_r4342399789"
+        },
+        "pull_request": {
+          "href": "https://api.github.com/repos/canonical/maas/pulls/801"
+        },
+        "self": {
+          "href": "https://api.github.com/repos/canonical/maas/pulls/comments/4342399789"
+        }
+      },
+      "author_association": "MEMBER",
+      "body": "nit: you can avoid the noqa by using the annotated method which is no recommended by fastapi and use in placed like `src/maasapiserver/v3/api/public/handlers/operations.py`, however, we might want to do a larger refactor to fix this across the codebase at some point so this isn't necessary to change here. \nSee https://github.com/canonical/maas/pull/367#discussion_r3420501537",
+      "commit_id": "5e54416a4007799d7f42f4469edb72b9fa055240",
+      "copilot_code_review_sources": [],
+      "created_at": "2026-10-21T21:57:43Z",
+      "diff_hunk": "@@ -192,6 +194,27 @@ async def get_agent_config(\n             self_base_hyperlink=f\"{V3_INTERNAL_API_PREFIX}/agents/{uuid}/config\",\n         )\n \n+    @handler(\n+        path=\"/agents/{system_id}/dhcp-data\",\n+        methods=[\"GET\"],\n+        responses={\n+            200: {\"model\": AgentDHCPDataResponse},\n+            404: {\"model\": NotFoundBodyResponse},\n+            422: {\"model\": ValidationErrorBodyResponse},\n+        },\n+        status_code=200,\n+    )\n+    async def get_agent_dhcp_data(\n+        self,\n+        system_id: str,\n+        services: ServiceCollectionV3 = Depends(services),  # noqa: B008",
+      "html_url": "https://github.com/canonical/maas/pull/801#discussion_r4342399789",
+      "id": 4342399789,
+      "is_copilot_code_review": false,
+      "line": null,
+      "node_id": "PRRC_kwDOBSgIKM8AAAABAtPDLQ",
+      "original_commit_id": "5e54416a4007799d7f42f4469edb72b9fa055240",
+      "original_line": 210,
+      "original_position": 33,
+      "original_start_line": null,
+      "path": "src/maasapiserver/v3/api/internal/handlers/agent.py",
+      "position": 1,
+      "pull_request_review_id": 5606746524,
+      "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/801",
+      "reactions": {
+        "+1": 1,
+        "-1": 0,
+        "confused": 0,
+        "eyes": 0,
+        "heart": 0,
+        "hooray": 0,
+        "laugh": 0,
+        "rocket": 0,
+        "total_count": 1,
+        "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4342399789/reactions"
+      },
+      "side": "RIGHT",
+      "start_line": null,
+      "start_side": null,
+      "subject_type": "line",
+      "updated_at": "2026-10-21T21:57:51Z",
+      "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4342399789",
+      "user": {
+        "avatar_url": "https://avatars.githubusercontent.com/u/87246463?v=4",
+        "events_url": "https://api.github.com/users/MaikRe/events{/privacy}",
+        "followers_url": "https://api.github.com/users/MaikRe/followers",
+        "following_url": "https://api.github.com/users/MaikRe/following{/other_user}",
+        "gists_url": "https://api.github.com/users/MaikRe/gists{/gist_id}",
+        "gravatar_id": "",
+        "html_url": "https://github.com/MaikRe",
+        "id": 87246463,
+        "login": "MaikRe",
+        "node_id": "MDQ6VXNlcjg3MjQ2NDYz",
+        "organizations_url": "https://api.github.com/users/MaikRe/orgs",
+        "received_events_url": "https://api.github.com/users/MaikRe/received_events",
+        "repos_url": "https://api.github.com/users/MaikRe/repos",
+        "site_admin": false,
+        "starred_url": "https://api.github.com/users/MaikRe/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/MaikRe/subscriptions",
+        "type": "User",
+        "url": "https://api.github.com/users/MaikRe",
+        "user_view_type": "public"
+      }
+    },
+    {
+      "_links": {
+        "html": {
+          "href": "https://github.com/canonical/maas/pull/801#discussion_r4342435110"
+        },
+        "pull_request": {
+          "href": "https://api.github.com/repos/canonical/maas/pulls/801"
+        },
+        "self": {
+          "href": "https://api.github.com/repos/canonical/maas/pulls/comments/4342435110"
+        }
+      },
+      "author_association": "MEMBER",
+      "body": "I believe this should be dhcp_data to match snake case conventions ",
+      "commit_id": "5e54416a4007799d7f42f4469edb72b9fa055240",
+      "copilot_code_review_sources": [],
+      "created_at": "2026-10-21T22:02:29Z",
+      "diff_hunk": "@@ -192,6 +194,27 @@ async def get_agent_config(\n             self_base_hyperlink=f\"{V3_INTERNAL_API_PREFIX}/agents/{uuid}/config\",\n         )\n \n+    @handler(\n+        path=\"/agents/{system_id}/dhcp-data\",",
+      "html_url": "https://github.com/canonical/maas/pull/801#discussion_r4342435110",
+      "id": 4342435110,
+      "is_copilot_code_review": false,
+      "line": null,
+      "node_id": "PRRC_kwDOBSgIKM8AAAABAtRNJg",
+      "original_commit_id": "5e54416a4007799d7f42f4469edb72b9fa055240",
+      "original_line": 198,
+      "original_position": 21,
+      "original_start_line": null,
+      "path": "src/maasapiserver/v3/api/internal/handlers/agent.py",
+      "position": 1,
+      "pull_request_review_id": 5606788567,
+      "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/801",
+      "reactions": {
+        "+1": 1,
+        "-1": 0,
+        "confused": 0,
+        "eyes": 0,
+        "heart": 0,
+        "hooray": 0,
+        "laugh": 0,
+        "rocket": 0,
+        "total_count": 1,
+        "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4342435110/reactions"
+      },
+      "side": "RIGHT",
+      "start_line": null,
+      "start_side": null,
+      "subject_type": "line",
+      "updated_at": "2026-10-21T22:02:29Z",
+      "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4342435110",
+      "user": {
+        "avatar_url": "https://avatars.githubusercontent.com/u/87246463?v=4",
+        "events_url": "https://api.github.com/users/MaikRe/events{/privacy}",
+        "followers_url": "https://api.github.com/users/MaikRe/followers",
+        "following_url": "https://api.github.com/users/MaikRe/following{/other_user}",
+        "gists_url": "https://api.github.com/users/MaikRe/gists{/gist_id}",
+        "gravatar_id": "",
+        "html_url": "https://github.com/MaikRe",
+        "id": 87246463,
+        "login": "MaikRe",
+        "node_id": "MDQ6VXNlcjg3MjQ2NDYz",
+        "organizations_url": "https://api.github.com/users/MaikRe/orgs",
+        "received_events_url": "https://api.github.com/users/MaikRe/received_events",
+        "repos_url": "https://api.github.com/users/MaikRe/repos",
+        "site_admin": false,
+        "starred_url": "https://api.github.com/users/MaikRe/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/MaikRe/subscriptions",
+        "type": "User",
+        "url": "https://api.github.com/users/MaikRe",
+        "user_view_type": "public"
+      }
+    }
+  ]
+}

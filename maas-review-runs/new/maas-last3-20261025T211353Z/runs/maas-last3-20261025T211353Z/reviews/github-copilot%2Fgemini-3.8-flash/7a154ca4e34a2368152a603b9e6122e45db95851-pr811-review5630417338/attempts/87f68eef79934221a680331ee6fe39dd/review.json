@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nThe pull request primarily updates typographical curly apostrophes to straight apostrophes across multiple documentation files, alongside minor link adjustments.\n\nHowever, in `docs/explanation/security.md`, modifying the link target from `https://help.ubuntu.com/community/Full_Disk_Encryption_Howto_2019` to `https://wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019` introduces a broken link (HTTP 404), as that page does not exist on `wiki.ubuntu.com`.",
+  "inline_comments": {
+    "docs/explanation/security.md": {
+      "110": "Changing this URL to `https://wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019` results in a 404 Not Found error. The Community Help Wiki guide is located at `https://help.ubuntu.com/community/Full_Disk_Encryption_Howto_2019`, or alternatively consider linking to Ubuntu's official security documentation (such as `https://documentation.ubuntu.com/security/security-features/storage/encryption-full-disk/`)."
+    }
+  }
+}

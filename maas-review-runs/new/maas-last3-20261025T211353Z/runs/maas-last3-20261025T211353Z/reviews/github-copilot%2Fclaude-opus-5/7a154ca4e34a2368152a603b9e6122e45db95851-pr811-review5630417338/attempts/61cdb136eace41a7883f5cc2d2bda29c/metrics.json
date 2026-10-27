@@ -1,0 +1,16 @@
+{
+  "model_name": "github-copilot/claude-opus-5",
+  "agent_name": "omp",
+  "agent_version": "18.12.2",
+  "tokens_thinking": null,
+  "tokens_input": 24,
+  "tokens_output": 11189,
+  "tokens_cache_read": 634174,
+  "tokens_cache_write": 66673,
+  "tokens_total": 712060,
+  "cost": 1.01363825,
+  "cost_currency": "USD",
+  "agents_md_read": true,
+  "diff_lines": 350,
+  "diff_size_bytes": 73850
+}

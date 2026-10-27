@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "case_id": "552bb58bb215d410a605914283392a5550df9688-pr793-review5583503415",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T22:44:03Z",
+  "reviewers": [
+    {
+      "key": "gemini-3.1-pro-preview",
+      "label": "gemini-3.1-pro-preview (original)"
+    },
+    {
+      "key": "github-copilot/claude-opus-5",
+      "label": "github-copilot/claude-opus-5"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4-pro-0813",
+      "label": "openrouter/deepseek/deepseek-v4-pro-0813"
+    },
+    {
+      "key": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+      "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"
+    },
+    {
+      "key": "openrouter/moonshotai/kimi-k3",
+      "label": "openrouter/moonshotai/kimi-k3"
+    }
+  ],
+  "issues": [
+    {
+      "summary": "Rename test_GET_sorts_by_name to reflect id-based ordering",
+      "detail": "The test at src/maasserver/api/tests/test_networks.py:90 now asserts ordering by subnet.id, matching the handler's order_by(\"id\") in NetworksListingForm.filter_subnets; it never exercised name sorting. The misleading name invites a future regression back to lexicographic comparison; rename to test_GET_sorts_by_id (line 93/90, outside the hunk).",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "gemini-3.1-pro-preview",
+        "github-copilot/claude-opus-5",
+        "openrouter/deepseek/deepseek-v4-pro-0813",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "openrouter/moonshotai/kimi-k3"
+      ]
+    },
+    {
+      "summary": "Drop the redundant sorted() over already id-ascending factory subnets",
+      "detail": "At src/maasserver/api/tests/test_networks.py:104, subnets is built by sequential factory.make_Subnet() calls, so it is already in ascending-id order; sorted(subnets, key=lambda subnet: subnet.id) is a no-op. Keeping it is defensible as an explicit ordering guard, but the actual fix is comparing ids rather than lexicographically sorting \"subnet-<id>\" strings.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5",
+        "openrouter/deepseek/deepseek-v4.1-flash-1017"
+      ]
+    },
+    {
+      "summary": "Remove the unused name= kwarg from the subnet fixtures",
+      "detail": "Line 93 passes name=factory.make_name(\"subnet\").lower() to factory.make_Subnet(), but neither the handler nor the new assertion uses the subnet name field; convert_to_network_name returns \"subnet-%d\" % subnet.id (src/maasserver/api/networks.py:23-25). The fixture argument is actively misleading alongside the sorts_by_name test name.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": [
+        "github-copilot/claude-opus-5"
+      ]
+    }
+  ]
+}

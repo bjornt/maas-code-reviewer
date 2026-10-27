@@ -1,0 +1,2226 @@
+diff --git a/src/maasservicelayer/db/repositories/interfaces.py b/src/maasservicelayer/db/repositories/interfaces.py
+index daf0d8310..d0dfb01bb 100644
+--- a/src/maasservicelayer/db/repositories/interfaces.py
++++ b/src/maasservicelayer/db/repositories/interfaces.py
+@@ -16,6 +16,7 @@ from maasservicelayer.db.filters import Clause, ClauseFactory
+ from maasservicelayer.db.repositories.base import BaseRepository
+ from maasservicelayer.db.tables import (
+     InterfaceIPAddressTable,
++    InterfaceRelationshipTable,
+     InterfaceTable,
+     NodeConfigTable,
+     NodeTable,
+@@ -132,6 +133,19 @@ class InterfaceRepository(BaseRepository):
+             ]
+         ]
+ 
++    async def get_parents(self, interface_id: int) -> list[Interface]:
++        parent_ids = select(InterfaceRelationshipTable.c.parent_id).where(
++            InterfaceRelationshipTable.c.child_id == interface_id
++        )
++        stmt = self._select_all_statement().where(
++            InterfaceTable.c.id.in_(parent_ids)
++        )
++        rows = (await self.execute_stmt(stmt)).all()
++        return [
++            Interface(**build_interface_links(row._asdict()))  # pyright: ignore [reportArgumentType]
++            for row in rows
++        ]
++
+     async def get_interfaces_in_fabric(
+         self, fabric_id: int
+     ) -> List[Interface]:
+diff --git a/src/maasservicelayer/db/repositories/nodes.py b/src/maasservicelayer/db/repositories/nodes.py
+index a6247df89..97d0ff345 100644
+--- a/src/maasservicelayer/db/repositories/nodes.py
++++ b/src/maasservicelayer/db/repositories/nodes.py
+@@ -51,6 +51,12 @@ T = TypeVar("T", bound=Node)
+ 
+ 
+ class AbstractNodesRepository(BaseRepository[T], ABC):
++    async def get_url(self, system_id: str) -> str | None:
++        stmt = select(NodeTable.c.url).where(
++            NodeTable.c.system_id == system_id
++        )
++        return (await self.execute_stmt(stmt)).scalar_one_or_none()
++
+     async def move_to_zone(self, old_zone_id: int, new_zone_id: int) -> None:
+         stmt = (
+             update(NodeTable)
+diff --git a/src/maasservicelayer/db/repositories/reservedips.py b/src/maasservicelayer/db/repositories/reservedips.py
+index 96d680104..6651ff504 100644
+--- a/src/maasservicelayer/db/repositories/reservedips.py
++++ b/src/maasservicelayer/db/repositories/reservedips.py
+@@ -24,6 +24,10 @@ class ReservedIPsClauseFactory(ClauseFactory):
+     def with_subnet_id(cls, subnet_id: int) -> Clause:
+         return Clause(condition=eq(ReservedIPTable.c.subnet_id, subnet_id))
+ 
++    @classmethod
++    def with_subnet_id_in(cls, subnet_ids: list[int]) -> Clause:
++        return Clause(condition=ReservedIPTable.c.subnet_id.in_(subnet_ids))
++
+     @classmethod
+     def with_vlan_id(cls, vlan_id: int) -> Clause:
+         return Clause(
+diff --git a/src/maasservicelayer/db/repositories/staticipaddress.py b/src/maasservicelayer/db/repositories/staticipaddress.py
+index 666b42568..656a333f9 100644
+--- a/src/maasservicelayer/db/repositories/staticipaddress.py
++++ b/src/maasservicelayer/db/repositories/staticipaddress.py
+@@ -90,6 +90,22 @@ class StaticIPAddressClauseFactory(ClauseFactory):
+             condition=StaticIPAddressTable.c.alloc_type.notin_(alloc_types)
+         )
+ 
++    @classmethod
++    def with_alloc_type_in(cls, alloc_types: list[IpAddressType]) -> Clause:
++        return Clause(
++            condition=StaticIPAddressTable.c.alloc_type.in_(alloc_types)
++        )
++
++    @classmethod
++    def with_temp_expires_on_is_null(cls) -> Clause:
++        return Clause(
++            condition=StaticIPAddressTable.c.temp_expires_on.is_(None)
++        )
++
++    @classmethod
++    def with_interface_enabled(cls, enabled: bool) -> Clause:
++        return Clause(condition=eq(InterfaceTable.c.enabled, enabled))
++
+     @classmethod
+     def with_ip_not_null(cls) -> Clause:
+         return Clause(condition=StaticIPAddressTable.c.ip.isnot(None))
+diff --git a/src/maasservicelayer/db/repositories/subnets.py b/src/maasservicelayer/db/repositories/subnets.py
+index 797a667e5..2b393d8c7 100644
+--- a/src/maasservicelayer/db/repositories/subnets.py
++++ b/src/maasservicelayer/db/repositories/subnets.py
+@@ -50,6 +50,10 @@ class SubnetClauseFactory(ClauseFactory):
+     def with_allow_dns(cls, allow_dns: bool) -> Clause:
+         return Clause(condition=eq(SubnetTable.c.allow_dns, allow_dns))
+ 
++    @classmethod
++    def with_managed(cls, managed: bool) -> Clause:
++        return Clause(condition=eq(SubnetTable.c.managed, managed))
++
+     @classmethod
+     def with_rdns_mode(cls, rdns_mode: RdnsMode) -> Clause:
+         return Clause(condition=eq(SubnetTable.c.rdns_mode, rdns_mode))
+diff --git a/src/maasservicelayer/db/repositories/vlans.py b/src/maasservicelayer/db/repositories/vlans.py
+index bd12b69a2..ed50891f3 100644
+--- a/src/maasservicelayer/db/repositories/vlans.py
++++ b/src/maasservicelayer/db/repositories/vlans.py
+@@ -46,6 +46,15 @@ class VlansClauseFactory(ClauseFactory):
+     def with_dhcp_on(cls, on: bool) -> Clause:
+         return Clause(condition=eq(VlanTable.c.dhcp_on, on))
+ 
++    @classmethod
++    def with_primary_or_secondary_rack_id(cls, rack_id: int) -> Clause:
++        return Clause(
++            condition=or_(
++                VlanTable.c.primary_rack_id == rack_id,
++                VlanTable.c.secondary_rack_id == rack_id,
++            )
++        )
++
+     @classmethod
+     def with_relay_vlan_id(cls, relay_vlan_id: int) -> Clause:
+         return Clause(condition=eq(VlanTable.c.relay_vlan_id, relay_vlan_id))
+diff --git a/src/maasservicelayer/db/tables.py b/src/maasservicelayer/db/tables.py
+index f6af2a52a..8d5072e2e 100644
+--- a/src/maasservicelayer/db/tables.py
++++ b/src/maasservicelayer/db/tables.py
+@@ -998,6 +998,32 @@ InterfaceTable = Table(
+     Index("maasserver_interface_switch_id_idx", "switch_id"),
+ )
+ 
++InterfaceRelationshipTable = Table(
++    "maasserver_interfacerelationship",
++    METADATA,
++    Column("id", BigInteger, Identity(), primary_key=True),
++    Column("created", DateTime(timezone=True), nullable=False),
++    Column("updated", DateTime(timezone=True), nullable=False),
++    Column(
++        "child_id",
++        BigInteger,
++        ForeignKey(
++            "maasserver_interface.id", deferrable=True, initially="DEFERRED"
++        ),
++        nullable=False,
++    ),
++    Column(
++        "parent_id",
++        BigInteger,
++        ForeignKey(
++            "maasserver_interface.id", deferrable=True, initially="DEFERRED"
++        ),
++        nullable=False,
++    ),
++    Index("maasserver_interfacerelationship_child_id_7be5401e", "child_id"),
++    Index("maasserver_interfacerelationship_parent_id_d3c77c37", "parent_id"),
++)
++
+ IPRangeTable = Table(
+     "maasserver_iprange",
+     METADATA,
+diff --git a/src/maasservicelayer/models/dhcp.py b/src/maasservicelayer/models/dhcp.py
+new file mode 100644
+index 000000000..529ed9ed0
+--- /dev/null
++++ b/src/maasservicelayer/models/dhcp.py
+@@ -0,0 +1,76 @@
++# Copyright 2026 Canonical Ltd.  This software is licensed under the
++# GNU Affero General Public License version 3 (see the file LICENSE).
++
++from dataclasses import dataclass
++
++
++@dataclass
++class VlanData:
++    id: int
++    vid: int
++    relayed_vlan_id: int | None
++    mtu: int
++
++
++@dataclass
++class InterfaceData:
++    id: int
++    vlan_id: int
++    name: str
++
++
++@dataclass
++class IPRangeData:
++    id: int
++    subnet_id: int
++    dynamic: bool
++    start_ip: str
++    end_ip: str
++
++
++@dataclass
++class HostReservationData:
++    ip: str
++    mac_address: str
++    hostname: str
++
++
++@dataclass
++class SubnetData:
++    id: int
++    rack_system_id: str
++    secondary_rack_system_id: str | None
++    ip_version: int
++    cidr: str
++    gateway_ip: str
++    dns_servers: list[str]
++    allow_dns: bool
++    vlan_id: int
++    vlan_mtu: int
++    mask: str
++    broadcast_ip: str
++    domain_name: str
++    search_list: list[str]
++    ntp_servers: list[str]
++    next_server: str
++    pools: list[IPRangeData]
++    host_reservations: list[HostReservationData]
++
++
++@dataclass(frozen=True)
++class KeaHAConfig:
++    primary_rack_system_id: str
++    secondary_rack_system_id: str
++    primary_rack_ip: str
++    secondary_rack_ip: str
++
++
++@dataclass
++class DHCPDataForAgent:
++    vlans: list[VlanData]
++    subnets: list[SubnetData]
++    ipranges: list[IPRangeData]
++    interfaces: list[InterfaceData]
++    default_dns_servers: list[str]
++    ntp_servers: list[str]
++    ha_data: list[KeaHAConfig]
+diff --git a/src/maasservicelayer/services/__init__.py b/src/maasservicelayer/services/__init__.py
+index a30f86d5c..30b2e7dc0 100644
+--- a/src/maasservicelayer/services/__init__.py
++++ b/src/maasservicelayer/services/__init__.py
+@@ -153,6 +153,7 @@ from maasservicelayer.services.consumers import ConsumersService
+ from maasservicelayer.services.database_configurations import (
+     DatabaseConfigurationsService,
+ )
++from maasservicelayer.services.dhcp import DHCPService
+ from maasservicelayer.services.dhcpsnippets import DhcpSnippetsService
+ from maasservicelayer.services.discoveries import DiscoveriesService
+ from maasservicelayer.services.django_session import DjangoSessionService
+@@ -275,6 +276,7 @@ class ServiceCollectionV3:
+     database_configurations: DatabaseConfigurationsService
+     configurations: ConfigurationsService
+     consumers: ConsumersService
++    dhcp: DHCPService
+     dhcpsnippets: DhcpSnippetsService
+     discoveries: DiscoveriesService
+     django_session: DjangoSessionService
+@@ -653,6 +655,18 @@ class ServiceCollectionV3:
+             nodegrouptorackcontrollers_service=services.nodegrouptorackcontrollers,
+             subnets_repository=SubnetsRepository(context),
+         )
++        services.dhcp = DHCPService(
++            context=context,
++            configurations_service=services.configurations,
++            domains_service=services.domains,
++            interfaces_service=services.interfaces,
++            ipranges_service=services.ipranges,
++            nodes_service=services.nodes,
++            reservedips_service=services.reservedips,
++            staticipaddress_service=services.staticipaddress,
++            subnets_service=services.subnets,
++            vlans_service=services.vlans,
++        )
+         services.dnsdata = DNSDataService(
+             context=context,
+             dnspublications_service=services.dnspublications,
+diff --git a/src/maasservicelayer/services/dhcp.py b/src/maasservicelayer/services/dhcp.py
+new file mode 100644
+index 000000000..22bf19a19
+--- /dev/null
++++ b/src/maasservicelayer/services/dhcp.py
+@@ -0,0 +1,904 @@
++# Copyright 2026 Canonical Ltd.  This software is licensed under the
++# GNU Affero General Public License version 3 (see the file LICENSE).
++
++import asyncio
++from ipaddress import ip_address, IPv4Address, IPv6Address
++from urllib.parse import urlparse
++
++from netaddr import IPNetwork
++import structlog
++
++from maascommon.enums.interface import InterfaceType
++from maascommon.enums.ipaddress import IpAddressType
++from maascommon.enums.ipranges import IPRangeType
++from maascommon.enums.node import NodeTypeEnum
++from maasservicelayer.context import Context
++from maasservicelayer.db.filters import OrderByClause, QuerySpec
++from maasservicelayer.db.repositories.domains import DomainsClauseFactory
++from maasservicelayer.db.repositories.interfaces import InterfaceClauseFactory
++from maasservicelayer.db.repositories.ipranges import IPRangeClauseFactory
++from maasservicelayer.db.repositories.nodes import NodeClauseFactory
++from maasservicelayer.db.repositories.reservedips import (
++    ReservedIPsClauseFactory,
++)
++from maasservicelayer.db.repositories.staticipaddress import (
++    StaticIPAddressClauseFactory,
++)
++from maasservicelayer.db.repositories.subnets import SubnetClauseFactory
++from maasservicelayer.db.repositories.vlans import VlansClauseFactory
++from maasservicelayer.db.tables import (
++    DomainTable,
++    IPRangeTable,
++    ReservedIPTable,
++    StaticIPAddressTable,
++    VlanTable,
++)
++from maasservicelayer.exceptions.catalog import (
++    NotFoundException,
++    ValidationException,
++)
++from maasservicelayer.models.dhcp import (
++    DHCPDataForAgent,
++    HostReservationData,
++    InterfaceData,
++    IPRangeData,
++    KeaHAConfig,
++    SubnetData,
++    VlanData,
++)
++from maasservicelayer.models.interfaces import Interface
++from maasservicelayer.models.nodes import Node
++from maasservicelayer.models.staticipaddress import StaticIPAddress
++from maasservicelayer.models.subnets import Subnet
++from maasservicelayer.models.vlans import Vlan
++from maasservicelayer.services.base import Service
++from maasservicelayer.services.configurations import ConfigurationsService
++from maasservicelayer.services.domains import DomainsService
++from maasservicelayer.services.interfaces import InterfacesService
++from maasservicelayer.services.ipranges import IPRangesService
++from maasservicelayer.services.nodes import NodesService
++from maasservicelayer.services.reservedips import ReservedIPsService
++from maasservicelayer.services.staticipaddress import StaticIPAddressService
++from maasservicelayer.services.subnets import SubnetsService
++from maasservicelayer.services.vlans import VlansService
++from provisioningserver.utils.env import MAAS_ID
++from provisioningserver.utils.network import (
++    get_source_address,
++    resolve_hostname,
++)
++from provisioningserver.utils.text import split_string_list
++
++logger = structlog.get_logger()
++
++
++class DHCPService(Service):
++    """Collect network data needed to configure DHCP on a rack controller."""
++
++    def __init__(
++        self,
++        context: Context,
++        configurations_service: ConfigurationsService,
++        domains_service: DomainsService,
++        interfaces_service: InterfacesService,
++        ipranges_service: IPRangesService,
++        nodes_service: NodesService,
++        reservedips_service: ReservedIPsService,
++        staticipaddress_service: StaticIPAddressService,
++        subnets_service: SubnetsService,
++        vlans_service: VlansService,
++    ):
++        super().__init__(context)
++        self.configurations_service = configurations_service
++        self.domains_service = domains_service
++        self.interfaces_service = interfaces_service
++        self.ipranges_service = ipranges_service
++        self.nodes_service = nodes_service
++        self.reservedips_service = reservedips_service
++        self.staticipaddress_service = staticipaddress_service
++        self.subnets_service = subnets_service
++        self.vlans_service = vlans_service
++
++    async def get_kea_dhcp_data_for_agent(
++        self, system_id: str
++    ) -> DHCPDataForAgent:
++        """Retrieve Kea configuration inputs for a rack controller system ID.
++
++        This does not render or apply a Kea configuration.
++        """
++        rack = await self.nodes_service.get_one(
++            query=QuerySpec(where=NodeClauseFactory.with_system_id(system_id))
++        )
++        if rack is None:
++            raise NotFoundException()
++        if rack.node_type not in (
++            NodeTypeEnum.RACK_CONTROLLER,
++            NodeTypeEnum.REGION_AND_RACK_CONTROLLER,
++        ):
++            raise ValidationException.build_for_field(
++                "system_id", "The node must be a rack controller."
++            )
++        if rack.current_config_id is None:
++            raise ValidationException.build_for_field(
++                "system_id",
++                "The rack controller has no current configuration.",
++            )
++
++        active_vlans = await self.vlans_service.get_many(
++            QuerySpec(
++                where=VlansClauseFactory.and_clauses(
++                    [
++                        VlansClauseFactory.with_dhcp_on(True),
++                        VlansClauseFactory.with_primary_or_secondary_rack_id(
++                            rack.id
++                        ),
++                    ]
++                ),
++                order_by=[OrderByClause(VlanTable.c.id)],
++            )
++        )
++        interfaces = await self._get_rack_interfaces(rack)
++        interface_vlan_ids = {
++            interface.vlan_id
++            for interface in interfaces
++            if interface.vlan_id is not None
++        }
++        active_vlans = [
++            vlan for vlan in active_vlans if vlan.id in interface_vlan_ids
++        ]
++        vlans = {vlan.id: vlan for vlan in active_vlans}
++        for vlan in list(vlans.values()):
++            for relay in await self.vlans_service.get_many(
++                query=QuerySpec(
++                    where=VlansClauseFactory.with_relay_vlan_id(vlan.id)
++                )
++            ):
++                vlans[relay.id] = relay
++        subnets = await self.subnets_service.get_many(
++            query=QuerySpec(
++                where=SubnetClauseFactory.and_clauses(
++                    [
++                        SubnetClauseFactory.with_vlan_id_in(list(vlans)),
++                        SubnetClauseFactory.with_managed(True),
++                    ]
++                )
++            )
++        )
++        subnets.sort(
++            key=lambda subnet: (
++                subnet.vlan_id,
++                subnet.cidr.version,
++                str(subnet.cidr.network_address),
++            )
++        )
++        ipranges = await self.ipranges_service.get_many(
++            query=QuerySpec(
++                where=IPRangeClauseFactory.with_subnet_ids(
++                    [subnet.id for subnet in subnets]
++                ),
++                order_by=[OrderByClause(IPRangeTable.c.id)],
++            )
++        )
++        ipranges.sort(key=lambda iprange: iprange.id)
++        ranges = [
++            IPRangeData(
++                id=iprange.id,
++                subnet_id=iprange.subnet_id,
++                dynamic=iprange.type == IPRangeType.DYNAMIC,
++                start_ip=str(iprange.start_ip),
++                end_ip=str(iprange.end_ip),
++            )
++            for iprange in ipranges
++        ]
++        rack_url = await self.nodes_service.get_url(system_id)
++        default_domain = await self.domains_service.get_default_domain()
++        search_domains = await self.domains_service.get_many(
++            query=QuerySpec(
++                where=DomainsClauseFactory.and_clauses(
++                    [
++                        DomainsClauseFactory.not_clause(
++                            DomainsClauseFactory.with_name(default_domain.name)
++                        ),
++                        DomainsClauseFactory.with_authoritative(True),
++                    ]
++                ),
++                order_by=[OrderByClause(DomainTable.c.name)],
++            )
++        )
++        external_only = await self.configurations_service.get(
++            "ntp_external_only"
++        )
++        external_ntp = (
++            list(
++                split_string_list(
++                    await self.configurations_service.get("ntp_servers")
++                )
++            )
++            if external_only
++            else []
++        )
++        ntp_by_space = (
++            {} if external_only else await self._get_ntp_servers_for_rack(rack)
++        )
++        rack_ips = await self.staticipaddress_service.get_for_nodes(
++            query=QuerySpec(
++                where=StaticIPAddressClauseFactory.and_clauses(
++                    [
++                        StaticIPAddressClauseFactory.with_node_system_id(
++                            system_id
++                        ),
++                        StaticIPAddressClauseFactory.with_alloc_type_in(
++                            [IpAddressType.STICKY, IpAddressType.USER_RESERVED]
++                        ),
++                        StaticIPAddressClauseFactory.with_ip_not_null(),
++                    ]
++                )
++            )
++        )
++        subnet_ids = {subnet.id for subnet in subnets}
++        default_dns_servers = list(
++            dict.fromkeys(
++                str(ip.ip)
++                for ip in rack_ips
++                if ip.ip is not None and ip.subnet_id in subnet_ids
++            )
++        )
++        dhcp_interfaces: dict[int, InterfaceData] = {}
++        configured_ip_versions: set[int] = set()
++        subnet_data = []
++        ha_data: dict[KeaHAConfig, None] = {}
++        host_reservations: dict[int, list[HostReservationData]] = {}
++        for grouped_subnets in self._group_subnets(subnets).values():
++            host_reservations.update(
++                await self._get_dhcp_host_reservations(
++                    [subnet.id for subnet in grouped_subnets]
++                )
++            )
++        peer_ntp_by_rack: dict[int, dict[tuple[int | None, int], str]] = {}
++        for subnet in subnets:
++            vlan = vlans[subnet.vlan_id]
++            iface, ips = await self._get_best_interface_with_ip_on_vlan(
++                subnet, vlan, interfaces
++            )
++            if iface is not None and iface.vlan_id is not None:
++                configured_ip_versions.add(subnet.cidr.version)
++                dhcp_interfaces[iface.id] = InterfaceData(
++                    id=iface.id, vlan_id=iface.vlan_id, name=iface.name
++                )
++            next_server = self._get_next_server(subnet, ips)
++            secondary_system_id = None
++            peer_rack_id = None
++            if vlan.secondary_rack_id is not None:
++                ha = await self._get_ha_config(subnet, vlan)
++                secondary_system_id = ha.secondary_rack_system_id
++                ha_data[ha] = None
++                peer_rack_id = (
++                    vlan.secondary_rack_id
++                    if vlan.primary_rack_id == rack.id
++                    else vlan.primary_rack_id
++                )
++                if peer_rack_id is None:
++                    raise ValidationException.build_for_field(
++                        "system_id",
++                        f"VLAN {vlan.id} has incomplete HA rack configuration.",
++                    )
++                if peer_rack_id not in peer_ntp_by_rack:
++                    peer_rack = await self.nodes_service.get_by_id(
++                        peer_rack_id
++                    )
++                    if peer_rack is None:
++                        raise ValidationException.build_for_field(
++                            "system_id",
++                            f"VLAN {vlan.id} has a missing HA peer rack.",
++                        )
++                    peer_ntp_by_rack[
++                        peer_rack_id
++                    ] = await self._get_ntp_servers_for_rack(peer_rack)
++            ntp_server = ntp_by_space.get((vlan.space_id, subnet.cidr.version))
++            peer_ntp_server = (
++                peer_ntp_by_rack.get(peer_rack_id, {}).get(
++                    (vlan.space_id, subnet.cidr.version)
++                )
++                if peer_rack_id is not None
++                else None
++            )
++            subnet_ntp_servers = (
++                external_ntp
++                if external_only
++                else [
++                    server
++                    for server in (ntp_server, peer_ntp_server)
++                    if server is not None
++                ]
++            )
++            subnet_data.append(
++                SubnetData(
++                    id=subnet.id,
++                    rack_system_id=system_id,
++                    secondary_rack_system_id=secondary_system_id,
++                    ip_version=subnet.cidr.version,
++                    cidr=str(subnet.cidr),
++                    gateway_ip=str(subnet.gateway_ip)
++                    if subnet.gateway_ip is not None
++                    else "",
++                    dns_servers=await self._get_default_dns_servers_for_subnet(
++                        subnet, rack_url
++                    ),
++                    allow_dns=subnet.allow_dns,
++                    vlan_id=subnet.vlan_id,
++                    vlan_mtu=vlan.mtu,
++                    mask=str(subnet.cidr.netmask),
++                    broadcast_ip=str(subnet.cidr.broadcast_address),
++                    domain_name=default_domain.name,
++                    search_list=[default_domain.name]
++                    + [domain.name for domain in search_domains],
++                    ntp_servers=subnet_ntp_servers,
++                    next_server=next_server,
++                    pools=[
++                        r
++                        for r in ranges
++                        if r.subnet_id == subnet.id and r.dynamic
++                    ],
++                    host_reservations=host_reservations.get(subnet.id, []),
++                )
++            )
++        subnet_data = [
++            subnet
++            for subnet in subnet_data
++            if subnet.ip_version in configured_ip_versions
++        ]
++        ranges = [
++            iprange
++            for iprange in ranges
++            if iprange.subnet_id in {subnet.id for subnet in subnet_data}
++        ]
++        return DHCPDataForAgent(
++            vlans=[
++                VlanData(
++                    id=vlan.id,
++                    vid=vlan.vid,
++                    relayed_vlan_id=vlan.relay_vlan_id,
++                    mtu=vlan.mtu,
++                )
++                for vlan in sorted(vlans.values(), key=lambda item: item.id)
++            ],
++            subnets=subnet_data,
++            ipranges=ranges,
++            interfaces=sorted(
++                dhcp_interfaces.values(), key=lambda iface: iface.name
++            ),
++            default_dns_servers=default_dns_servers,
++            ntp_servers=external_ntp
++            if external_only
++            else list(
++                dict.fromkeys(
++                    str(ip.ip)
++                    for ip in rack_ips
++                    if ip.ip is not None and ip.subnet_id in subnet_ids
++                )
++            ),
++            ha_data=list(ha_data),
++        )
++
++    async def _get_rack_interfaces(self, rack: Node) -> list[Interface]:
++        if rack.current_config_id is None:
++            raise ValidationException.build_for_field(
++                "system_id",
++                f"Rack controller {rack.system_id} has no current configuration.",
++            )
++        interfaces = await self.interfaces_service.get_many(
++            query=QuerySpec(
++                where=InterfaceClauseFactory.with_node_config_id(
++                    rack.current_config_id
++                )
++            )
++        )
++        return sorted(interfaces, key=lambda interface: interface.created)
++
++    @staticmethod
++    def _group_subnets(
++        subnets: list[Subnet],
++    ) -> dict[tuple[int, int], list[Subnet]]:
++        groups: dict[tuple[int, int], list[Subnet]] = {}
++        for subnet in subnets:
++            groups.setdefault(
++                (subnet.vlan_id, subnet.cidr.version), []
++            ).append(subnet)
++        return groups
++
++    async def _get_best_interface_with_ip_on_vlan(
++        self, subnet: Subnet, vlan: Vlan, interfaces: list[Interface]
++    ) -> tuple[Interface | None, list[StaticIPAddress]]:
++        """Choose the legacy preferred interface and its addresses by family."""
++        eligible_vlans = {vlan.id}
++        if vlan.relay_vlan_id is not None:
++            eligible_vlans.add(vlan.relay_vlan_id)
++        static_interfaces: list[
++            tuple[Interface, list[StaticIPAddress], int]
++        ] = []
++        discovered_interfaces: list[
++            tuple[Interface, list[StaticIPAddress], int]
++        ] = []
++        for interface in sorted(interfaces, key=lambda item: item.created):
++            ips = await self.staticipaddress_service.get_for_interfaces(
++                [interface.id]
++            )
++            static_match = False
++            discovered_match = False
++            dynamic_count = 0
++            for ip in ips:
++                if ip.subnet_id is None:
++                    continue
++                ip_subnet = await self.subnets_service.get_by_id(ip.subnet_id)
++                assert ip_subnet is not None
++                dynamic_count += len(
++                    await self.ipranges_service.get_many(
++                        query=QuerySpec(
++                            where=IPRangeClauseFactory.and_clauses(
++                                [
++                                    IPRangeClauseFactory.with_subnet_id(
++                                        ip_subnet.id
++                                    ),
++                                    IPRangeClauseFactory.with_type(
++                                        IPRangeType.DYNAMIC
++                                    ),
++                                ]
++                            ),
++                            order_by=[OrderByClause(IPRangeTable.c.id)],
++                        )
++                    )
++                )
++                if (
++                    ip.ip is None
++                    or ip.ip.version != subnet.cidr.version
++                    or ip_subnet.vlan_id not in eligible_vlans
++                ):
++                    continue
++                if ip.alloc_type in (IpAddressType.AUTO, IpAddressType.STICKY):
++                    static_match = True
++                elif ip.alloc_type == IpAddressType.DISCOVERED:
++                    discovered_match = True
++            if static_match:
++                static_interfaces.append((interface, ips, dynamic_count))
++            elif discovered_match:
++                discovered_interfaces.append((interface, ips, dynamic_count))
++
++        candidates = static_interfaces or discovered_interfaces
++        candidates.sort(key=lambda item: item[2], reverse=True)
++        best_interface = None
++        for interface, _, _ in candidates:
++            if (
++                best_interface is None
++                or (
++                    best_interface.type == InterfaceType.PHYSICAL
++                    and interface.type == InterfaceType.BOND
++                )
++                or (
++                    best_interface.type == InterfaceType.VLAN
++                    and interface.type == InterfaceType.PHYSICAL
++                )
++            ):
++                best_interface = interface
++        if best_interface is None:
++            return None, []
++        best_ips = await self.staticipaddress_service.get_for_interfaces(
++            [best_interface.id]
++        )
++        return best_interface, sorted(
++            [
++                ip
++                for ip in best_ips
++                if ip.ip is not None and ip.ip.version == subnet.cidr.version
++            ],
++            key=lambda address: address.id,
++        )
++
++    @staticmethod
++    def _get_next_server(subnet: Subnet, ips: list[StaticIPAddress]) -> str:
++        addresses = [
++            ip.ip
++            for ip in ips
++            if ip.ip is not None and ip.ip.version == subnet.cidr.version
++        ]
++        address = next(
++            (ip for ip in addresses if ip in subnet.cidr),
++            addresses[0] if addresses else None,
++        )
++        return str(address) if address is not None else ""
++
++    async def _get_ha_config(self, subnet: Subnet, vlan: Vlan) -> KeaHAConfig:
++        addresses = []
++        racks = []
++        for rack_id in (vlan.primary_rack_id, vlan.secondary_rack_id):
++            rack = (
++                await self.nodes_service.get_by_id(rack_id)
++                if rack_id is not None
++                else None
++            )
++            if rack is None:
++                raise ValidationException.build_for_field(
++                    "system_id", f"VLAN {vlan.id} has a missing HA rack."
++                )
++            address = await self._get_ip_address_for_rack_controller(
++                rack, subnet, vlan
++            )
++            if not address:
++                raise ValidationException.build_for_field(
++                    "system_id",
++                    f"Rack {rack.system_id} has no IPv{subnet.cidr.version} "
++                    f"address for HA on VLAN {vlan.id}.",
++                )
++            racks.append(rack)
++            addresses.append(address)
++        return KeaHAConfig(
++            primary_rack_system_id=racks[0].system_id,
++            secondary_rack_system_id=racks[1].system_id,
++            primary_rack_ip=addresses[0],
++            secondary_rack_ip=addresses[1],
++        )
++
++    async def _get_ip_address_for_rack_controller(
++        self, rack: Node, subnet: Subnet, vlan: Vlan
++    ) -> str | None:
++        interface, ips = await self._get_best_interface_with_ip_on_vlan(
++            subnet, vlan, await self._get_rack_interfaces(rack)
++        )
++        if interface is None:
++            return None
++        for ip in ips:
++            if (
++                ip.ip is None
++                or ip.ip.version != subnet.cidr.version
++                or ip.alloc_type
++                not in (IpAddressType.STICKY, IpAddressType.AUTO)
++                or ip.subnet_id is None
++            ):
++                continue
++            ip_subnet = await self.subnets_service.get_by_id(ip.subnet_id)
++            if ip_subnet is not None and ip_subnet.vlan_id == vlan.id:
++                return str(ip.ip)
++        return None
++
++    async def _get_dhcp_host_reservations(
++        self, subnet_ids: list[int]
++    ) -> dict[int, list[HostReservationData]]:
++        hosts_by_subnet = {subnet_id: [] for subnet_id in subnet_ids}
++        if not subnet_ids:
++            return hosts_by_subnet
++        ips = await self.staticipaddress_service.get_many(
++            query=QuerySpec(
++                where=StaticIPAddressClauseFactory.and_clauses(
++                    [
++                        StaticIPAddressClauseFactory.with_subnet_id_in(
++                            subnet_ids
++                        ),
++                        StaticIPAddressClauseFactory.with_alloc_type_in(
++                            [
++                                IpAddressType.AUTO,
++                                IpAddressType.STICKY,
++                                IpAddressType.USER_RESERVED,
++                            ]
++                        ),
++                        StaticIPAddressClauseFactory.with_ip_not_null(),
++                        StaticIPAddressClauseFactory.with_temp_expires_on_is_null(),
++                    ]
++                ),
++                order_by=[OrderByClause(StaticIPAddressTable.c.id)],
++            )
++        )
++        seen_interfaces: set[int] = set()
++        for ip in ips:
++            if ip.ip is None or ip.subnet_id is None:
++                continue
++            interfaces = await self.interfaces_service.get_for_ip(ip)
++            for interface in sorted(
++                interfaces or [], key=lambda item: item.created
++            ):
++                parents = []
++                if interface.type == InterfaceType.BOND:
++                    parents = sorted(
++                        await self.interfaces_service.get_parents(
++                            interface.id
++                        ),
++                        key=lambda item: item.created,
++                    )
++                for parent in parents:
++                    if parent.id in seen_interfaces:
++                        continue
++                    seen_interfaces.add(parent.id)
++                    if parent.mac_address == interface.mac_address:
++                        continue
++                    if parent.mac_address is not None:
++                        hosts_by_subnet[ip.subnet_id].append(
++                            HostReservationData(
++                                ip=str(ip.ip),
++                                mac_address=parent.mac_address,
++                                hostname=await self._make_interface_hostname(
++                                    parent
++                                ),
++                            ),
++                        )
++                if interface.id in seen_interfaces:
++                    continue
++                seen_interfaces.add(interface.id)
++                if interface.mac_address is not None:
++                    hosts_by_subnet[ip.subnet_id].append(
++                        HostReservationData(
++                            ip=str(ip.ip),
++                            mac_address=interface.mac_address,
++                            hostname=await self._make_interface_hostname(
++                                interface
++                            ),
++                        )
++                    )
++        reserved_ips = await self.reservedips_service.get_many(
++            query=QuerySpec(
++                where=ReservedIPsClauseFactory.with_subnet_id_in(subnet_ids),
++                order_by=[OrderByClause(ReservedIPTable.c.id)],
++            )
++        )
++        known_macs = {
++            host.mac_address
++            for hosts in hosts_by_subnet.values()
++            for host in hosts
++        }
++        for reserved_ip in reserved_ips:
++            if reserved_ip.mac_address not in known_macs:
++                hosts_by_subnet[reserved_ip.subnet_id].append(
++                    HostReservationData(
++                        ip=str(reserved_ip.ip),
++                        mac_address=reserved_ip.mac_address,
++                        hostname=f"rsvd-{reserved_ip.id}",
++                    )
++                )
++        return hosts_by_subnet
++
++    async def _make_interface_hostname(self, interface: Interface) -> str:
++        name = interface.name.replace(".", "-")
++        if interface.node_config_id is None:
++            return f"unknown-{interface.id}-{name}"
++        node = await self.nodes_service.get_one(
++            query=QuerySpec(
++                where=NodeClauseFactory.with_node_config_id(
++                    interface.node_config_id
++                )
++            )
++        )
++        assert node is not None
++        return f"{node.hostname}-{name}"
++
++    async def _get_ntp_servers_for_rack(
++        self, rack: Node
++    ) -> dict[tuple[int | None, int], str]:
++        addresses = await self.staticipaddress_service.get_for_nodes(
++            query=QuerySpec(
++                where=StaticIPAddressClauseFactory.and_clauses(
++                    [
++                        StaticIPAddressClauseFactory.with_node_system_id(
++                            rack.system_id
++                        ),
++                        StaticIPAddressClauseFactory.with_interface_enabled(
++                            True
++                        ),
++                        StaticIPAddressClauseFactory.with_alloc_type_in(
++                            [IpAddressType.STICKY, IpAddressType.USER_RESERVED]
++                        ),
++                        StaticIPAddressClauseFactory.with_ip_not_null(),
++                    ]
++                )
++            )
++        )
++        best: dict[tuple[int | None, int], tuple[bool, int, str]] = {}
++        for address in addresses:
++            if address.ip is None or address.subnet_id is None:
++                continue
++            subnet = await self.subnets_service.get_by_id(address.subnet_id)
++            assert subnet is not None
++            vlan = await self.vlans_service.get_by_id(subnet.vlan_id)
++            assert vlan is not None
++            key = (vlan.space_id, address.ip.version)
++            rank = (
++                not vlan.dhcp_on,
++                int(ip_address(str(address.ip))),
++                str(address.ip),
++            )
++            if key not in best or rank < best[key]:
++                best[key] = rank
++        return {key: rank[2] for key, rank in best.items()}
++
++    async def _get_boot_rack_controller_ips(
++        self, subnet: Subnet
++    ) -> list[IPv4Address | IPv6Address]:
++        vlan = await self.vlans_service.get_by_id(subnet.vlan_id)
++        assert vlan is not None
++        if vlan.relay_vlan_id is not None:
++            vlan = await self.vlans_service.get_by_id(vlan.relay_vlan_id)
++            assert vlan is not None
++        if not vlan.dhcp_on or vlan.primary_rack_id is None:
++            return []
++        addresses: list[IPv4Address | IPv6Address] = []
++        vlan_subnets = await self.subnets_service.get_many(
++            query=QuerySpec(where=SubnetClauseFactory.with_vlan_id(vlan.id))
++        )
++        for rack_id in (vlan.primary_rack_id, vlan.secondary_rack_id):
++            if rack_id is None:
++                continue
++            rack = await self.nodes_service.get_by_id(rack_id)
++            assert rack is not None
++            ips = await self.staticipaddress_service.get_for_nodes(
++                query=QuerySpec(
++                    where=StaticIPAddressClauseFactory.and_clauses(
++                        [
++                            StaticIPAddressClauseFactory.with_node_system_id(
++                                rack.system_id
++                            ),
++                            StaticIPAddressClauseFactory.with_subnet_id_in(
++                                [sn.id for sn in vlan_subnets]
++                            ),
++                            StaticIPAddressClauseFactory.with_ip_not_null(),
++                            StaticIPAddressClauseFactory.with_alloc_type_not_in(
++                                [IpAddressType.DISCOVERED]
++                            ),
++                        ]
++                    )
++                )
++            )
++            for ip in ips:
++                if (
++                    ip.ip is not None
++                    and ip.ip.version == subnet.cidr.version
++                    and ip.ip not in addresses
++                ):
++                    addresses.append(ip_address(str(ip.ip)))
++        return sorted(addresses, key=lambda ip: ip not in subnet.cidr)
++
++    async def _get_alt_region_ips_for_dns(
++        self, dns_servers: list[IPv4Address | IPv6Address]
++    ) -> list[IPv4Address | IPv6Address]:
++        addresses: list[IPv4Address | IPv6Address] = []
++        regions = await self.nodes_service.get_many(
++            query=QuerySpec(
++                where=NodeClauseFactory.or_clauses(
++                    [
++                        NodeClauseFactory.with_type(
++                            NodeTypeEnum.REGION_CONTROLLER
++                        ),
++                        NodeClauseFactory.with_type(
++                            NodeTypeEnum.REGION_AND_RACK_CONTROLLER
++                        ),
++                    ]
++                )
++            )
++        )
++        regions_by_id = {region.id: region for region in regions}
++        seen_regions: set[tuple[int, int]] = set()
++        for server in dns_servers:
++            subnet = await self.subnets_service.find_best_subnet_for_ip(server)
++            if subnet is None:
++                continue
++            for region in regions_by_id.values():
++                if region.current_config_id is None:
++                    continue
++                ips = await self.staticipaddress_service.get_for_nodes(
++                    query=QuerySpec(
++                        where=StaticIPAddressClauseFactory.and_clauses(
++                            [
++                                StaticIPAddressClauseFactory.with_node_system_id(
++                                    region.system_id
++                                ),
++                                StaticIPAddressClauseFactory.with_subnet_id(
++                                    subnet.id
++                                ),
++                                StaticIPAddressClauseFactory.with_ip_not_null(),
++                            ]
++                        ),
++                        order_by=[OrderByClause(StaticIPAddressTable.c.ip)],
++                    )
++                )
++                if (region.id, server.version) in seen_regions:
++                    continue
++                for ip in ips:
++                    if (
++                        ip.ip is None
++                        or ip.ip.version != server.version
++                        or ip.ip in dns_servers
++                    ):
++                        continue
++                    alternate_subnet = (
++                        await self.subnets_service.find_best_subnet_for_ip(
++                            ip_address(str(ip.ip))
++                        )
++                    )
++                    if (
++                        alternate_subnet is not None
++                        and not alternate_subnet.allow_dns
++                    ):
++                        continue
++                    if ip.ip not in addresses:
++                        addresses.append(ip_address(str(ip.ip)))
++                    seen_regions.add((region.id, server.version))
++                    break
++        return addresses
++
++    async def _get_default_dns_servers_for_subnet(
++        self, subnet: Subnet, rack_url: str | None
++    ) -> list[str]:
++        explicit_servers = subnet.dns_servers or []
++        if not subnet.allow_dns:
++            return list(explicit_servers)
++        network = IPNetwork(str(subnet.cidr))
++        source = await asyncio.to_thread(get_source_address, network)
++        default_region_ip = (
++            ip_address(str(source)) if source is not None else None
++        )
++        if (
++            default_region_ip is not None
++            and default_region_ip.version != subnet.cidr.version
++        ):
++            default_region_ip = None
++        if rack_url:
++            maas_server_host = urlparse(rack_url).hostname
++        elif default_region_ip is not None:
++            maas_server_host = str(default_region_ip)
++        else:
++            maas_server_host = urlparse(
++                await self.configurations_service.get("maas_url")
++            ).hostname
++        servers: list[IPv4Address | IPv6Address] = []
++        if maas_server_host is not None:
++            try:
++                resolved = await asyncio.to_thread(
++                    resolve_hostname, maas_server_host, subnet.cidr.version
++                )
++            except OSError:
++                logger.warning(
++                    "Unable to resolve MAAS host for DHCP DNS.",
++                    hostname=maas_server_host,
++                    exc_info=True,
++                )
++            else:
++                servers = [
++                    ip_address(str(ip))
++                    for ip in resolved
++                    if not ip.is_link_local()
++                ]
++                allowed_dns_servers = []
++                for server in servers:
++                    server_subnet = (
++                        await self.subnets_service.find_best_subnet_for_ip(
++                            server
++                        )
++                    )
++                    if server_subnet is None or server_subnet.allow_dns:
++                        allowed_dns_servers.append(server)
++                servers = sorted(allowed_dns_servers)
++                non_loopback = [
++                    server for server in servers if not server.is_loopback
++                ]
++                if non_loopback:
++                    servers = non_loopback
++        if MAAS_ID.get():
++            servers.extend(await self._get_alt_region_ips_for_dns(servers))
++        if await self.configurations_service.get("use_rack_proxy"):
++            rack_ips = await self._get_boot_rack_controller_ips(subnet)
++            servers = rack_ips + [
++                ip
++                for ip in servers
++                if ip not in rack_ips and ip != default_region_ip
++            ]
++        if default_region_ip is not None and default_region_ip in servers:
++            servers = [ip for ip in servers if ip != default_region_ip] + [
++                default_region_ip
++            ]
++        if not servers:
++            if default_region_ip is not None:
++                logger.warning(
++                    "No DNS servers found, DHCP defaulting to region IP."
++                )
++                servers = [default_region_ip]
++            else:
++                logger.warning("No DNS servers found.")
++        if subnet.gateway_ip is None:
++            servers = [ip for ip in servers if ip in subnet.cidr]
++        return list(
++            dict.fromkeys([str(ip) for ip in servers] + explicit_servers)
++        )
+diff --git a/src/maasservicelayer/services/interfaces.py b/src/maasservicelayer/services/interfaces.py
+index f216ed431..369b2884d 100644
+--- a/src/maasservicelayer/services/interfaces.py
++++ b/src/maasservicelayer/services/interfaces.py
+@@ -79,6 +79,9 @@ class InterfacesService(
+     async def get_interfaces_for_mac(self, mac: str) -> List[Interface]:
+         return await self.interface_repository.get_interfaces_for_mac(mac)
+ 
++    async def get_parents(self, interface_id: int) -> list[Interface]:
++        return await self.repository.get_parents(interface_id)
++
+     async def get_interfaces_in_fabric(
+         self, fabric_id: int
+     ) -> List[Interface]:
+diff --git a/src/maasservicelayer/services/nodes.py b/src/maasservicelayer/services/nodes.py
+index c4bdcebef..95d3b3f28 100644
+--- a/src/maasservicelayer/services/nodes.py
++++ b/src/maasservicelayer/services/nodes.py
+@@ -41,6 +41,9 @@ class NodesService(BaseService[Node, AbstractNodesRepository, NodeBuilder]):
+         self.scriptresults_service = scriptresults_service
+         self.dnspublications_service = dnspublications_service
+ 
++    async def get_url(self, system_id: str) -> str | None:
++        return await self.repository.get_url(system_id)
++
+     async def update_by_system_id(
+         self, system_id: str, builder: NodeBuilder
+     ) -> Node:
+diff --git a/src/tests/maasservicelayer/db/repositories/test_interfaces.py b/src/tests/maasservicelayer/db/repositories/test_interfaces.py
+index 4fff7a71c..899e1d255 100644
+--- a/src/tests/maasservicelayer/db/repositories/test_interfaces.py
++++ b/src/tests/maasservicelayer/db/repositories/test_interfaces.py
+@@ -11,9 +11,11 @@ from maascommon.enums.interface import InterfaceType
+ from maascommon.enums.ipaddress import IpAddressType
+ from maasservicelayer.context import Context
+ from maasservicelayer.db.repositories.interfaces import InterfaceRepository
++from maasservicelayer.db.tables import InterfaceRelationshipTable
+ from maasservicelayer.models.base import ListResult
+ from maasservicelayer.models.interfaces import Interface
+ from maasservicelayer.models.staticipaddress import StaticIPAddress
++from maasservicelayer.utils.date import utcnow
+ from tests.fixtures.factories.bmc import create_test_bmc
+ from tests.fixtures.factories.interface import (
+     create_test_interface,
+@@ -59,6 +61,29 @@ def _assert_interface_in_list(
+ @pytest.mark.usefixtures("ensuremaasdb")
+ @pytest.mark.asyncio
+ class TestInterfaceRepository:
++    async def test_get_parents(
++        self, db_connection: AsyncConnection, fixture: Fixture
++    ) -> None:
++        child = await create_test_interface_entry(
++            fixture, type=InterfaceType.BOND
++        )
++        parent = await create_test_interface_entry(fixture)
++        unrelated = await create_test_interface_entry(fixture)
++        await fixture.create(
++            InterfaceRelationshipTable.name,
++            [
++                {
++                    "child_id": child.id,
++                    "parent_id": parent.id,
++                    "created": utcnow(),
++                    "updated": utcnow(),
++                }
++            ],
++        )
++        repository = InterfaceRepository(Context(connection=db_connection))
++        assert await repository.get_parents(child.id) == [parent]
++        assert await repository.get_parents(unrelated.id) == []
++
+     @pytest.mark.parametrize("page_size", range(1, 4))
+     @pytest.mark.parametrize(
+         "alloc_type",
+@@ -250,8 +275,9 @@ class TestInterfaceRepository:
+         ) -> None:
+             interface_response = next(
+                 filter(
+-                    lambda interface_response: interface.id
+-                    == interface_response.id,
++                    lambda interface_response: (
++                        interface.id == interface_response.id
++                    ),
+                     interfaces_response.items,
+                 )
+             )
+diff --git a/src/tests/maasservicelayer/db/repositories/test_nodes.py b/src/tests/maasservicelayer/db/repositories/test_nodes.py
+index 6d7488396..d04492531 100644
+--- a/src/tests/maasservicelayer/db/repositories/test_nodes.py
++++ b/src/tests/maasservicelayer/db/repositories/test_nodes.py
+@@ -52,6 +52,15 @@ class TestNodeClauseFactory:
+ @pytest.mark.usefixtures("ensuremaasdb")
+ @pytest.mark.asyncio
+ class TestNodesRepository:
++    @pytest.mark.parametrize("url", ["", "http://region:5240/MAAS"])
++    async def test_get_url(
++        self, db_connection: AsyncConnection, fixture: Fixture, url: str
++    ) -> None:
++        node = await create_test_machine_entry(fixture, url=url)
++        repository = NodesRepository(Context(connection=db_connection))
++        assert await repository.get_url(node["system_id"]) == url
++        assert await repository.get_url("missing") is None
++
+     async def test_move_to_zone(
+         self, db_connection: AsyncConnection, fixture: Fixture
+     ) -> None:
+diff --git a/src/tests/maasservicelayer/db/repositories/test_staticipaddress.py b/src/tests/maasservicelayer/db/repositories/test_staticipaddress.py
+index 43558bb54..1a6a9893d 100644
+--- a/src/tests/maasservicelayer/db/repositories/test_staticipaddress.py
++++ b/src/tests/maasservicelayer/db/repositories/test_staticipaddress.py
+@@ -30,6 +30,29 @@ from tests.maasservicelayer.db.repositories.base import RepositoryCommonTests
+ 
+ 
+ class TestStaticIPAddressClauseFactory:
++    def test_with_alloc_type_in(self) -> None:
++        clause = StaticIPAddressClauseFactory.with_alloc_type_in(
++            [IpAddressType.AUTO, IpAddressType.STICKY]
++        )
++        assert (
++            str(
++                clause.condition.compile(
++                    compile_kwargs={"literal_binds": True}
++                )
++            )
++            == "maasserver_staticipaddress.alloc_type IN (0, 1)"
++        )
++
++    def test_with_temp_expires_on_is_null(self) -> None:
++        clause = StaticIPAddressClauseFactory.with_temp_expires_on_is_null()
++        assert str(clause.condition) == (
++            "maasserver_staticipaddress.temp_expires_on IS NULL"
++        )
++
++    def test_with_interface_enabled(self) -> None:
++        clause = StaticIPAddressClauseFactory.with_interface_enabled(True)
++        assert str(clause.condition) == "maasserver_interface.enabled = true"
++
+     def test_with_id(self) -> None:
+         clause = StaticIPAddressClauseFactory.with_id(1)
+         assert str(
+diff --git a/src/tests/maasservicelayer/services/test_dhcp.py b/src/tests/maasservicelayer/services/test_dhcp.py
+new file mode 100644
+index 000000000..98eafdf12
+--- /dev/null
++++ b/src/tests/maasservicelayer/services/test_dhcp.py
+@@ -0,0 +1,856 @@
++# Copyright 2026 Canonical Ltd.  This software is licensed under the
++# GNU Affero General Public License version 3 (see the file LICENSE).
++
++from ipaddress import ip_address, ip_network
++from unittest.mock import AsyncMock, Mock
++
++from netaddr import IPAddress
++import pytest
++
++from maascommon.enums.interface import InterfaceType
++from maascommon.enums.ipaddress import IpAddressType
++from maascommon.enums.ipranges import IPRangeType
++from maascommon.enums.node import NodeStatus, NodeTypeEnum
++from maascommon.enums.power import PowerState
++from maascommon.enums.subnet import RdnsMode
++from maasservicelayer.context import Context
++from maasservicelayer.db.repositories.interfaces import InterfaceClauseFactory
++from maasservicelayer.db.repositories.staticipaddress import (
++    StaticIPAddressClauseFactory,
++)
++from maasservicelayer.db.repositories.subnets import SubnetClauseFactory
++from maasservicelayer.db.repositories.vlans import VlansClauseFactory
++from maasservicelayer.exceptions.catalog import (
++    NotFoundException,
++    ValidationException,
++)
++from maasservicelayer.models.dhcp import (
++    DHCPDataForAgent,
++    HostReservationData,
++    InterfaceData,
++    IPRangeData,
++    KeaHAConfig,
++    SubnetData,
++    VlanData,
++)
++from maasservicelayer.models.domains import Domain
++from maasservicelayer.models.interfaces import Interface
++from maasservicelayer.models.ipranges import IPRange
++from maasservicelayer.models.nodes import Node
++from maasservicelayer.models.reservedips import ReservedIP
++from maasservicelayer.models.staticipaddress import StaticIPAddress
++from maasservicelayer.models.subnets import Subnet
++from maasservicelayer.models.vlans import Vlan
++from maasservicelayer.services.configurations import ConfigurationsService
++from maasservicelayer.services.dhcp import DHCPService
++from maasservicelayer.services.domains import DomainsService
++from maasservicelayer.services.interfaces import InterfacesService
++from maasservicelayer.services.ipranges import IPRangesService
++from maasservicelayer.services.nodes import NodesService
++from maasservicelayer.services.reservedips import ReservedIPsService
++from maasservicelayer.services.staticipaddress import StaticIPAddressService
++from maasservicelayer.services.subnets import SubnetsService
++from maasservicelayer.services.vlans import VlansService
++from maasservicelayer.utils.date import utcnow
++
++
++@pytest.fixture
++def rack():
++    return Node(
++        id=1,
++        created=utcnow(),
++        updated=utcnow(),
++        system_id="rack-1",
++        hostname="rack",
++        status=NodeStatus.DEPLOYED,
++        node_type=NodeTypeEnum.RACK_CONTROLLER,
++        power_state=PowerState.ON,
++        current_config_id=1,
++    )
++
++
++@pytest.fixture
++def vlan():
++    return Vlan(
++        id=1,
++        created=utcnow(),
++        updated=utcnow(),
++        vid=10,
++        description="",
++        mtu=1500,
++        dhcp_on=True,
++        primary_rack_id=1,
++        fabric_id=1,
++        space_id=1,
++    )
++
++
++@pytest.fixture
++def subnet():
++    return Subnet(
++        id=1,
++        created=utcnow(),
++        updated=utcnow(),
++        cidr=ip_network("10.0.0.0/24"),
++        rdns_mode=RdnsMode.DEFAULT,
++        gateway_ip=ip_address("10.0.0.254"),
++        allow_dns=True,
++        allow_proxy=True,
++        active_discovery=False,
++        managed=True,
++        disabled_boot_architectures=[],
++        vlan_id=1,
++    )
++
++
++@pytest.fixture
++def interface():
++    return Interface(
++        id=1,
++        created=utcnow(),
++        updated=utcnow(),
++        name="eth0",
++        type=InterfaceType.PHYSICAL,
++        mac_address="00:11:22:33:44:55",
++        node_config_id=1,
++        vlan_id=1,
++    )
++
++
++def make_ip(id=1, ip="10.0.0.1", subnet_id=1, alloc_type=IpAddressType.STICKY):
++    return StaticIPAddress(
++        id=id,
++        created=utcnow(),
++        updated=utcnow(),
++        ip=ip_address(ip) if ip else None,
++        alloc_type=alloc_type,
++        lease_time=600,
++        subnet_id=subnet_id,
++    )
++
++
++@pytest.fixture
++def dhcp(rack, vlan, subnet, interface, monkeypatch):
++    service = DHCPService(
++        context=Context(),
++        configurations_service=Mock(ConfigurationsService),
++        domains_service=Mock(DomainsService),
++        interfaces_service=Mock(InterfacesService),
++        ipranges_service=Mock(IPRangesService),
++        nodes_service=Mock(NodesService),
++        reservedips_service=Mock(ReservedIPsService),
++        staticipaddress_service=Mock(StaticIPAddressService),
++        subnets_service=Mock(SubnetsService),
++        vlans_service=Mock(VlansService),
++    )
++    service.nodes_service.get_one.return_value = rack
++    service.nodes_service.get_by_id.return_value = rack
++    service.nodes_service.get_url.return_value = ""
++    service.nodes_service.get_many.return_value = []
++    service.vlans_service.get_node_vlans.return_value = [vlan, vlan]
++    service.vlans_service.get_many.return_value = [vlan]
++    service.vlans_service.get_by_id.return_value = vlan
++    service.subnets_service.get_many.return_value = [subnet]
++    service.subnets_service.get_by_id.return_value = subnet
++    service.interfaces_service.get_many.return_value = [interface]
++    service.interfaces_service.get_for_ip.return_value = []
++    service.staticipaddress_service.get_for_interfaces.return_value = [
++        make_ip()
++    ]
++    service.staticipaddress_service.get_for_nodes.return_value = [make_ip()]
++    service.staticipaddress_service.get_many.return_value = []
++    service.ipranges_service.get_many.return_value = []
++    service.reservedips_service.get_many.return_value = []
++    service.domains_service.get_default_domain.return_value = Domain(
++        id=1,
++        created=utcnow(),
++        updated=utcnow(),
++        name="maas",
++        authoritative=True,
++    )
++    service.domains_service.get_many.return_value = []
++    service.configurations_service.get.side_effect = lambda name: {
++        "maas_url": "http://region:5240/MAAS",
++        "ntp_external_only": False,
++        "ntp_servers": "ntp.example.com, ntp2.example.com",
++        "use_rack_proxy": True,
++    }[name]
++    monkeypatch.setattr(
++        "maasservicelayer.services.dhcp.get_source_address",
++        lambda network: None,
++    )
++    monkeypatch.setattr(
++        "maasservicelayer.services.dhcp.resolve_hostname",
++        lambda hostname, version: {IPAddress("10.0.0.10")},
++    )
++    monkeypatch.setattr(
++        "maasservicelayer.services.dhcp.MAAS_ID.get", lambda: None
++    )
++    return service
++
++
++@pytest.mark.asyncio
++class TestDHCPService:
++    @pytest.mark.parametrize(
++        "cidr,rack_ip,gateway,start,end",
++        [
++            (
++                "10.0.0.0/24",
++                "10.0.0.1",
++                "10.0.0.254",
++                "10.0.0.100",
++                "10.0.0.200",
++            ),
++            (
++                "2001:db8::/64",
++                "2001:db8::1",
++                "2001:db8::ffff",
++                "2001:db8::100",
++                "2001:db8::200",
++            ),
++        ],
++    )
++    async def test_get_kea_dhcp_data_for_agent(
++        self,
++        dhcp,
++        subnet,
++        interface,
++        cidr,
++        rack_ip,
++        gateway,
++        start,
++        end,
++        monkeypatch,
++    ):
++        subnet.cidr = ip_network(cidr)
++        subnet.gateway_ip = ip_address(gateway)
++        rack_address = make_ip(ip=rack_ip)
++        dhcp.staticipaddress_service.get_for_interfaces.return_value = [
++            rack_address
++        ]
++        dhcp.staticipaddress_service.get_for_nodes.return_value = [
++            rack_address
++        ]
++        iprange = IPRange(
++            id=1,
++            created=utcnow(),
++            updated=utcnow(),
++            type=IPRangeType.DYNAMIC,
++            start_ip=ip_address(start),
++            end_ip=ip_address(end),
++            subnet_id=1,
++        )
++        dhcp.ipranges_service.get_many.return_value = [iprange]
++        monkeypatch.setattr(
++            "maasservicelayer.services.dhcp.resolve_hostname",
++            lambda hostname, version: set(),
++        )
++        pool = IPRangeData(1, 1, True, start, end)
++
++        result = await dhcp.get_kea_dhcp_data_for_agent("rack-1")
++
++        assert result == DHCPDataForAgent(
++            vlans=[VlanData(1, 10, None, 1500)],
++            subnets=[
++                SubnetData(
++                    id=1,
++                    rack_system_id="rack-1",
++                    secondary_rack_system_id=None,
++                    ip_version=subnet.cidr.version,
++                    cidr=cidr,
++                    gateway_ip=gateway,
++                    dns_servers=[rack_ip],
++                    allow_dns=True,
++                    vlan_id=1,
++                    vlan_mtu=1500,
++                    mask=str(subnet.cidr.netmask),
++                    broadcast_ip=str(subnet.cidr.broadcast_address),
++                    domain_name="maas",
++                    search_list=["maas"],
++                    ntp_servers=[rack_ip],
++                    next_server=rack_ip,
++                    pools=[pool],
++                    host_reservations=[],
++                )
++            ],
++            ipranges=[pool],
++            interfaces=[InterfaceData(1, 1, interface.name)],
++            default_dns_servers=[rack_ip],
++            ntp_servers=[rack_ip],
++            ha_data=[],
++        )
++
++    async def test_only_includes_owned_dhcp_vlans_and_managed_subnets(
++        self, dhcp, rack
++    ):
++        await dhcp.get_kea_dhcp_data_for_agent(rack.system_id)
++
++        vlan_query = dhcp.vlans_service.get_many.call_args_list[0].args[0]
++        assert vlan_query.where == VlansClauseFactory.and_clauses(
++            [
++                VlansClauseFactory.with_dhcp_on(True),
++                VlansClauseFactory.with_primary_or_secondary_rack_id(rack.id),
++            ]
++        )
++        subnet_query = dhcp.subnets_service.get_many.call_args_list[0].kwargs[
++            "query"
++        ]
++        assert subnet_query.where == SubnetClauseFactory.and_clauses(
++            [
++                SubnetClauseFactory.with_vlan_id_in([1]),
++                SubnetClauseFactory.with_managed(True),
++            ]
++        )
++
++    async def test_subnets_and_pools_are_sorted_and_only_dynamic_ranges_are_pools(
++        self, dhcp, subnet, vlan
++    ):
++        later_subnet = subnet.model_copy(
++            update={
++                "id": 2,
++                "cidr": ip_network("10.0.1.0/24"),
++            }
++        )
++        dhcp.subnets_service.get_many.return_value = [later_subnet, subnet]
++        dynamic_range = IPRange(
++            id=2,
++            created=utcnow(),
++            updated=utcnow(),
++            type=IPRangeType.DYNAMIC,
++            start_ip=ip_address("10.0.1.100"),
++            end_ip=ip_address("10.0.1.200"),
++            subnet_id=2,
++        )
++        reserved_range = IPRange(
++            id=1,
++            created=utcnow(),
++            updated=utcnow(),
++            type=IPRangeType.RESERVED,
++            start_ip=ip_address("10.0.0.100"),
++            end_ip=ip_address("10.0.0.200"),
++            subnet_id=1,
++        )
++        dhcp.ipranges_service.get_many.return_value = [
++            dynamic_range,
++            reserved_range,
++        ]
++
++        result = await dhcp.get_kea_dhcp_data_for_agent("rack-1")
++
++        assert [subnet.cidr for subnet in result.subnets] == [
++            "10.0.0.0/24",
++            "10.0.1.0/24",
++        ]
++        assert [
++            pool.id for subnet in result.subnets for pool in subnet.pools
++        ] == [2]
++        assert [pool.id for pool in result.ipranges] == [1, 2]
++
++    async def test_unconfigured_address_family_is_omitted(
++        self, dhcp, subnet, interface
++    ):
++        subnet.cidr = ip_network("2001:db8::/64")
++
++        result = await dhcp.get_kea_dhcp_data_for_agent("rack-1")
++
++        assert result.subnets == []
++        assert result.ipranges == []
++        assert result.interfaces == []
++
++    async def test_unattached_owned_vlan_is_omitted(self, dhcp, interface):
++        dhcp.interfaces_service.get_many.return_value = [
++            interface.model_copy(update={"vlan_id": 2})
++        ]
++        dhcp.subnets_service.get_many.return_value = []
++
++        result = await dhcp.get_kea_dhcp_data_for_agent("rack-1")
++
++        assert result.vlans == []
++        assert result.subnets == []
++
++    async def test_subnets_without_an_interface_in_same_family_remain_configured(
++        self, dhcp, subnet, interface
++    ):
++        subnet.cidr = ip_network("2001:db8::/64")
++        dhcp.staticipaddress_service.get_for_interfaces.return_value = [
++            make_ip(ip="2001:db8::1")
++        ]
++        dhcp.staticipaddress_service.get_for_nodes.return_value = [
++            make_ip(ip="2001:db8::1")
++        ]
++
++        result = await dhcp.get_kea_dhcp_data_for_agent("rack-1")
++
++        assert result.subnets[0].ip_version == 6
++
++    @pytest.mark.parametrize(
++        "node_type,current_config_id,error",
++        [
++            (NodeTypeEnum.MACHINE, 1, ValidationException),
++            (NodeTypeEnum.REGION_CONTROLLER, 1, ValidationException),
++            (NodeTypeEnum.RACK_CONTROLLER, None, ValidationException),
++        ],
++    )
++    async def test_rejects_invalid_rack(
++        self, dhcp, rack, node_type, current_config_id, error
++    ):
++        rack.node_type = node_type
++        rack.current_config_id = current_config_id
++        with pytest.raises(error):
++            await dhcp.get_kea_dhcp_data_for_agent(rack.system_id)
++
++    async def test_missing_rack(self, dhcp):
++        dhcp.nodes_service.get_one.return_value = None
++        with pytest.raises(NotFoundException):
++            await dhcp.get_kea_dhcp_data_for_agent("missing")
++
++    async def test_external_ntp_and_rack_url(self, dhcp, monkeypatch):
++        dhcp.nodes_service.get_url.return_value = (
++            "http://rack-region:5240/MAAS"
++        )
++        dhcp.configurations_service.get.side_effect = lambda name: {
++            "ntp_external_only": True,
++            "ntp_servers": "ntp.example.com, ntp2.example.com",
++            "use_rack_proxy": True,
++        }[name]
++        resolver = Mock(return_value=set())
++        monkeypatch.setattr(
++            "maasservicelayer.services.dhcp.resolve_hostname", resolver
++        )
++        result = await dhcp.get_kea_dhcp_data_for_agent("rack-1")
++        assert result.ntp_servers == ["ntp.example.com", "ntp2.example.com"]
++        assert result.subnets[0].ntp_servers == result.ntp_servers
++        resolver.assert_called_once_with("rack-region", 4)
++
++    async def test_relay_uses_serving_vlan_interface(self, dhcp, subnet, vlan):
++        relay = vlan.model_copy(
++            update={
++                "id": 2,
++                "vid": 20,
++                "relay_vlan_id": 1,
++                "dhcp_on": False,
++            }
++        )
++        serving_subnet = subnet.model_copy()
++        subnet.id = 2
++        subnet.vlan_id = 2
++        subnet.cidr = ip_network("10.1.0.0/24")
++        dhcp.vlans_service.get_many.side_effect = [
++            [vlan],
++            [relay],
++            [relay],
++        ]
++        dhcp.subnets_service.get_by_id.return_value = serving_subnet
++        dhcp._get_default_dns_servers_for_subnet = AsyncMock(return_value=[])
++
++        result = await dhcp.get_kea_dhcp_data_for_agent("rack-1")
++
++        assert [v.id for v in result.vlans] == [1, 2]
++        assert result.subnets[0].vlan_id == 2
++        assert result.subnets[0].next_server == "10.0.0.1"
++        assert result.interfaces == [InterfaceData(1, 1, "eth0")]
++
++    async def test_base_vlan_does_not_select_interface_from_relay_vlan(
++        self, dhcp, subnet, vlan, interface
++    ):
++        relay_subnet = subnet.model_copy(update={"id": 2, "vlan_id": 2})
++        dhcp.staticipaddress_service.get_for_interfaces.return_value = [
++            make_ip(subnet_id=2)
++        ]
++        dhcp.subnets_service.get_by_id.return_value = relay_subnet
++
++        selected, addresses = await dhcp._get_best_interface_with_ip_on_vlan(
++            subnet, vlan, [interface]
++        )
++
++        assert selected is None
++        assert addresses == []
++
++    @pytest.mark.parametrize("system_id", ["rack-1", "rack-2"])
++    async def test_ha_roles_are_independent_of_requesting_rack(
++        self, dhcp, rack, vlan, interface, subnet, system_id
++    ):
++        secondary = rack.model_copy(
++            update={
++                "id": 2,
++                "system_id": "rack-2",
++                "current_config_id": 2,
++            }
++        )
++        secondary_interface = interface.model_copy(
++            update={
++                "id": 2,
++                "node_config_id": 2,
++            }
++        )
++        vlan.secondary_rack_id = secondary.id
++        dhcp.nodes_service.get_one.return_value = (
++            rack if system_id == rack.system_id else secondary
++        )
++        dhcp.nodes_service.get_by_id.side_effect = lambda id: {
++            1: rack,
++            2: secondary,
++        }[id]
++        dhcp.interfaces_service.get_many.side_effect = lambda query: (
++            [interface]
++            if query.where.condition.compare(
++                InterfaceClauseFactory.with_node_config_id(1).condition
++            )
++            else [secondary_interface]
++        )
++        dhcp.staticipaddress_service.get_for_interfaces.side_effect = (
++            lambda ids: [make_ip(ip=f"10.0.0.{ids[0]}")]
++        )
++        dhcp.subnets_service.get_many.return_value = [subnet, subnet]
++        dhcp._get_ntp_servers_for_rack = AsyncMock(
++            side_effect=[
++                {(1, 4): "10.0.0.1"},
++                {(1, 4): "10.0.0.2"},
++            ]
++        )
++        result = await dhcp.get_kea_dhcp_data_for_agent(system_id)
++        assert result.ha_data == [
++            KeaHAConfig("rack-1", "rack-2", "10.0.0.1", "10.0.0.2")
++        ]
++        assert result.interfaces == [
++            InterfaceData(1 if system_id == "rack-1" else 2, 1, "eth0")
++        ]
++        assert result.subnets[0].ntp_servers == ["10.0.0.1", "10.0.0.2"]
++
++    async def test_ha_without_address_fails(self, dhcp, subnet, vlan):
++        vlan.secondary_rack_id = 2
++        dhcp.staticipaddress_service.get_for_interfaces.return_value = []
++        with pytest.raises(ValidationException):
++            await dhcp._get_ha_config(subnet, vlan)
++
++    @pytest.mark.parametrize(
++        "first_type,first_alloc,second_type,second_alloc,expected",
++        [
++            (
++                InterfaceType.BOND,
++                IpAddressType.DISCOVERED,
++                InterfaceType.PHYSICAL,
++                IpAddressType.STICKY,
++                2,
++            ),
++            (
++                InterfaceType.PHYSICAL,
++                IpAddressType.STICKY,
++                InterfaceType.BOND,
++                IpAddressType.STICKY,
++                2,
++            ),
++            (
++                InterfaceType.VLAN,
++                IpAddressType.AUTO,
++                InterfaceType.PHYSICAL,
++                IpAddressType.AUTO,
++                2,
++            ),
++        ],
++    )
++    async def test_interface_preference(
++        self,
++        dhcp,
++        subnet,
++        vlan,
++        interface,
++        first_type,
++        first_alloc,
++        second_type,
++        second_alloc,
++        expected,
++    ):
++        first = interface.model_copy(update={"type": first_type})
++        second = interface.model_copy(update={"id": 2, "type": second_type})
++        dhcp.staticipaddress_service.get_for_interfaces.side_effect = (
++            lambda ids: [
++                make_ip(alloc_type=first_alloc if ids == [1] else second_alloc)
++            ]
++        )
++        best, _ = await dhcp._get_best_interface_with_ip_on_vlan(
++            subnet, vlan, [first, second]
++        )
++        assert best.id == expected
++
++    async def test_legacy_selection_does_not_filter_disabled_interfaces(
++        self, dhcp, subnet, vlan, interface
++    ):
++        disabled = interface.model_copy(update={"enabled": False})
++        dhcp.staticipaddress_service.get_for_interfaces.side_effect = (
++            lambda ids: [
++                make_ip() if ids == [1] else make_ip(ip="2001:db8::1")
++            ]
++        )
++        selected, addresses = await dhcp._get_best_interface_with_ip_on_vlan(
++            subnet, vlan, [disabled, interface.model_copy(update={"id": 2})]
++        )
++        assert selected.id == 1
++        assert [address.ip for address in addresses] == [
++            ip_address("10.0.0.1")
++        ]
++
++    async def test_interface_ties_follow_creation_time(
++        self, dhcp, subnet, vlan, interface
++    ):
++        earlier = interface.model_copy(update={"type": InterfaceType.PHYSICAL})
++        later = interface.model_copy(
++            update={
++                "id": 2,
++                "type": InterfaceType.PHYSICAL,
++                "created": interface.created.replace(
++                    year=interface.created.year + 1
++                ),
++            }
++        )
++        dhcp.staticipaddress_service.get_for_interfaces.return_value = [
++            make_ip()
++        ]
++        selected, _ = await dhcp._get_best_interface_with_ip_on_vlan(
++            subnet, vlan, [later, earlier]
++        )
++        assert selected.id == 1
++
++    async def test_dynamic_pools_break_interface_ties(
++        self, dhcp, subnet, vlan, interface
++    ):
++        other_subnet = subnet.model_copy(update={"id": 2})
++        second = interface.model_copy(update={"id": 2})
++        dhcp.staticipaddress_service.get_for_interfaces.side_effect = (
++            lambda ids: [make_ip(subnet_id=ids[0])]
++        )
++        dhcp.subnets_service.get_by_id.side_effect = lambda id: {
++            1: subnet,
++            2: other_subnet,
++        }[id]
++        dhcp.ipranges_service.get_many.side_effect = [[], [Mock(IPRange)]]
++
++        best, _ = await dhcp._get_best_interface_with_ip_on_vlan(
++            subnet, vlan, [interface, second]
++        )
++
++        assert best.id == 2
++
++    async def test_bond_hosts_precede_bond_and_duplicate_reserved_macs_remain(
++        self, dhcp, interface
++    ):
++        bond = interface.model_copy(update={"type": InterfaceType.BOND})
++        parent = interface.model_copy(
++            update={
++                "id": 2,
++                "name": "eth0.10",
++                "mac_address": "00:11:22:33:44:66",
++            }
++        )
++        same_mac_parent = interface.model_copy(update={"id": 3})
++        dhcp.staticipaddress_service.get_many.return_value = [make_ip()]
++        dhcp.interfaces_service.get_for_ip.return_value = [bond, parent]
++        dhcp.interfaces_service.get_parents.return_value = [
++            same_mac_parent,
++            parent,
++        ]
++        dhcp.reservedips_service.get_many.return_value = [
++            ReservedIP(
++                id=id,
++                created=utcnow(),
++                updated=utcnow(),
++                ip=ip_address("10.0.0.100"),
++                mac_address=mac,
++                subnet_id=1,
++            )
++            for id, mac in [
++                (1, bond.mac_address),
++                (2, "00:11:22:33:44:77"),
++                (3, "00:11:22:33:44:77"),
++            ]
++        ]
++        hosts = await dhcp._get_dhcp_host_reservations([1])
++        assert hosts[1] == [
++            HostReservationData(
++                "10.0.0.1", parent.mac_address, "rack-eth0-10"
++            ),
++            HostReservationData("10.0.0.1", bond.mac_address, "rack-eth0"),
++            HostReservationData("10.0.0.100", "00:11:22:33:44:77", "rsvd-2"),
++            HostReservationData("10.0.0.100", "00:11:22:33:44:77", "rsvd-3"),
++        ]
++        query = dhcp.staticipaddress_service.get_many.call_args.kwargs["query"]
++        expected = StaticIPAddressClauseFactory.and_clauses(
++            [
++                StaticIPAddressClauseFactory.with_subnet_id_in([1]),
++                StaticIPAddressClauseFactory.with_alloc_type_in(
++                    [
++                        IpAddressType.AUTO,
++                        IpAddressType.STICKY,
++                        IpAddressType.USER_RESERVED,
++                    ]
++                ),
++                StaticIPAddressClauseFactory.with_ip_not_null(),
++                StaticIPAddressClauseFactory.with_temp_expires_on_is_null(),
++            ]
++        )
++        assert query.where == expected
++
++    async def test_host_interface_deduplication_spans_vlan_subnets(
++        self, dhcp, interface
++    ):
++        dhcp.staticipaddress_service.get_many.return_value = [
++            make_ip(id=1, subnet_id=1),
++            make_ip(id=2, ip="10.0.1.1", subnet_id=2),
++        ]
++        dhcp.interfaces_service.get_for_ip.return_value = [interface]
++
++        hosts = await dhcp._get_dhcp_host_reservations([1, 2])
++
++        assert hosts[1] == [
++            HostReservationData("10.0.0.1", interface.mac_address, "rack-eth0")
++        ]
++        assert hosts[2] == []
++
++    async def test_ntp_prefers_dhcp_vlan_without_relying_on_group_order(
++        self, dhcp, rack, subnet, vlan
++    ):
++        other_vlan = vlan.model_copy(update={"id": 2, "dhcp_on": False})
++        other_subnet = subnet.model_copy(update={"id": 2, "vlan_id": 2})
++        dhcp.staticipaddress_service.get_for_nodes.return_value = [
++            make_ip(ip="10.0.0.1", subnet_id=2),
++            make_ip(ip="2001:db8::1", subnet_id=1),
++            make_ip(ip="10.0.0.20", subnet_id=1),
++            make_ip(ip="10.0.0.10", subnet_id=1),
++        ]
++        dhcp.subnets_service.get_by_id.side_effect = lambda id: {
++            1: subnet,
++            2: other_subnet,
++        }[id]
++        dhcp.vlans_service.get_by_id.side_effect = lambda id: {
++            1: vlan,
++            2: other_vlan,
++        }[id]
++        assert await dhcp._get_ntp_servers_for_rack(rack) == {
++            (1, 4): "10.0.0.10",
++            (1, 6): "2001:db8::1",
++        }
++
++    async def test_dns_preserves_explicit_servers_when_maas_dns_disabled(
++        self, dhcp, subnet
++    ):
++        subnet.allow_dns = False
++        subnet.dns_servers = ["9.9.9.9"]
++        assert await dhcp._get_default_dns_servers_for_subnet(
++            subnet, "region"
++        ) == ["9.9.9.9"]
++
++    async def test_dns_resolution_failure_still_uses_rack(
++        self, dhcp, subnet, monkeypatch
++    ):
++        monkeypatch.setattr(
++            "maasservicelayer.services.dhcp.resolve_hostname",
++            Mock(side_effect=OSError("unresolvable")),
++        )
++        assert await dhcp._get_default_dns_servers_for_subnet(
++            subnet, "region"
++        ) == ["10.0.0.1"]
++
++    async def test_dns_servers_are_sorted_and_filtered_by_allow_dns(
++        self, dhcp, subnet, monkeypatch
++    ):
++        disallowed = subnet.model_copy(update={"allow_dns": False})
++        dhcp.subnets_service.find_best_subnet_for_ip.side_effect = lambda ip: (
++            disallowed if ip == ip_address("10.0.0.20") else None
++        )
++        monkeypatch.setattr(
++            "maasservicelayer.services.dhcp.resolve_hostname",
++            lambda hostname, version: {
++                IPAddress("10.0.0.20"),
++                IPAddress("10.0.0.10"),
++            },
++        )
++
++        servers = await dhcp._get_default_dns_servers_for_subnet(
++            subnet, "http://region:5240/MAAS"
++        )
++
++        assert servers == ["10.0.0.1", "10.0.0.10"]
++
++    async def test_dns_prefers_non_loopback_addresses(
++        self, dhcp, subnet, monkeypatch
++    ):
++        monkeypatch.setattr(
++            "maasservicelayer.services.dhcp.resolve_hostname",
++            lambda hostname, version: {
++                IPAddress("127.0.0.1"),
++                IPAddress("10.0.0.10"),
++            },
++        )
++
++        servers = await dhcp._get_default_dns_servers_for_subnet(
++            subnet, "region"
++        )
++
++        assert "127.0.0.1" not in servers
++
++    async def test_alternate_region_dns_is_limited_to_source_subnet(
++        self, dhcp, rack, subnet
++    ):
++        dhcp.nodes_service.get_many.return_value = [rack]
++        dhcp.staticipaddress_service.get_for_nodes.return_value = [
++            make_ip(ip="10.0.0.20")
++        ]
++        dhcp.subnets_service.find_best_subnet_for_ip.return_value = subnet
++
++        addresses = await dhcp._get_alt_region_ips_for_dns(
++            [ip_address("10.0.0.10")]
++        )
++
++        assert addresses == [ip_address("10.0.0.20")]
++        query = dhcp.staticipaddress_service.get_for_nodes.call_args.kwargs[
++            "query"
++        ]
++        assert query.where == StaticIPAddressClauseFactory.and_clauses(
++            [
++                StaticIPAddressClauseFactory.with_node_system_id("rack-1"),
++                StaticIPAddressClauseFactory.with_subnet_id(subnet.id),
++                StaticIPAddressClauseFactory.with_ip_not_null(),
++            ]
++        )
++
++    async def test_dns_prioritizes_rack_and_deduplicates_explicit_servers(
++        self, dhcp, subnet
++    ):
++        subnet.dns_servers = ["10.0.0.10", "9.9.9.9"]
++        assert await dhcp._get_default_dns_servers_for_subnet(
++            subnet, "region"
++        ) == ["10.0.0.1", "10.0.0.10", "9.9.9.9"]
++
++    async def test_dns_falls_back_to_region_when_hostname_is_unresolvable(
++        self, dhcp, subnet, monkeypatch
++    ):
++        monkeypatch.setattr(
++            "maasservicelayer.services.dhcp.get_source_address",
++            lambda network: "10.0.0.10",
++        )
++        monkeypatch.setattr(
++            "maasservicelayer.services.dhcp.resolve_hostname",
++            Mock(side_effect=OSError("unresolvable")),
++        )
++        dhcp._get_boot_rack_controller_ips = AsyncMock(return_value=[])
++
++        assert await dhcp._get_default_dns_servers_for_subnet(
++            subnet, "region"
++        ) == ["10.0.0.10"]
++
++    async def test_dns_without_gateway_filters_automatic_servers(
++        self, dhcp, subnet, monkeypatch
++    ):
++        subnet.gateway_ip = None
++        subnet.dns_servers = ["9.9.9.9"]
++        monkeypatch.setattr(
++            "maasservicelayer.services.dhcp.resolve_hostname",
++            lambda hostname, version: {IPAddress("192.0.2.1")},
++        )
++        assert await dhcp._get_default_dns_servers_for_subnet(
++            subnet, "region"
++        ) == ["10.0.0.1", "9.9.9.9"]
++
++    async def test_alternate_region_dns_requires_a_resolved_server(self, dhcp):
++        assert await dhcp._get_alt_region_ips_for_dns([]) == []
++        dhcp.staticipaddress_service.get_for_nodes.assert_not_called()
+diff --git a/src/tests/maasservicelayer/services/test_nodes.py b/src/tests/maasservicelayer/services/test_nodes.py
+index 5ce70cdc1..ab10be586 100644
+--- a/src/tests/maasservicelayer/services/test_nodes.py
++++ b/src/tests/maasservicelayer/services/test_nodes.py
+@@ -98,6 +98,13 @@ class TestNodesService:
+             scriptresults_service=scriptresults_service_mock,
+         )
+ 
++    async def test_get_url(self, nodes_service, nodes_repository_mock) -> None:
++        nodes_repository_mock.get_url.return_value = "http://region:5240/MAAS"
++        assert await nodes_service.get_url("rack-1") == (
++            "http://region:5240/MAAS"
++        )
++        nodes_repository_mock.get_url.assert_called_once_with("rack-1")
++
+     async def test_update_by_system_id(
+         self, nodes_service, nodes_repository_mock
+     ) -> None:
+diff --git a/utilities/check-imports b/utilities/check-imports
+index 02ad38e23..e83e79b7b 100755
+--- a/utilities/check-imports
++++ b/utilities/check-imports
+@@ -512,6 +512,7 @@ ServiceLayerRule = Rule(
+     Allow("provisioningserver.utils.arch.**"),
+     Allow("provisioningserver.utils.env.**"),
+     Allow("provisioningserver.utils.network.**"),
++    Allow("provisioningserver.utils.text.**"),
+     Allow("provisioningserver.utils.version.**"),
+     Allow("cryptography.hazmat.primitives.**"),
+     Allow("cryptography.x509|cryptography.x509.**"),

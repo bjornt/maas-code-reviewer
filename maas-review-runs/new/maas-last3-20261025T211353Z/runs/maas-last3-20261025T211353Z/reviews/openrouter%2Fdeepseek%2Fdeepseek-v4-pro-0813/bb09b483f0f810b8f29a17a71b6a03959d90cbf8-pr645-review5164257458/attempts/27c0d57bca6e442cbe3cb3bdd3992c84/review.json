@@ -1,0 +1,10 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nThe check as written enforces the old `LP:<number>` format and rejects the new standard it was meant to introduce. Per the commit description and the Launchpad comment-syntax docs, the canonical multi-bug reference is `LP: #<bug_id>` (with `#`), but the inner regex `LP:\\s*\\K[0-9]+` only accepts digits immediately after optional whitespace \u2014 so `LP: #123` fails the check with exit 1 while `LP:123`/`LP: 123` pass. This also leaves the CI check inconsistent with lp-bug-update.yaml:24, which uses the same regex and would likewise fail to extract a `#`-prefixed bug id. The regex also matches Launchpad branch URIs like `lp:~user/branch`, which can produce false-positive failures when a closing keyword appears on the same line.",
+  "inline_comments": {
+    ".github/workflows/ci.yaml": {
+      "172": "The inner regex `LP:\\s*\\K[0-9]+` requires the bug number to appear immediately after `LP:` with only optional whitespace, and does not allow the `#` required by the new standard (`LP: #<bug_id>`). The canonical `LP: #123` therefore hits this branch and exits 1, while the old `LP:123`/`LP: 123` passes \u2014 the opposite of the intended switch. Use e.g. `LP:\\s*#?\\s*\\K[0-9]+` (and update the matching extraction regex in lp-bug-update.yaml:24, which is still `LP:\\s*\\K[0-9]+` and would also be broken for the new format).",
+      "174": "Error message advertises `LP:<number>`, but the stated (Launchpad-documented) standard is `LP: #<number>`; as written it instructs users to use the exact format the check should be rejecting.",
+      "171": "The outer `.*LP:\\s*` also matches Launchpad branch URIs such as `lp:~user/branch`, so a line combining a closing keyword with a branch reference (not a bug) still passes the outer test and then falsely fails the inner test with exit 1."
+    }
+  }
+}

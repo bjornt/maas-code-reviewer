@@ -1,0 +1,21 @@
+{
+  "general_comment": "",
+  "inline_comments": {
+    "docs/explanation/security.md": {
+      "13": "If PostgreSQL is treated as part of MAAS, should we also mention any Load Balancing solution, such as HAProxy?",
+      "51": "If we treat Temporal server as an independent component, then we might have to add a row for the MAAS Agent too. Especially since the way is mentioned in this line implies a standalone component. The alternative would be to treat Temporal server as part of region controller and MAAS Agent as part of rack controller, so no independent component at all.",
+      "56": "Q: should we differentiate the tokens of v2 and v3 API or it's not so important in this particular sentence?",
+      "58": "Even when TLS is enabled, we still allow some unencrypted communication. I mention it in case we want to refer to it here.",
+      "66": "They also communicate via the internal API at port 5242"
+    },
+    "docs/how-to-guides/decommission-maas.md": {
+      "17": "Is this sentence necessary here?",
+      "27": "This one also reserves a warning:\n\n\n```suggestion\n:::{warning}\nReleasing a machine only erases its disks when you select an erase option. MAAS does not delete any other data automatically.\n:::\n```",
+      "3": "A general comment: In case of VMs, all the below actions, excluding actions on real machines are not necessary. Simply deleting the VMs is more than enough",
+      "34": "Should we do this as last step? Doing it in the middle of the process might lead to inability to access MAAS",
+      "5": "The below renders better with the documentation engine we use. For example: https://canonical.com/maas/docs/latest/how-to-guides/manage-switches/#manage-switches\n\n```\n:::{warning}\nThis process erases all MAAS data. Back up any data that you need to keep before you start.\n:::\n```",
+      "66": "Delete might not be enough. But let us avoid figuring it out and point users to official HashiCorp docs for deletion of a kv secret, if any.",
+      "67": "There is chance users are forwarding to other Observability solution, so what about replacing Loki and Prometheus with abstract words?"
+    }
+  }
+}

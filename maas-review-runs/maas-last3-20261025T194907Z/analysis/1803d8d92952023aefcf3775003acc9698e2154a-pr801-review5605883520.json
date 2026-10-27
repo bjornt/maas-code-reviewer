@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "case_id": "1803d8d92952023aefcf3775003acc9698e2154a-pr801-review5605883520",
+  "classifier_model": "openrouter/moonshotai/kimi-k3",
+  "generated": "2026-10-25T20:05:00Z",
+  "reviewers": [
+    {"key": "gemini-3.1-pro-preview", "label": "gemini-3.1-pro-preview (original)"},
+    {"key": "github-copilot/claude-opus-5", "label": "github-copilot/claude-opus-5"},
+    {"key": "openrouter/deepseek/deepseek-v4.1-flash-1017", "label": "openrouter/deepseek/deepseek-v4.1-flash-1017"}
+  ],
+  "issues": [
+    {
+      "summary": "Bind dhcp-data access to the authenticated agent's rack",
+      "detail": "get_agent_dhcp_data takes system_id from the path with only mTLS for authorization (agent.py:212), so any enrolled agent can dump another rack's DHCP inventory (host reservations with MACs/hostnames, HA rack IPs, DNS/NTP). The middleware already exposes the agent UUID as request.scope[\"client_cn\"]; reviewers suggest resolving CN -> agent -> rackcontroller_id -> system_id and 403-ing mismatches, or documenting the flat-trust model explicitly.",
+      "kind": "security",
+      "severity": "high",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Define explicit API response models instead of service-layer dataclasses",
+      "detail": "AgentDHCPDataResponse embeds maasservicelayer.models.dhcp dataclasses (VlanData, SubnetData, etc.) verbatim as the API schema (responses/agent.py:73), so a service-layer field rename silently becomes a breaking agent wire-protocol change, bypassing the three-tier split used elsewhere (e.g. responses/domains.py). Note pydantic v2 does not revalidate already-built stdlib dataclass instances, so the annotations only document, not enforce, the schema.",
+      "kind": "style",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Add ETag caching to the large polled dhcp-data payload",
+      "detail": "The 200 response declares no headers and sets no ETag, unlike /agents/{uuid}/config which uses OPENAPI_ETAG_HEADER (agent.py:201). Agents will poll this endpoint and its payload is large (ranges are duplicated under both ipranges and subnets[].pools); an ETag over the serialized DHCPDataForAgent would let agents skip unchanged configs.",
+      "kind": "performance",
+      "severity": "medium",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Declare the 403 response in the handler's response map",
+      "detail": "RequireClientCertMiddleware can return 403 for this path, but the @handler responses dict (agent.py:201) only declares 200/404/422, so the OpenAPI schema understates the endpoint's possible responses.",
+      "kind": "documentation",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Remove redundant explicit 422 response entry",
+      "detail": "maasapiserver.common.api.base.handler() already injects 422: ValidationErrorBodyResponse whenever responses is provided, so the explicit entry at agent.py:203 (and the ValidationErrorBodyResponse import) duplicates the default the sibling handlers rely on.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Confirm intent behind dhcp-data having no consumer yet",
+      "detail": "Nothing under src/maasagent (or elsewhere) references /dhcp-data, so the PR adds unreferenced API surface; confirm a follow-up wires the agent to it or that a backend-only step is deliberate.",
+      "kind": "scope",
+      "severity": "low",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Settle route shape relative to sibling DHCP route before clients adopt it",
+      "detail": "The new route is /agents/{system_id}/dhcp-data while the sibling DHCP route is /agents/{system_id}/services/dhcp/config; not wrong, but the shape should be settled before the Go client is written against it.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Drop no-op f-string wrapper around href construction",
+      "detail": "In AgentDHCPDataResponse.from_model (responses/agent.py:94), href=f\"{self_base_hyperlink.rstrip('/')}\" is equivalent to self_base_hyperlink.rstrip(\"/\") and inconsistent with AgentConfigResponse.from_model and responses/domains.py:208.",
+      "kind": "style",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    },
+    {
+      "summary": "Remove client-certificate test that re-exercises global middleware",
+      "detail": "test_agent_dhcp_data_requires_client_certificate (test_agent.py:368) tests RequireClientCertMiddleware added by the app fixture, not the handler; that 403-on-missing-CN behavior is already covered in src/tests/maasapiserver/v3/middlewares/test_client_certificate.py. The test and the InjectTLSWithoutClientCert middleware can be dropped unless kept as a guard against an exemption-list regression, which would warrant a comment.",
+      "kind": "testing",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Remove tautological pass-through assertions in from_model test",
+      "detail": "TestAgentDHCPDataResponse.test_from_model (responses test_agent.py:69) asserts plain field copying (response.vlans == dhcp_data.vlans, interfaces, ha_data) and a literal kind default; only hal_links.self.href (the rstrip handling) pins real behavior, and the handler test already covers the serialized payload.",
+      "kind": "testing",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5", "openrouter/deepseek/deepseek-v4.1-flash-1017"]
+    },
+    {
+      "summary": "Parametrize the near-identical 404 and 422 handler tests",
+      "detail": "test_agent_dhcp_data_404 and test_agent_dhcp_data_422_when_rack_not_configured (test_agent.py:386) differ only in the mocked exception and expected status, both verifying the shared exception-middleware mapping; a single @pytest.mark.parametrize case would remove ~30 duplicated lines.",
+      "kind": "testing",
+      "severity": "low",
+      "reviewers": ["github-copilot/claude-opus-5"]
+    }
+  ]
+}

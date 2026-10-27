@@ -1,0 +1,11 @@
+{
+  "run_id": "maas-last3-20261025T194907Z",
+  "case_id": "a0727d8211a11f19d6579247f398380264a742e2-pr806-review5614247103",
+  "reviewed_commit": "d253703f075ff41cc68f806abbfda96b5479b0b2",
+  "landed_commit": "a0727d8211a11f19d6579247f398380264a742e2",
+  "repository": "canonical/maas",
+  "model": "github-copilot/claude-opus-5",
+  "attempt_id": "a1e7e62d28f44affa427c03accfeff5a",
+  "review_status": "succeeded",
+  "export_status": "succeeded"
+}

@@ -1,0 +1,20 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nDocs-only change. The two link updates are correct and consistent with the rest of the repo: https://canonical.com/juju is the current Juju home (already used in docs/how-to-guides/get-started/index.md:16) and wiki.ubuntu.com matches the convention in docs/reference/configuration-guides/logging.md:16. The bulk of the change, however (curly apostrophes U+2019 \u2192 straight '), does not advance the stated goal: proselint has no check that flags curly apostrophes \u2014 its only quote-related check, typography.symbols.curly_quotes (checks/typography/symbols.py), matches straight double quotes (\"...\") around words, and no registered check matches apostrophes (verified against proselint main source). The result is typographically inconsistent files: straight apostrophes mixed with retained curly double quotes in the very same sentences, plus divergence from the ~36 other docs files that still use \u2019. If quote normalization is the real goal, pick one convention repo-wide (note docs/_scripts/generate_cli_docs.py:fix_curly_quotes normalizes straight double quotes to curly), apply it to all touched files consistently, and register the reformat commit in .git-blame-ignore-revs so blame stays usable.",
+  "inline_comments": {
+    "docs/how-to-guides/manage-machine-groups.md": {
+      "424": "This edit converts the apostrophes to straight quotes while the same line keeps curly double quotes (\u201cdeploy only machines with SSDs\u201d) \u2014 now mixed typography. Proselint does not flag curly apostrophes (its only quote check, typography.symbols.curly_quotes, matches straight double quotes), so this doesn't reduce proselint errors. Either normalize the whole file (also lines 428, 437 keep \u201c \u201d) or revert the apostrophe churn."
+    },
+    "docs/uncategorized/use-cases-server-lifecycle-management.md": {
+      "7": "Same issue: straight apostrophes introduced here while curly double quotes remain throughout the file (lines 19, 27, 59, 71, 93, ...). Proselint has no check on apostrophe style, so these edits don't achieve the stated compliance goal; they just create inconsistent typography vs. the rest of docs/."
+    },
+    "docs/uncategorized/what-maas-shouldn-t-do.md": {
+      "4": "Line 46 now reads don't \u201cjust work.\u201d \u2014 straight apostrophe next to curly double quotes in one sentence. Consider one quote convention per file; also note the filename's own URL-safe form (what-maas-shouldn-t-do.md) is fine, just flagging the mixed typography."
+    },
+    "docs/explanation/deploying-machines.md": {
+      "40": "Link change verified and fine (canonical.com/juju is the current Juju site and matches usage in how-to-guides/get-started/index.md). It is unrelated to the proselint scope of the PR, and this file still contains curly apostrophes at lines 19, 27, 33, 42, 80 \u2014 quote handling in the PR is inconsistent even for files it touches."
+    },
+    "docs/explanation/security.md": {
+      "110": "wiki.ubuntu.com/Full_Disk_Encryption_Howto_2019 is the same MoinMoin page as the old help.ubuntu.com URL and matches the wiki.ubuntu.com convention used in reference/configuration-guides/logging.md \u2014 no objection, just noting it is unrelated to the stated proselint goal."
+    }
+  }
+}

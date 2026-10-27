@@ -1,0 +1,11 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nOverall, the DHCP service layer port provides a clean and well-structured implementation of Kea DHCP data aggregation with comprehensive test coverage. However, there are two key issues that need attention:\n\n1. In `DHCPService._get_dhcp_host_reservations` (`src/maasservicelayer/services/dhcp.py`), querying interfaces and parents per IP in a loop causes an N+1 query problem, and `seen_interfaces` is updated with bond parents before the child bond interface is evaluated. If multiple bonds share a parent physical interface or if duplicate entries occur, reservations can be unintentionally skipped.\n2. In `DHCPService._get_alt_region_ips_for_dns` (`src/maasservicelayer/services/dhcp.py`), DNS resolution for dual-stack or multiple DNS servers repeatedly performs queries in a nested loop across all region controllers without batching.",
+  "inline_comments": {
+    "src/maasservicelayer/services/dhcp.py": {
+      "386": "Evaluating and mutating `dhcp_interfaces` inside the loop will include interfaces even for subnets that get filtered out subsequently at lines 472-476 when their IP version is not in `configured_ip_versions`.",
+      "467": "`subnet.cidr.broadcast_address` will raise `ValueError` on IPv6 subnets because broadcast addresses are only defined for IPv4 in Python's standard `ipaddress.IPv6Network`.",
+      "603": "Adding `parent.id` to `seen_interfaces` before checking `parent.mac_address == interface.mac_address` causes the parent to be permanently marked as seen even when its MAC matches the bond (and was thus skipped here). Furthermore, sharing the single `seen_interfaces` set across all subnets causes interfaces attached to multi-homed devices to only generate reservations for the first subnet encountered.",
+      "747": "Issuing separate queries inside a nested loop over `dns_servers` and `regions_by_id.values()` will generate $O(S \\times R)$ database queries. Consider filtering for all regions in a single query by region system IDs."
+    }
+  }
+}

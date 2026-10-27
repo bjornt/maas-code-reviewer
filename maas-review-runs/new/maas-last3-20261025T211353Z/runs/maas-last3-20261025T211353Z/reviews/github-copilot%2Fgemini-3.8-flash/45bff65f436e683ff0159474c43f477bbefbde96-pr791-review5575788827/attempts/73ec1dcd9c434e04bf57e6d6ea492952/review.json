@@ -1,0 +1,4 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nThe changes cleanly fix potential test flakiness and CIDR collisions by ensuring rack controllers are created with the specific target subnets and using their configured interfaces rather than creating redundant unconfigured interfaces.",
+  "inline_comments": {}
+}

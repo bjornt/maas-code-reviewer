@@ -1,0 +1,17 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nSolid port of the legacy DHCP data collection into the v3 service layer, with good test coverage and correct wiring in ServiceCollectionV3. The main issues are performance and robustness: several helpers issue repeated N+1 queries (most notably the dynamic-range counting inside _get_best_interface_with_ip_on_vlan, which runs once per subnet and again per HA peer rack), and `assert` is used to validate database-derived references where the rest of the file raises ValidationException. A few smaller maintainability nits (duplicated DNS/NTP list derivation, a redundant query in the alt-region DNS path, non-deterministic get_parents ordering, and a clause factory that references InterfaceTable without a join) are noted inline.",
+  "inline_comments": {
+    "src/maasservicelayer/services/dhcp.py": {
+      "431": "`assert ip_subnet is not None` (and the same pattern at lines 665, 694, 696, 712/714, and 726) validates DB-derived references. Under `python -O` these checks vanish, and even normally they raise a bare `AssertionError` rather than a mapped `ValidationException` like the HA-missing-rack paths in this file. Given a subnet/vlan/node id can be stale only through a FK race, prefer an explicit `if ... is None` raising `ValidationException` (or a clear sentinel) for consistency and safe operation in optimized mode.",
+      "433": "N+1 query amplification: `ipranges_service.get_many` executes per IP per interface, and this method runs once per subnet (plus once per HA peer via `_get_ip_address_for_rack_controller`). Together with the per-IP `subnets_service.get_by_id` above, a rack with N subnets and M interfaces costs O(N*M) extra queries just for a tie-break count. Fetch dynamic-range counts (and subnets) once for all relevant subnet ids before the loop.",
+      "374": "`ntp_servers` recomputes the exact expression already stored in `default_dns_servers` when `external_only` is false. Reuse `default_dns_servers` here to avoid the two lists silently diverging on a future edit (the equal value is intentional and mirrors the existing Temporal worker).",
+      "794": "The `(region.id, server.version) in seen_regions` early-exit runs after the `get_for_nodes` await, so already-seen regions still issue a query for every DNS server in the outer loop. Move the `seen_regions` check above the `get_for_nodes` call to skip the redundant query."
+    },
+    "src/maasservicelayer/db/repositories/interfaces.py": {
+      "140": "`get_parents` has no ORDER BY, so its result order is whatever the database returns. The DHCP service re-sorts by `created` afterward, but this public repository method should be deterministic on its own (e.g. `.order_by(InterfaceTable.c.id)`); the test only passes because it inserts a single parent."
+    },
+    "src/maasservicelayer/db/repositories/staticipaddress.py": {
+      "107": "`with_interface_enabled` references `InterfaceTable.c.enabled` but supplies no `joins` (unlike `with_interface_ids` above). It is only valid inside `get_for_nodes`, which already joins InterfaceTable; if reused with the base `get_many`/`select_all_statement` (which selects from `StaticIPAddressTable` alone) it will produce an unresolved-column SQL error. Add the needed join to the clause or document/move this so it cannot be misused."
+    }
+  }
+}

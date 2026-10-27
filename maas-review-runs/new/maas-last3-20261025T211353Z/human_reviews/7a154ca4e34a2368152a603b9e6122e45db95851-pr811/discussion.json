@@ -1,0 +1,55 @@
+{
+  "conversation_comments": [
+    {
+      "author_association": "MEMBER",
+      "body": "> [maas-code-reviewer review]\r\n> \r\n> > LLM-generated review from https://github.com/canonical/maas-code-reviewer.\r\n> > Intended to assist a human reviewer, not replace one — suggestions may be\r\n> > incorrect, please verify before acting.\r\n> \r\n> The updates nicely convert smart/curly apostrophes to straight apostrophes (`'`), which will resolve many of the `proselint` warnings. However, the PR missed converting the curly double quotes (`“` and `”`) to straight double quotes (`\"`) across several files. To fully satisfy `proselint`, you should also replace those curly double quotes. Additionally, there's a link update in `docs/explanation/security.md` that changes `help.ubuntu.com/community/...` to `wiki.ubuntu.com/...`, which might result in a broken link.\r\n\r\nOnly apostrophes are necessary.\r\n\"help.ubuntu.com\" is redirected to \"wiki.ubuntu.com\"",
+      "created_at": "2026-10-23T15:23:38Z",
+      "html_url": "https://github.com/canonical/maas/pull/811#issuecomment-6368359392",
+      "id": 6368359392,
+      "issue_url": "https://api.github.com/repos/canonical/maas/issues/811",
+      "minimized": null,
+      "node_id": "IC_kwDOBSgIKM8AAAABe5Vz4A",
+      "performed_via_github_app": null,
+      "reactions": {
+        "+1": 0,
+        "-1": 0,
+        "confused": 0,
+        "eyes": 0,
+        "heart": 0,
+        "hooray": 0,
+        "laugh": 0,
+        "rocket": 0,
+        "total_count": 0,
+        "url": "https://api.github.com/repos/canonical/maas/issues/comments/6368359392/reactions"
+      },
+      "updated_at": "2026-10-23T15:23:38Z",
+      "url": "https://api.github.com/repos/canonical/maas/issues/comments/6368359392",
+      "user": {
+        "avatar_url": "https://avatars.githubusercontent.com/u/83240569?v=4",
+        "events_url": "https://api.github.com/users/motrilense/events{/privacy}",
+        "followers_url": "https://api.github.com/users/motrilense/followers",
+        "following_url": "https://api.github.com/users/motrilense/following{/other_user}",
+        "gists_url": "https://api.github.com/users/motrilense/gists{/gist_id}",
+        "gravatar_id": "",
+        "html_url": "https://github.com/motrilense",
+        "id": 83240569,
+        "login": "motrilense",
+        "node_id": "MDQ6VXNlcjgzMjQwNTY5",
+        "organizations_url": "https://api.github.com/users/motrilense/orgs",
+        "received_events_url": "https://api.github.com/users/motrilense/received_events",
+        "repos_url": "https://api.github.com/users/motrilense/repos",
+        "site_admin": false,
+        "starred_url": "https://api.github.com/users/motrilense/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/motrilense/subscriptions",
+        "type": "User",
+        "url": "https://api.github.com/users/motrilense",
+        "user_view_type": "public"
+      }
+    }
+  ],
+  "landed_commit": "7a154ca4e34a2368152a603b9e6122e45db95851",
+  "pr_author": "motrilense",
+  "pr_number": 811,
+  "repository": "canonical/maas",
+  "review_comments": []
+}

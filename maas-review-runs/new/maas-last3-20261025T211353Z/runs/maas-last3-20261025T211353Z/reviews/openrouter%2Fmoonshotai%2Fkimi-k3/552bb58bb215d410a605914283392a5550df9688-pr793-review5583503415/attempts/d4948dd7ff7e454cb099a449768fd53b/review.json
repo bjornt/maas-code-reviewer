@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nThe fix is correct. NetworksHandler.read delegates to NetworksListingForm.filter_subnets, which returns `subnets.order_by(\"id\")` (src/maasserver/forms/__init__.py:2267), so the response is ordered numerically by subnet id, not lexicographically by the rendered \"subnet-<id>\" name. The old assertion only passed while string sort and numeric sort coincided (ids with equal digit counts), which broke at the 99\u2192100 boundary. Sorting the expected values by `subnet.id` matches the actual API behavior. One residual nit: the test is named `test_GET_sorts_by_name`, but it has never exercised name-based sorting \u2014 the endpoint orders by id. Consider renaming it to `test_GET_sorts_by_id` (line 93, outside this hunk) so the name doesn't mislead the next reader into \"fixing\" the assertion back to name order.",
+  "inline_comments": {
+    "src/maasserver/api/tests/test_networks.py": {
+      "104": "Correct expectation: the handler orders by subnet id (filter_subnets does `subnets.order_by(\"id\")`), not by the \"subnet-<id>\" name string. While here, consider renaming the test from `test_GET_sorts_by_name` to `test_GET_sorts_by_id` \u2014 the current name describes behavior the API never had and invites regressions of this same fix."
+    }
+  }
+}

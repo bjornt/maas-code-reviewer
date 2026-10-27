@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nThank you for the updates! Most link adjustments correctly point to the updated official URLs, but there is one invalid link introduced in `docs/reference/configuration-guides/logging.md` that leads to an HTTP 404 page.",
+  "inline_comments": {
+    "docs/reference/configuration-guides/logging.md": {
+      "16": "`https://wiki.ubuntu.com/IptablesHowTo` does not exist and returns an HTTP 404 error. The Community Help Wiki page is located at `https://help.ubuntu.com/community/IptablesHowTo` (or alternatively Ubuntu manpages at `https://manpages.ubuntu.com/manpages/noble/man8/iptables.8.html`). Please retain the original URL or update it to the proper current resource."
+    }
+  }
+}

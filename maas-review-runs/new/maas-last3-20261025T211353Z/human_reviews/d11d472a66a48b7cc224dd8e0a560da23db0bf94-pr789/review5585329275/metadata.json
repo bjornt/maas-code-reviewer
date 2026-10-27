@@ -1,0 +1,62 @@
+{
+  "author": "alexsander-souza",
+  "author_id": 61709370,
+  "base_sha": "bfeb69a932befd282dc202017c2d22c6c32ab0c4",
+  "description_source": "latest fetched PR body; NOT the review-time body",
+  "description_updated_at": "2026-10-20T14:44:48Z",
+  "diff_source": "git diff of merge-base(landed first parent, review head) to review head",
+  "diff_status": "collected",
+  "head_sha": "255f550cbb1a7c5962804aebcf23fed651d897ff",
+  "is_pr_author": true,
+  "landed_commit": "d11d472a66a48b7cc224dd8e0a560da23db0bf94",
+  "pr_number": 789,
+  "published_review": {
+    "_links": {
+      "html": {
+        "href": "https://github.com/canonical/maas/pull/789#pullrequestreview-5585329275"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/canonical/maas/pulls/789"
+      }
+    },
+    "author_association": "MEMBER",
+    "body": "",
+    "commit_id": "255f550cbb1a7c5962804aebcf23fed651d897ff",
+    "copilot_code_review_effort": null,
+    "html_url": "https://github.com/canonical/maas/pull/789#pullrequestreview-5585329275",
+    "id": 5585329275,
+    "is_copilot_code_review": false,
+    "node_id": "PRR_kwDOBSgIKM8AAAABTOlcew",
+    "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/789",
+    "state": "COMMENTED",
+    "submitted_at": "2026-10-20T13:00:12Z",
+    "user": {
+      "avatar_url": "https://avatars.githubusercontent.com/u/61709370?u=92a4059216e18237539f381ce49bb1b865fa5f16&v=4",
+      "events_url": "https://api.github.com/users/alexsander-souza/events{/privacy}",
+      "followers_url": "https://api.github.com/users/alexsander-souza/followers",
+      "following_url": "https://api.github.com/users/alexsander-souza/following{/other_user}",
+      "gists_url": "https://api.github.com/users/alexsander-souza/gists{/gist_id}",
+      "gravatar_id": "",
+      "html_url": "https://github.com/alexsander-souza",
+      "id": 61709370,
+      "login": "alexsander-souza",
+      "node_id": "MDQ6VXNlcjYxNzA5Mzcw",
+      "organizations_url": "https://api.github.com/users/alexsander-souza/orgs",
+      "received_events_url": "https://api.github.com/users/alexsander-souza/received_events",
+      "repos_url": "https://api.github.com/users/alexsander-souza/repos",
+      "site_admin": false,
+      "starred_url": "https://api.github.com/users/alexsander-souza/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/alexsander-souza/subscriptions",
+      "type": "User",
+      "url": "https://api.github.com/users/alexsander-souza",
+      "user_view_type": "public"
+    }
+  },
+  "repository": "canonical/maas",
+  "review_id": 5585329275,
+  "review_submitted_at": "2026-10-20T13:00:12Z",
+  "review_url": "https://github.com/canonical/maas/pull/789#pullrequestreview-5585329275",
+  "state": "COMMENTED",
+  "unsupported_inline_comment_count": 0,
+  "unsupported_inline_comments": []
+}

@@ -1,0 +1,8 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one — suggestions may be\n> incorrect, please verify before acting.\n\n\nThe change correctly addresses the intermittent test failure caused by the alphabetical sorting of `subnet-X` strings crossing digit boundaries. The API actually returns subnets ordered by `id` (as implemented in `NetworksListingForm.filter_subnets`), so the previous test only passed coincidentally when all IDs had the same number of digits. Since the test now explicitly checks for ID-based sorting, you should rename the test method to reflect its actual behaviour.",
+  "inline_comments": {
+    "src/maasserver/api/tests/test_networks.py": {
+      "104": "Since you are now explicitly sorting the expected results by `subnet.id`, the test method name `test_GET_sorts_by_name` is misleading. Consider renaming it to `test_GET_sorts_by_id`."
+    }
+  }
+}

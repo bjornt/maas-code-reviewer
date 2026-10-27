@@ -1,0 +1,62 @@
+{
+  "author": "tobiasdemendonca",
+  "author_id": 75569552,
+  "base_sha": "1803d8d92952023aefcf3775003acc9698e2154a",
+  "description_source": "latest fetched PR body; NOT the review-time body",
+  "description_updated_at": "2026-10-23T16:04:15Z",
+  "diff_source": "git diff of merge-base(landed first parent, review head) to review head",
+  "diff_status": "collected",
+  "head_sha": "4403f4780c1b85f2d23b2c4156039ae208a00603",
+  "is_pr_author": false,
+  "landed_commit": "7a154ca4e34a2368152a603b9e6122e45db95851",
+  "pr_number": 811,
+  "published_review": {
+    "_links": {
+      "html": {
+        "href": "https://github.com/canonical/maas/pull/811#pullrequestreview-5630905037"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/canonical/maas/pulls/811"
+      }
+    },
+    "author_association": "MEMBER",
+    "body": "",
+    "commit_id": "4403f4780c1b85f2d23b2c4156039ae208a00603",
+    "copilot_code_review_effort": null,
+    "html_url": "https://github.com/canonical/maas/pull/811#pullrequestreview-5630905037",
+    "id": 5630905037,
+    "is_copilot_code_review": false,
+    "node_id": "PRR_kwDOBSgIKM8AAAABT6DKzQ",
+    "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/811",
+    "state": "APPROVED",
+    "submitted_at": "2026-10-23T15:55:44Z",
+    "user": {
+      "avatar_url": "https://avatars.githubusercontent.com/u/75569552?u=3e8d820bda870649ae018756fd9a7ecede40619d&v=4",
+      "events_url": "https://api.github.com/users/tobiasdemendonca/events{/privacy}",
+      "followers_url": "https://api.github.com/users/tobiasdemendonca/followers",
+      "following_url": "https://api.github.com/users/tobiasdemendonca/following{/other_user}",
+      "gists_url": "https://api.github.com/users/tobiasdemendonca/gists{/gist_id}",
+      "gravatar_id": "",
+      "html_url": "https://github.com/tobiasdemendonca",
+      "id": 75569552,
+      "login": "tobiasdemendonca",
+      "node_id": "MDQ6VXNlcjc1NTY5NTUy",
+      "organizations_url": "https://api.github.com/users/tobiasdemendonca/orgs",
+      "received_events_url": "https://api.github.com/users/tobiasdemendonca/received_events",
+      "repos_url": "https://api.github.com/users/tobiasdemendonca/repos",
+      "site_admin": false,
+      "starred_url": "https://api.github.com/users/tobiasdemendonca/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/tobiasdemendonca/subscriptions",
+      "type": "User",
+      "url": "https://api.github.com/users/tobiasdemendonca",
+      "user_view_type": "public"
+    }
+  },
+  "repository": "canonical/maas",
+  "review_id": 5630905037,
+  "review_submitted_at": "2026-10-23T15:55:44Z",
+  "review_url": "https://github.com/canonical/maas/pull/811#pullrequestreview-5630905037",
+  "state": "APPROVED",
+  "unsupported_inline_comment_count": 0,
+  "unsupported_inline_comments": []
+}

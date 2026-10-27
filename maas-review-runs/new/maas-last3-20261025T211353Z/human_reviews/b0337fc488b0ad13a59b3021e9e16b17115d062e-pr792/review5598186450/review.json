@@ -1,0 +1,10 @@
+{
+  "general_comment": "LGTM. I added some new comments while I was re-reviewing the PR. Feel free to either resolve them or address them. If the latter, I am happy to re-approve post addressing.",
+  "inline_comments": {
+    "docs/explanation/security.md": {
+      "147": "Retrieving the secrets from any of these sources  is not enough to control the machines. Network access to either MAAS or the machine management network is also required. I do not know if we want to include it here, but I am just mentioning it.",
+      "151": "The MAAS snap is refreshed automatically but is only getting point releases. In case the current release that snap points to goes out of support there is no automatic refresh to the next one. We might want to rephrase a bit here to include this info or do nothing. Up to you.",
+      "52": "We also have switches as experimental starting from 3.8, and DPUs which are not machines per se. Do you think we should include them or let it be for now?"
+    }
+  }
+}

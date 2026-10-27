@@ -1,0 +1,15 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nSound test-only fix. Binding the rack controller to the explicit 10.0.0.0/8 subnet removes the random-subnet collision described in the commit, and switching the static-IP factory to `subnet=subnet` targets the same subnet deterministically. I verified against the discovery view SQL (`neigh.ip << subnet.cidr` joined on `iface.vlan_id`) that `test_associates_known_subnet` and `test_is_external_dhcp` still exercise the intended path, and `make_Node_with_Interface_on_Subnet` creates exactly one interface per controller (no BMC interface, `with_dhcp_rack_primary/secondary` disabled). One minor robustness note: `rack.current_config.interface_set.first()` relies on `Interface.Meta.ordering = (\"created\",)` and the implicit single-interface invariant; `rack.get_boot_interface()` is the intended, deterministic accessor since the factory already sets `node.boot_interface`.",
+  "inline_comments": {
+    "src/maasserver/models/tests/test_discovery.py": {
+      "44": "Prefer `rack.get_boot_interface()` over `interface_set.first()`: the factory already sets `node.boot_interface` to exactly this interface, whereas `.first()` depends on the implicit `created` ordering and the single-interface assumption (which the commit message itself flags as fragile).",
+      "55": "Same as line 44 \u2014 `rack.get_boot_interface()` is deterministic here.",
+      "80": "Same as line 44 \u2014 `rack.get_boot_interface()` is deterministic here.",
+      "87": "Same as line 44 \u2014 `rack.get_boot_interface()` is deterministic here."
+    },
+    "src/maasserver/api/tests/test_discoveries.py": {
+      "130": "Prefer `rack.get_boot_interface()` over `interface_set.first()` for the same reason as in `test_discovery.py`.",
+      "143": "Same as line 130 \u2014 `rack.get_boot_interface()` is deterministic here."
+    }
+  }
+}

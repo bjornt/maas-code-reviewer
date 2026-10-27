@@ -1,0 +1,285 @@
+{
+  "author": "MaikRe",
+  "author_id": 87246463,
+  "base_sha": "bb09b483f0f810b8f29a17a71b6a03959d90cbf8",
+  "description_source": "latest fetched PR body; NOT the review-time body",
+  "description_updated_at": "2026-10-21T20:23:57Z",
+  "diff_source": "git diff of merge-base(landed first parent, review head) to review head",
+  "diff_status": "collected",
+  "head_sha": "8ae306af8f7425e9728beaab0d9f270a54b743cf",
+  "is_pr_author": false,
+  "landed_commit": "d19b2bd6a283488bb10261d6a3c6964336de6ff1",
+  "pr_number": 790,
+  "published_review": {
+    "_links": {
+      "html": {
+        "href": "https://github.com/canonical/maas/pull/790#pullrequestreview-5602893580"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/canonical/maas/pulls/790"
+      }
+    },
+    "author_association": "MEMBER",
+    "body": " number of questions and some nitpicks",
+    "commit_id": "8ae306af8f7425e9728beaab0d9f270a54b743cf",
+    "copilot_code_review_effort": null,
+    "html_url": "https://github.com/canonical/maas/pull/790#pullrequestreview-5602893580",
+    "id": 5602893580,
+    "is_copilot_code_review": false,
+    "node_id": "PRR_kwDOBSgIKM8AAAABTfVfDA",
+    "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/790",
+    "state": "COMMENTED",
+    "submitted_at": "2026-10-21T17:24:07Z",
+    "user": {
+      "avatar_url": "https://avatars.githubusercontent.com/u/87246463?u=890e8416c62adcced2656ece9e980d05a635a3f1&v=4",
+      "events_url": "https://api.github.com/users/MaikRe/events{/privacy}",
+      "followers_url": "https://api.github.com/users/MaikRe/followers",
+      "following_url": "https://api.github.com/users/MaikRe/following{/other_user}",
+      "gists_url": "https://api.github.com/users/MaikRe/gists{/gist_id}",
+      "gravatar_id": "",
+      "html_url": "https://github.com/MaikRe",
+      "id": 87246463,
+      "login": "MaikRe",
+      "node_id": "MDQ6VXNlcjg3MjQ2NDYz",
+      "organizations_url": "https://api.github.com/users/MaikRe/orgs",
+      "received_events_url": "https://api.github.com/users/MaikRe/received_events",
+      "repos_url": "https://api.github.com/users/MaikRe/repos",
+      "site_admin": false,
+      "starred_url": "https://api.github.com/users/MaikRe/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/MaikRe/subscriptions",
+      "type": "User",
+      "url": "https://api.github.com/users/MaikRe",
+      "user_view_type": "public"
+    }
+  },
+  "repository": "canonical/maas",
+  "review_id": 5602893580,
+  "review_submitted_at": "2026-10-21T17:24:07Z",
+  "review_url": "https://github.com/canonical/maas/pull/790#pullrequestreview-5602893580",
+  "state": "COMMENTED",
+  "unsupported_inline_comment_count": 3,
+  "unsupported_inline_comments": [
+    {
+      "comment": {
+        "_links": {
+          "html": {
+            "href": "https://github.com/canonical/maas/pull/790#discussion_r4339289085"
+          },
+          "pull_request": {
+            "href": "https://api.github.com/repos/canonical/maas/pulls/790"
+          },
+          "self": {
+            "href": "https://api.github.com/repos/canonical/maas/pulls/comments/4339289085"
+          }
+        },
+        "author_association": "MEMBER",
+        "body": "I might be missing something here but if I am not mistaken if the secondary rack is the caller of this function then rack_system_id and secondary_rack_system_id would be identical since the secondary would be the called in this case.\nIs that intentional? Would the case I am describing even happen? Are there downsides to this?",
+        "commit_id": "8ae306af8f7425e9728beaab0d9f270a54b743cf",
+        "copilot_code_review_sources": [],
+        "created_at": "2026-10-21T16:30:07Z",
+        "diff_hunk": "@@ -0,0 +1,1047 @@\n+# Copyright 2026 Canonical Ltd.  This software is licensed under the\n+# GNU Affero General Public License version 3 (see the file LICENSE).\n+\n+import asyncio\n+from dataclasses import dataclass, field\n+from ipaddress import ip_address, IPv4Address, IPv6Address\n+from urllib.parse import urlparse\n+\n+from netaddr import IPNetwork\n+import structlog\n+\n+from maascommon.enums.interface import InterfaceType\n+from maascommon.enums.ipaddress import IpAddressType\n+from maascommon.enums.ipranges import IPRangeType\n+from maascommon.enums.node import NodeTypeEnum\n+from maasservicelayer.context import Context\n+from maasservicelayer.db.filters import OrderByClause, QuerySpec\n+from maasservicelayer.db.repositories.domains import DomainsClauseFactory\n+from maasservicelayer.db.repositories.interfaces import InterfaceClauseFactory\n+from maasservicelayer.db.repositories.ipranges import IPRangeClauseFactory\n+from maasservicelayer.db.repositories.nodes import NodeClauseFactory\n+from maasservicelayer.db.repositories.reservedips import (\n+    ReservedIPsClauseFactory,\n+)\n+from maasservicelayer.db.repositories.staticipaddress import (\n+    StaticIPAddressClauseFactory,\n+)\n+from maasservicelayer.db.repositories.subnets import SubnetClauseFactory\n+from maasservicelayer.db.repositories.vlans import VlansClauseFactory\n+from maasservicelayer.db.tables import (\n+    DomainTable,\n+    IPRangeTable,\n+    ReservedIPTable,\n+    StaticIPAddressTable,\n+    VlanTable,\n+)\n+from maasservicelayer.exceptions.catalog import (\n+    NotFoundException,\n+    ValidationException,\n+)\n+from maasservicelayer.models.dhcp import (\n+    DHCPDataForAgent,\n+    HostReservationData,\n+    InterfaceData,\n+    IPRangeData,\n+    KeaHAConfig,\n+    SubnetData,\n+    VlanData,\n+)\n+from maasservicelayer.models.interfaces import Interface\n+from maasservicelayer.models.nodes import Node\n+from maasservicelayer.models.staticipaddress import StaticIPAddress\n+from maasservicelayer.models.subnets import Subnet\n+from maasservicelayer.models.vlans import Vlan\n+from maasservicelayer.services.base import Service\n+from maasservicelayer.services.configurations import ConfigurationsService\n+from maasservicelayer.services.domains import DomainsService\n+from maasservicelayer.services.interfaces import InterfacesService\n+from maasservicelayer.services.ipranges import IPRangesService\n+from maasservicelayer.services.nodes import NodesService\n+from maasservicelayer.services.reservedips import ReservedIPsService\n+from maasservicelayer.services.staticipaddress import StaticIPAddressService\n+from maasservicelayer.services.subnets import SubnetsService\n+from maasservicelayer.services.vlans import VlansService\n+from provisioningserver.utils.env import MAAS_ID\n+from provisioningserver.utils.network import (\n+    get_source_address,\n+    resolve_hostname,\n+)\n+from provisioningserver.utils.text import split_string_list\n+\n+logger = structlog.get_logger()\n+\n+\n+@dataclass\n+class _DHCPQueryCache:\n+    \"\"\"Per-request caches that memoize lookups to avoid N+1 queries.\"\"\"\n+\n+    ips_by_interface: dict[int, list[StaticIPAddress]] = field(\n+        default_factory=dict\n+    )\n+    subnet_by_id: dict[int, Subnet | None] = field(default_factory=dict)\n+    vlan_by_id: dict[int, Vlan | None] = field(default_factory=dict)\n+    node_by_id: dict[int, Node | None] = field(default_factory=dict)\n+    interfaces_by_config: dict[int, list[Interface]] = field(\n+        default_factory=dict\n+    )\n+    dynamic_count_by_subnet: dict[int, int] = field(default_factory=dict)\n+\n+\n+class DHCPService(Service):\n+    \"\"\"Collect network data needed to configure DHCP on a rack controller.\"\"\"\n+\n+    def __init__(\n+        self,\n+        context: Context,\n+        configurations_service: ConfigurationsService,\n+        domains_service: DomainsService,\n+        interfaces_service: InterfacesService,\n+        ipranges_service: IPRangesService,\n+        nodes_service: NodesService,\n+        reservedips_service: ReservedIPsService,\n+        staticipaddress_service: StaticIPAddressService,\n+        subnets_service: SubnetsService,\n+        vlans_service: VlansService,\n+    ):\n+        super().__init__(context)\n+        self.configurations_service = configurations_service\n+        self.domains_service = domains_service\n+        self.interfaces_service = interfaces_service\n+        self.ipranges_service = ipranges_service\n+        self.nodes_service = nodes_service\n+        self.reservedips_service = reservedips_service\n+        self.staticipaddress_service = staticipaddress_service\n+        self.subnets_service = subnets_service\n+        self.vlans_service = vlans_service\n+\n+    async def get_kea_dhcp_data_for_agent(\n+        self, system_id: str\n+    ) -> DHCPDataForAgent:\n+        \"\"\"Retrieve Kea configuration inputs for a rack controller system ID.\"\"\"\n+        rack = await self.nodes_service.get_one(\n+            query=QuerySpec(where=NodeClauseFactory.with_system_id(system_id))\n+        )\n+        if rack is None:\n+            raise NotFoundException()\n+        if rack.node_type not in (\n+            NodeTypeEnum.RACK_CONTROLLER,\n+            NodeTypeEnum.REGION_AND_RACK_CONTROLLER,\n+        ):\n+            raise ValidationException.build_for_field(\n+                \"system_id\", \"The node must be a rack controller.\"\n+            )\n+        if rack.current_config_id is None:\n+            raise ValidationException.build_for_field(\n+                \"system_id\",\n+                \"The rack controller has no current configuration.\",\n+            )\n+\n+        cache = _DHCPQueryCache()\n+        cache.node_by_id[rack.id] = rack\n+\n+        # Retrieve relevant VLANs for this rack\n+        active_vlans = await self.vlans_service.get_many(\n+            QuerySpec(\n+                where=VlansClauseFactory.and_clauses(\n+                    [\n+                        VlansClauseFactory.with_dhcp_on(True),\n+                        VlansClauseFactory.with_primary_or_secondary_rack_id(\n+                            rack.id\n+                        ),\n+                    ]\n+                ),\n+                order_by=[OrderByClause(VlanTable.c.id)],\n+            )\n+        )\n+        interfaces = await self._get_rack_interfaces(rack, cache)\n+        interface_vlan_ids = {\n+            interface.vlan_id\n+            for interface in interfaces\n+            if interface.vlan_id is not None\n+        }\n+        active_vlans = [\n+            vlan for vlan in active_vlans if vlan.id in interface_vlan_ids\n+        ]\n+        vlans = {vlan.id: vlan for vlan in active_vlans}\n+        if vlans:\n+            relay_vlans = await self.vlans_service.get_many(\n+                query=QuerySpec(\n+                    where=VlansClauseFactory.with_relay_vlan_id_in(list(vlans))\n+                )\n+            )\n+            for relay in relay_vlans:\n+                vlans[relay.id] = relay\n+        cache.vlan_by_id.update(vlans)\n+\n+        # Retrieve relevant subnets for this rack\n+        subnets = await self.subnets_service.get_many(\n+            query=QuerySpec(\n+                where=SubnetClauseFactory.and_clauses(\n+                    [\n+                        SubnetClauseFactory.with_vlan_id_in(list(vlans)),\n+                        SubnetClauseFactory.with_managed(True),\n+                    ]\n+                )\n+            )\n+        )\n+        subnets.sort(\n+            key=lambda subnet: (\n+                subnet.vlan_id,\n+                subnet.cidr.version,\n+                str(subnet.cidr.network_address),\n+            )\n+        )\n+        cache.subnet_by_id.update({subnet.id: subnet for subnet in subnets})\n+\n+        # Retrieve relevant IP ranges for this rack\n+        ipranges = await self.ipranges_service.get_many(\n+            query=QuerySpec(\n+                where=IPRangeClauseFactory.with_subnet_ids(\n+                    [subnet.id for subnet in subnets]\n+                ),\n+                order_by=[OrderByClause(IPRangeTable.c.id)],\n+            )\n+        )\n+        ipranges.sort(key=lambda iprange: iprange.id)\n+        dynamic_counts = {subnet.id: 0 for subnet in subnets}\n+        for iprange in ipranges:\n+            if iprange.type == IPRangeType.DYNAMIC:\n+                dynamic_counts[iprange.subnet_id] += 1\n+        cache.dynamic_count_by_subnet.update(dynamic_counts)\n+        ranges = [\n+            IPRangeData(\n+                id=iprange.id,\n+                subnet_id=iprange.subnet_id,\n+                dynamic=iprange.type == IPRangeType.DYNAMIC,\n+                start_ip=str(iprange.start_ip),\n+                end_ip=str(iprange.end_ip),\n+            )\n+            for iprange in ipranges\n+        ]\n+\n+        # Retrieve dns & ntp addresses, domains\n+        rack_url = await self.nodes_service.get_url(system_id)\n+        default_domain = await self.domains_service.get_default_domain()\n+        search_domains = await self.domains_service.get_many(\n+            query=QuerySpec(\n+                where=DomainsClauseFactory.and_clauses(\n+                    [\n+                        DomainsClauseFactory.not_clause(\n+                            DomainsClauseFactory.with_name(default_domain.name)\n+                        ),\n+                        DomainsClauseFactory.with_authoritative(True),\n+                    ]\n+                ),\n+                order_by=[OrderByClause(DomainTable.c.name)],\n+            )\n+        )\n+        external_only = await self.configurations_service.get(\n+            \"ntp_external_only\"\n+        )\n+        external_ntp = (\n+            list(\n+                split_string_list(\n+                    await self.configurations_service.get(\"ntp_servers\")\n+                )\n+            )\n+            if external_only\n+            else []\n+        )\n+        ntp_by_space = (\n+            {}\n+            if external_only\n+            else await self._get_ntp_servers_for_rack(rack, cache)\n+        )\n+        rack_ips = await self.staticipaddress_service.get_for_nodes(\n+            query=QuerySpec(\n+                where=StaticIPAddressClauseFactory.and_clauses(\n+                    [\n+                        StaticIPAddressClauseFactory.with_node_system_id(\n+                            system_id\n+                        ),\n+                        StaticIPAddressClauseFactory.with_alloc_type_in(\n+                            [IpAddressType.STICKY, IpAddressType.USER_RESERVED]\n+                        ),\n+                        StaticIPAddressClauseFactory.with_ip_not_null(),\n+                    ]\n+                )\n+            )\n+        )\n+        subnet_ids = {subnet.id for subnet in subnets}\n+        default_dns_servers = list(\n+            dict.fromkeys(\n+                str(ip.ip)\n+                for ip in rack_ips\n+                if ip.ip is not None and ip.subnet_id in subnet_ids\n+            )\n+        )\n+        dhcp_interfaces: dict[int, InterfaceData] = {}\n+        configured_ip_versions: set[int] = set()\n+        subnet_data = []\n+        # Dict used as an insertion-ordered set to dedupe HA configs shared by\n+        # multiple subnets on the same VLAN.\n+        ha_data: dict[KeaHAConfig, None] = {}\n+        host_reservations: dict[int, list[HostReservationData]] = {}\n+        for grouped_subnets in self._group_subnets(subnets).values():\n+            host_reservations.update(\n+                await self._get_dhcp_host_reservations(\n+                    [subnet.id for subnet in grouped_subnets]\n+                )\n+            )\n+        peer_ntp_by_rack: dict[int, dict[tuple[int | None, int], str]] = {}\n+        for subnet in subnets:\n+            vlan = vlans[subnet.vlan_id]\n+            # A subnet on a relay VLAN is served by the HA pair of the target\n+            # VLAN; relay VLANs don't hold the rack controller identifiers.\n+            dhcp_vlan = vlan\n+            if vlan.relay_vlan_id is not None:\n+                dhcp_vlan = vlans.get(vlan.relay_vlan_id, vlan)\n+            iface, ips = await self._get_best_interface_with_ip_on_vlan(\n+                subnet, vlan, interfaces, cache\n+            )\n+            if iface is not None and iface.vlan_id is not None:\n+                configured_ip_versions.add(subnet.cidr.version)\n+                dhcp_interfaces[iface.id] = InterfaceData(\n+                    id=iface.id, vlan_id=iface.vlan_id, name=iface.name\n+                )\n+            next_server = self._get_next_server(subnet, ips)\n+            secondary_system_id = None\n+            peer_rack_id = None\n+            if dhcp_vlan.secondary_rack_id is not None:\n+                ha = await self._get_ha_config(subnet, dhcp_vlan, cache)\n+                secondary_system_id = ha.secondary_rack_system_id\n+                ha_data[ha] = None\n+                peer_rack_id = (\n+                    dhcp_vlan.secondary_rack_id\n+                    if dhcp_vlan.primary_rack_id == rack.id\n+                    else dhcp_vlan.primary_rack_id\n+                )\n+                if peer_rack_id is None:\n+                    raise ValidationException.build_for_field(\n+                        \"system_id\",\n+                        f\"VLAN {dhcp_vlan.id} has incomplete HA rack \"\n+                        \"configuration.\",\n+                    )\n+                if peer_rack_id not in peer_ntp_by_rack:\n+                    peer_rack = await self._cached_node(cache, peer_rack_id)\n+                    if peer_rack is None:\n+                        raise ValidationException.build_for_field(\n+                            \"system_id\",\n+                            f\"VLAN {dhcp_vlan.id} has a missing HA peer rack.\",\n+                        )\n+                    peer_ntp_by_rack[\n+                        peer_rack_id\n+                    ] = await self._get_ntp_servers_for_rack(peer_rack, cache)\n+            ntp_server = ntp_by_space.get((vlan.space_id, subnet.cidr.version))\n+            peer_ntp_server = (\n+                peer_ntp_by_rack.get(peer_rack_id, {}).get(\n+                    (vlan.space_id, subnet.cidr.version)\n+                )\n+                if peer_rack_id is not None\n+                else None\n+            )\n+            subnet_ntp_servers = (\n+                external_ntp\n+                if external_only\n+                else [\n+                    server\n+                    for server in (ntp_server, peer_ntp_server)\n+                    if server is not None\n+                ]\n+            )\n+            subnet_data.append(\n+                SubnetData(\n+                    id=subnet.id,\n+                    rack_system_id=system_id,\n+                    secondary_rack_system_id=secondary_system_id,",
+        "html_url": "https://github.com/canonical/maas/pull/790#discussion_r4339289085",
+        "id": 4339289085,
+        "is_copilot_code_review": false,
+        "line": null,
+        "node_id": "PRRC_kwDOBSgIKM8AAAABAqRL_Q",
+        "original_commit_id": "8ae306af8f7425e9728beaab0d9f270a54b743cf",
+        "original_line": 357,
+        "original_position": 357,
+        "original_start_line": 356,
+        "path": "src/maasservicelayer/services/dhcp.py",
+        "position": 1,
+        "pull_request_review_id": 5602893580,
+        "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/790",
+        "reactions": {
+          "+1": 0,
+          "-1": 0,
+          "confused": 0,
+          "eyes": 0,
+          "heart": 0,
+          "hooray": 0,
+          "laugh": 0,
+          "rocket": 0,
+          "total_count": 0,
+          "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4339289085/reactions"
+        },
+        "side": "RIGHT",
+        "start_line": null,
+        "start_side": "RIGHT",
+        "subject_type": "line",
+        "updated_at": "2026-10-21T17:24:07Z",
+        "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4339289085",
+        "user": {
+          "avatar_url": "https://avatars.githubusercontent.com/u/87246463?v=4",
+          "events_url": "https://api.github.com/users/MaikRe/events{/privacy}",
+          "followers_url": "https://api.github.com/users/MaikRe/followers",
+          "following_url": "https://api.github.com/users/MaikRe/following{/other_user}",
+          "gists_url": "https://api.github.com/users/MaikRe/gists{/gist_id}",
+          "gravatar_id": "",
+          "html_url": "https://github.com/MaikRe",
+          "id": 87246463,
+          "login": "MaikRe",
+          "node_id": "MDQ6VXNlcjg3MjQ2NDYz",
+          "organizations_url": "https://api.github.com/users/MaikRe/orgs",
+          "received_events_url": "https://api.github.com/users/MaikRe/received_events",
+          "repos_url": "https://api.github.com/users/MaikRe/repos",
+          "site_admin": false,
+          "starred_url": "https://api.github.com/users/MaikRe/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/MaikRe/subscriptions",
+          "type": "User",
+          "url": "https://api.github.com/users/MaikRe",
+          "user_view_type": "public"
+        }
+      },
+      "reason": "multiline range cannot be represented in single-line review JSON"
+    },
+    {
+      "comment": {
+        "_links": {
+          "html": {
+            "href": "https://github.com/canonical/maas/pull/790#discussion_r4339744392"
+          },
+          "pull_request": {
+            "href": "https://api.github.com/repos/canonical/maas/pulls/790"
+          },
+          "self": {
+            "href": "https://api.github.com/repos/canonical/maas/pulls/comments/4339744392"
+          }
+        },
+        "author_association": "MEMBER",
+        "body": "This code duplicates from default_dns_servers. Is there a way to reuse it here?",
+        "commit_id": "8ae306af8f7425e9728beaab0d9f270a54b743cf",
+        "copilot_code_review_sources": [],
+        "created_at": "2026-10-21T17:14:46Z",
+        "diff_hunk": "@@ -0,0 +1,1047 @@\n+# Copyright 2026 Canonical Ltd.  This software is licensed under the\n+# GNU Affero General Public License version 3 (see the file LICENSE).\n+\n+import asyncio\n+from dataclasses import dataclass, field\n+from ipaddress import ip_address, IPv4Address, IPv6Address\n+from urllib.parse import urlparse\n+\n+from netaddr import IPNetwork\n+import structlog\n+\n+from maascommon.enums.interface import InterfaceType\n+from maascommon.enums.ipaddress import IpAddressType\n+from maascommon.enums.ipranges import IPRangeType\n+from maascommon.enums.node import NodeTypeEnum\n+from maasservicelayer.context import Context\n+from maasservicelayer.db.filters import OrderByClause, QuerySpec\n+from maasservicelayer.db.repositories.domains import DomainsClauseFactory\n+from maasservicelayer.db.repositories.interfaces import InterfaceClauseFactory\n+from maasservicelayer.db.repositories.ipranges import IPRangeClauseFactory\n+from maasservicelayer.db.repositories.nodes import NodeClauseFactory\n+from maasservicelayer.db.repositories.reservedips import (\n+    ReservedIPsClauseFactory,\n+)\n+from maasservicelayer.db.repositories.staticipaddress import (\n+    StaticIPAddressClauseFactory,\n+)\n+from maasservicelayer.db.repositories.subnets import SubnetClauseFactory\n+from maasservicelayer.db.repositories.vlans import VlansClauseFactory\n+from maasservicelayer.db.tables import (\n+    DomainTable,\n+    IPRangeTable,\n+    ReservedIPTable,\n+    StaticIPAddressTable,\n+    VlanTable,\n+)\n+from maasservicelayer.exceptions.catalog import (\n+    NotFoundException,\n+    ValidationException,\n+)\n+from maasservicelayer.models.dhcp import (\n+    DHCPDataForAgent,\n+    HostReservationData,\n+    InterfaceData,\n+    IPRangeData,\n+    KeaHAConfig,\n+    SubnetData,\n+    VlanData,\n+)\n+from maasservicelayer.models.interfaces import Interface\n+from maasservicelayer.models.nodes import Node\n+from maasservicelayer.models.staticipaddress import StaticIPAddress\n+from maasservicelayer.models.subnets import Subnet\n+from maasservicelayer.models.vlans import Vlan\n+from maasservicelayer.services.base import Service\n+from maasservicelayer.services.configurations import ConfigurationsService\n+from maasservicelayer.services.domains import DomainsService\n+from maasservicelayer.services.interfaces import InterfacesService\n+from maasservicelayer.services.ipranges import IPRangesService\n+from maasservicelayer.services.nodes import NodesService\n+from maasservicelayer.services.reservedips import ReservedIPsService\n+from maasservicelayer.services.staticipaddress import StaticIPAddressService\n+from maasservicelayer.services.subnets import SubnetsService\n+from maasservicelayer.services.vlans import VlansService\n+from provisioningserver.utils.env import MAAS_ID\n+from provisioningserver.utils.network import (\n+    get_source_address,\n+    resolve_hostname,\n+)\n+from provisioningserver.utils.text import split_string_list\n+\n+logger = structlog.get_logger()\n+\n+\n+@dataclass\n+class _DHCPQueryCache:\n+    \"\"\"Per-request caches that memoize lookups to avoid N+1 queries.\"\"\"\n+\n+    ips_by_interface: dict[int, list[StaticIPAddress]] = field(\n+        default_factory=dict\n+    )\n+    subnet_by_id: dict[int, Subnet | None] = field(default_factory=dict)\n+    vlan_by_id: dict[int, Vlan | None] = field(default_factory=dict)\n+    node_by_id: dict[int, Node | None] = field(default_factory=dict)\n+    interfaces_by_config: dict[int, list[Interface]] = field(\n+        default_factory=dict\n+    )\n+    dynamic_count_by_subnet: dict[int, int] = field(default_factory=dict)\n+\n+\n+class DHCPService(Service):\n+    \"\"\"Collect network data needed to configure DHCP on a rack controller.\"\"\"\n+\n+    def __init__(\n+        self,\n+        context: Context,\n+        configurations_service: ConfigurationsService,\n+        domains_service: DomainsService,\n+        interfaces_service: InterfacesService,\n+        ipranges_service: IPRangesService,\n+        nodes_service: NodesService,\n+        reservedips_service: ReservedIPsService,\n+        staticipaddress_service: StaticIPAddressService,\n+        subnets_service: SubnetsService,\n+        vlans_service: VlansService,\n+    ):\n+        super().__init__(context)\n+        self.configurations_service = configurations_service\n+        self.domains_service = domains_service\n+        self.interfaces_service = interfaces_service\n+        self.ipranges_service = ipranges_service\n+        self.nodes_service = nodes_service\n+        self.reservedips_service = reservedips_service\n+        self.staticipaddress_service = staticipaddress_service\n+        self.subnets_service = subnets_service\n+        self.vlans_service = vlans_service\n+\n+    async def get_kea_dhcp_data_for_agent(\n+        self, system_id: str\n+    ) -> DHCPDataForAgent:\n+        \"\"\"Retrieve Kea configuration inputs for a rack controller system ID.\"\"\"\n+        rack = await self.nodes_service.get_one(\n+            query=QuerySpec(where=NodeClauseFactory.with_system_id(system_id))\n+        )\n+        if rack is None:\n+            raise NotFoundException()\n+        if rack.node_type not in (\n+            NodeTypeEnum.RACK_CONTROLLER,\n+            NodeTypeEnum.REGION_AND_RACK_CONTROLLER,\n+        ):\n+            raise ValidationException.build_for_field(\n+                \"system_id\", \"The node must be a rack controller.\"\n+            )\n+        if rack.current_config_id is None:\n+            raise ValidationException.build_for_field(\n+                \"system_id\",\n+                \"The rack controller has no current configuration.\",\n+            )\n+\n+        cache = _DHCPQueryCache()\n+        cache.node_by_id[rack.id] = rack\n+\n+        # Retrieve relevant VLANs for this rack\n+        active_vlans = await self.vlans_service.get_many(\n+            QuerySpec(\n+                where=VlansClauseFactory.and_clauses(\n+                    [\n+                        VlansClauseFactory.with_dhcp_on(True),\n+                        VlansClauseFactory.with_primary_or_secondary_rack_id(\n+                            rack.id\n+                        ),\n+                    ]\n+                ),\n+                order_by=[OrderByClause(VlanTable.c.id)],\n+            )\n+        )\n+        interfaces = await self._get_rack_interfaces(rack, cache)\n+        interface_vlan_ids = {\n+            interface.vlan_id\n+            for interface in interfaces\n+            if interface.vlan_id is not None\n+        }\n+        active_vlans = [\n+            vlan for vlan in active_vlans if vlan.id in interface_vlan_ids\n+        ]\n+        vlans = {vlan.id: vlan for vlan in active_vlans}\n+        if vlans:\n+            relay_vlans = await self.vlans_service.get_many(\n+                query=QuerySpec(\n+                    where=VlansClauseFactory.with_relay_vlan_id_in(list(vlans))\n+                )\n+            )\n+            for relay in relay_vlans:\n+                vlans[relay.id] = relay\n+        cache.vlan_by_id.update(vlans)\n+\n+        # Retrieve relevant subnets for this rack\n+        subnets = await self.subnets_service.get_many(\n+            query=QuerySpec(\n+                where=SubnetClauseFactory.and_clauses(\n+                    [\n+                        SubnetClauseFactory.with_vlan_id_in(list(vlans)),\n+                        SubnetClauseFactory.with_managed(True),\n+                    ]\n+                )\n+            )\n+        )\n+        subnets.sort(\n+            key=lambda subnet: (\n+                subnet.vlan_id,\n+                subnet.cidr.version,\n+                str(subnet.cidr.network_address),\n+            )\n+        )\n+        cache.subnet_by_id.update({subnet.id: subnet for subnet in subnets})\n+\n+        # Retrieve relevant IP ranges for this rack\n+        ipranges = await self.ipranges_service.get_many(\n+            query=QuerySpec(\n+                where=IPRangeClauseFactory.with_subnet_ids(\n+                    [subnet.id for subnet in subnets]\n+                ),\n+                order_by=[OrderByClause(IPRangeTable.c.id)],\n+            )\n+        )\n+        ipranges.sort(key=lambda iprange: iprange.id)\n+        dynamic_counts = {subnet.id: 0 for subnet in subnets}\n+        for iprange in ipranges:\n+            if iprange.type == IPRangeType.DYNAMIC:\n+                dynamic_counts[iprange.subnet_id] += 1\n+        cache.dynamic_count_by_subnet.update(dynamic_counts)\n+        ranges = [\n+            IPRangeData(\n+                id=iprange.id,\n+                subnet_id=iprange.subnet_id,\n+                dynamic=iprange.type == IPRangeType.DYNAMIC,\n+                start_ip=str(iprange.start_ip),\n+                end_ip=str(iprange.end_ip),\n+            )\n+            for iprange in ipranges\n+        ]\n+\n+        # Retrieve dns & ntp addresses, domains\n+        rack_url = await self.nodes_service.get_url(system_id)\n+        default_domain = await self.domains_service.get_default_domain()\n+        search_domains = await self.domains_service.get_many(\n+            query=QuerySpec(\n+                where=DomainsClauseFactory.and_clauses(\n+                    [\n+                        DomainsClauseFactory.not_clause(\n+                            DomainsClauseFactory.with_name(default_domain.name)\n+                        ),\n+                        DomainsClauseFactory.with_authoritative(True),\n+                    ]\n+                ),\n+                order_by=[OrderByClause(DomainTable.c.name)],\n+            )\n+        )\n+        external_only = await self.configurations_service.get(\n+            \"ntp_external_only\"\n+        )\n+        external_ntp = (\n+            list(\n+                split_string_list(\n+                    await self.configurations_service.get(\"ntp_servers\")\n+                )\n+            )\n+            if external_only\n+            else []\n+        )\n+        ntp_by_space = (\n+            {}\n+            if external_only\n+            else await self._get_ntp_servers_for_rack(rack, cache)\n+        )\n+        rack_ips = await self.staticipaddress_service.get_for_nodes(\n+            query=QuerySpec(\n+                where=StaticIPAddressClauseFactory.and_clauses(\n+                    [\n+                        StaticIPAddressClauseFactory.with_node_system_id(\n+                            system_id\n+                        ),\n+                        StaticIPAddressClauseFactory.with_alloc_type_in(\n+                            [IpAddressType.STICKY, IpAddressType.USER_RESERVED]\n+                        ),\n+                        StaticIPAddressClauseFactory.with_ip_not_null(),\n+                    ]\n+                )\n+            )\n+        )\n+        subnet_ids = {subnet.id for subnet in subnets}\n+        default_dns_servers = list(\n+            dict.fromkeys(\n+                str(ip.ip)\n+                for ip in rack_ips\n+                if ip.ip is not None and ip.subnet_id in subnet_ids\n+            )\n+        )\n+        dhcp_interfaces: dict[int, InterfaceData] = {}\n+        configured_ip_versions: set[int] = set()\n+        subnet_data = []\n+        # Dict used as an insertion-ordered set to dedupe HA configs shared by\n+        # multiple subnets on the same VLAN.\n+        ha_data: dict[KeaHAConfig, None] = {}\n+        host_reservations: dict[int, list[HostReservationData]] = {}\n+        for grouped_subnets in self._group_subnets(subnets).values():\n+            host_reservations.update(\n+                await self._get_dhcp_host_reservations(\n+                    [subnet.id for subnet in grouped_subnets]\n+                )\n+            )\n+        peer_ntp_by_rack: dict[int, dict[tuple[int | None, int], str]] = {}\n+        for subnet in subnets:\n+            vlan = vlans[subnet.vlan_id]\n+            # A subnet on a relay VLAN is served by the HA pair of the target\n+            # VLAN; relay VLANs don't hold the rack controller identifiers.\n+            dhcp_vlan = vlan\n+            if vlan.relay_vlan_id is not None:\n+                dhcp_vlan = vlans.get(vlan.relay_vlan_id, vlan)\n+            iface, ips = await self._get_best_interface_with_ip_on_vlan(\n+                subnet, vlan, interfaces, cache\n+            )\n+            if iface is not None and iface.vlan_id is not None:\n+                configured_ip_versions.add(subnet.cidr.version)\n+                dhcp_interfaces[iface.id] = InterfaceData(\n+                    id=iface.id, vlan_id=iface.vlan_id, name=iface.name\n+                )\n+            next_server = self._get_next_server(subnet, ips)\n+            secondary_system_id = None\n+            peer_rack_id = None\n+            if dhcp_vlan.secondary_rack_id is not None:\n+                ha = await self._get_ha_config(subnet, dhcp_vlan, cache)\n+                secondary_system_id = ha.secondary_rack_system_id\n+                ha_data[ha] = None\n+                peer_rack_id = (\n+                    dhcp_vlan.secondary_rack_id\n+                    if dhcp_vlan.primary_rack_id == rack.id\n+                    else dhcp_vlan.primary_rack_id\n+                )\n+                if peer_rack_id is None:\n+                    raise ValidationException.build_for_field(\n+                        \"system_id\",\n+                        f\"VLAN {dhcp_vlan.id} has incomplete HA rack \"\n+                        \"configuration.\",\n+                    )\n+                if peer_rack_id not in peer_ntp_by_rack:\n+                    peer_rack = await self._cached_node(cache, peer_rack_id)\n+                    if peer_rack is None:\n+                        raise ValidationException.build_for_field(\n+                            \"system_id\",\n+                            f\"VLAN {dhcp_vlan.id} has a missing HA peer rack.\",\n+                        )\n+                    peer_ntp_by_rack[\n+                        peer_rack_id\n+                    ] = await self._get_ntp_servers_for_rack(peer_rack, cache)\n+            ntp_server = ntp_by_space.get((vlan.space_id, subnet.cidr.version))\n+            peer_ntp_server = (\n+                peer_ntp_by_rack.get(peer_rack_id, {}).get(\n+                    (vlan.space_id, subnet.cidr.version)\n+                )\n+                if peer_rack_id is not None\n+                else None\n+            )\n+            subnet_ntp_servers = (\n+                external_ntp\n+                if external_only\n+                else [\n+                    server\n+                    for server in (ntp_server, peer_ntp_server)\n+                    if server is not None\n+                ]\n+            )\n+            subnet_data.append(\n+                SubnetData(\n+                    id=subnet.id,\n+                    rack_system_id=system_id,\n+                    secondary_rack_system_id=secondary_system_id,\n+                    ip_version=subnet.cidr.version,\n+                    cidr=str(subnet.cidr),\n+                    gateway_ip=str(subnet.gateway_ip)\n+                    if subnet.gateway_ip is not None\n+                    else \"\",\n+                    dns_servers=await self._get_default_dns_servers_for_subnet(\n+                        subnet, rack_url, cache\n+                    ),\n+                    allow_dns=subnet.allow_dns,\n+                    vlan_id=subnet.vlan_id,\n+                    vlan_mtu=vlan.mtu,\n+                    mask=str(subnet.cidr.netmask),\n+                    broadcast_ip=str(subnet.cidr.broadcast_address),\n+                    domain_name=default_domain.name,\n+                    search_list=[default_domain.name]\n+                    + [domain.name for domain in search_domains],\n+                    ntp_servers=subnet_ntp_servers,\n+                    next_server=next_server,\n+                    pools=[\n+                        r\n+                        for r in ranges\n+                        if r.subnet_id == subnet.id and r.dynamic\n+                    ],\n+                    host_reservations=host_reservations.get(subnet.id, []),\n+                )\n+            )\n+        subnet_data = [\n+            subnet\n+            for subnet in subnet_data\n+            if subnet.ip_version in configured_ip_versions\n+        ]\n+        ranges = [\n+            iprange\n+            for iprange in ranges\n+            if iprange.subnet_id in {subnet.id for subnet in subnet_data}\n+        ]\n+        return DHCPDataForAgent(\n+            vlans=[\n+                VlanData(\n+                    id=vlan.id,\n+                    vid=vlan.vid,\n+                    relayed_vlan_id=vlan.relay_vlan_id,\n+                    mtu=vlan.mtu,\n+                )\n+                for vlan in sorted(vlans.values(), key=lambda item: item.id)\n+            ],\n+            subnets=subnet_data,\n+            ipranges=ranges,\n+            interfaces=sorted(\n+                dhcp_interfaces.values(), key=lambda iface: iface.name\n+            ),\n+            default_dns_servers=default_dns_servers,\n+            ntp_servers=external_ntp\n+            if external_only\n+            else list(\n+                dict.fromkeys(\n+                    str(ip.ip)\n+                    for ip in rack_ips\n+                    if ip.ip is not None and ip.subnet_id in subnet_ids\n+                )",
+        "html_url": "https://github.com/canonical/maas/pull/790#discussion_r4339744392",
+        "id": 4339744392,
+        "is_copilot_code_review": false,
+        "line": null,
+        "node_id": "PRRC_kwDOBSgIKM8AAAABAqs-iA",
+        "original_commit_id": "8ae306af8f7425e9728beaab0d9f270a54b743cf",
+        "original_line": 417,
+        "original_position": 417,
+        "original_start_line": 413,
+        "path": "src/maasservicelayer/services/dhcp.py",
+        "position": 1,
+        "pull_request_review_id": 5602893580,
+        "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/790",
+        "reactions": {
+          "+1": 1,
+          "-1": 0,
+          "confused": 0,
+          "eyes": 0,
+          "heart": 0,
+          "hooray": 0,
+          "laugh": 0,
+          "rocket": 0,
+          "total_count": 1,
+          "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4339744392/reactions"
+        },
+        "side": "RIGHT",
+        "start_line": null,
+        "start_side": "RIGHT",
+        "subject_type": "line",
+        "updated_at": "2026-10-21T17:24:07Z",
+        "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4339744392",
+        "user": {
+          "avatar_url": "https://avatars.githubusercontent.com/u/87246463?v=4",
+          "events_url": "https://api.github.com/users/MaikRe/events{/privacy}",
+          "followers_url": "https://api.github.com/users/MaikRe/followers",
+          "following_url": "https://api.github.com/users/MaikRe/following{/other_user}",
+          "gists_url": "https://api.github.com/users/MaikRe/gists{/gist_id}",
+          "gravatar_id": "",
+          "html_url": "https://github.com/MaikRe",
+          "id": 87246463,
+          "login": "MaikRe",
+          "node_id": "MDQ6VXNlcjg3MjQ2NDYz",
+          "organizations_url": "https://api.github.com/users/MaikRe/orgs",
+          "received_events_url": "https://api.github.com/users/MaikRe/received_events",
+          "repos_url": "https://api.github.com/users/MaikRe/repos",
+          "site_admin": false,
+          "starred_url": "https://api.github.com/users/MaikRe/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/MaikRe/subscriptions",
+          "type": "User",
+          "url": "https://api.github.com/users/MaikRe",
+          "user_view_type": "public"
+        }
+      },
+      "reason": "multiline range cannot be represented in single-line review JSON"
+    },
+    {
+      "comment": {
+        "_links": {
+          "html": {
+            "href": "https://github.com/canonical/maas/pull/790#discussion_r4339753573"
+          },
+          "pull_request": {
+            "href": "https://api.github.com/repos/canonical/maas/pulls/790"
+          },
+          "self": {
+            "href": "https://api.github.com/repos/canonical/maas/pulls/comments/4339753573"
+          }
+        },
+        "author_association": "MEMBER",
+        "body": "Same list is sorted twice, once using OrderByClause and once using lambda, are both needed?",
+        "commit_id": "8ae306af8f7425e9728beaab0d9f270a54b743cf",
+        "copilot_code_review_sources": [],
+        "created_at": "2026-10-21T17:15:42Z",
+        "diff_hunk": "@@ -0,0 +1,1047 @@\n+# Copyright 2026 Canonical Ltd.  This software is licensed under the\n+# GNU Affero General Public License version 3 (see the file LICENSE).\n+\n+import asyncio\n+from dataclasses import dataclass, field\n+from ipaddress import ip_address, IPv4Address, IPv6Address\n+from urllib.parse import urlparse\n+\n+from netaddr import IPNetwork\n+import structlog\n+\n+from maascommon.enums.interface import InterfaceType\n+from maascommon.enums.ipaddress import IpAddressType\n+from maascommon.enums.ipranges import IPRangeType\n+from maascommon.enums.node import NodeTypeEnum\n+from maasservicelayer.context import Context\n+from maasservicelayer.db.filters import OrderByClause, QuerySpec\n+from maasservicelayer.db.repositories.domains import DomainsClauseFactory\n+from maasservicelayer.db.repositories.interfaces import InterfaceClauseFactory\n+from maasservicelayer.db.repositories.ipranges import IPRangeClauseFactory\n+from maasservicelayer.db.repositories.nodes import NodeClauseFactory\n+from maasservicelayer.db.repositories.reservedips import (\n+    ReservedIPsClauseFactory,\n+)\n+from maasservicelayer.db.repositories.staticipaddress import (\n+    StaticIPAddressClauseFactory,\n+)\n+from maasservicelayer.db.repositories.subnets import SubnetClauseFactory\n+from maasservicelayer.db.repositories.vlans import VlansClauseFactory\n+from maasservicelayer.db.tables import (\n+    DomainTable,\n+    IPRangeTable,\n+    ReservedIPTable,\n+    StaticIPAddressTable,\n+    VlanTable,\n+)\n+from maasservicelayer.exceptions.catalog import (\n+    NotFoundException,\n+    ValidationException,\n+)\n+from maasservicelayer.models.dhcp import (\n+    DHCPDataForAgent,\n+    HostReservationData,\n+    InterfaceData,\n+    IPRangeData,\n+    KeaHAConfig,\n+    SubnetData,\n+    VlanData,\n+)\n+from maasservicelayer.models.interfaces import Interface\n+from maasservicelayer.models.nodes import Node\n+from maasservicelayer.models.staticipaddress import StaticIPAddress\n+from maasservicelayer.models.subnets import Subnet\n+from maasservicelayer.models.vlans import Vlan\n+from maasservicelayer.services.base import Service\n+from maasservicelayer.services.configurations import ConfigurationsService\n+from maasservicelayer.services.domains import DomainsService\n+from maasservicelayer.services.interfaces import InterfacesService\n+from maasservicelayer.services.ipranges import IPRangesService\n+from maasservicelayer.services.nodes import NodesService\n+from maasservicelayer.services.reservedips import ReservedIPsService\n+from maasservicelayer.services.staticipaddress import StaticIPAddressService\n+from maasservicelayer.services.subnets import SubnetsService\n+from maasservicelayer.services.vlans import VlansService\n+from provisioningserver.utils.env import MAAS_ID\n+from provisioningserver.utils.network import (\n+    get_source_address,\n+    resolve_hostname,\n+)\n+from provisioningserver.utils.text import split_string_list\n+\n+logger = structlog.get_logger()\n+\n+\n+@dataclass\n+class _DHCPQueryCache:\n+    \"\"\"Per-request caches that memoize lookups to avoid N+1 queries.\"\"\"\n+\n+    ips_by_interface: dict[int, list[StaticIPAddress]] = field(\n+        default_factory=dict\n+    )\n+    subnet_by_id: dict[int, Subnet | None] = field(default_factory=dict)\n+    vlan_by_id: dict[int, Vlan | None] = field(default_factory=dict)\n+    node_by_id: dict[int, Node | None] = field(default_factory=dict)\n+    interfaces_by_config: dict[int, list[Interface]] = field(\n+        default_factory=dict\n+    )\n+    dynamic_count_by_subnet: dict[int, int] = field(default_factory=dict)\n+\n+\n+class DHCPService(Service):\n+    \"\"\"Collect network data needed to configure DHCP on a rack controller.\"\"\"\n+\n+    def __init__(\n+        self,\n+        context: Context,\n+        configurations_service: ConfigurationsService,\n+        domains_service: DomainsService,\n+        interfaces_service: InterfacesService,\n+        ipranges_service: IPRangesService,\n+        nodes_service: NodesService,\n+        reservedips_service: ReservedIPsService,\n+        staticipaddress_service: StaticIPAddressService,\n+        subnets_service: SubnetsService,\n+        vlans_service: VlansService,\n+    ):\n+        super().__init__(context)\n+        self.configurations_service = configurations_service\n+        self.domains_service = domains_service\n+        self.interfaces_service = interfaces_service\n+        self.ipranges_service = ipranges_service\n+        self.nodes_service = nodes_service\n+        self.reservedips_service = reservedips_service\n+        self.staticipaddress_service = staticipaddress_service\n+        self.subnets_service = subnets_service\n+        self.vlans_service = vlans_service\n+\n+    async def get_kea_dhcp_data_for_agent(\n+        self, system_id: str\n+    ) -> DHCPDataForAgent:\n+        \"\"\"Retrieve Kea configuration inputs for a rack controller system ID.\"\"\"\n+        rack = await self.nodes_service.get_one(\n+            query=QuerySpec(where=NodeClauseFactory.with_system_id(system_id))\n+        )\n+        if rack is None:\n+            raise NotFoundException()\n+        if rack.node_type not in (\n+            NodeTypeEnum.RACK_CONTROLLER,\n+            NodeTypeEnum.REGION_AND_RACK_CONTROLLER,\n+        ):\n+            raise ValidationException.build_for_field(\n+                \"system_id\", \"The node must be a rack controller.\"\n+            )\n+        if rack.current_config_id is None:\n+            raise ValidationException.build_for_field(\n+                \"system_id\",\n+                \"The rack controller has no current configuration.\",\n+            )\n+\n+        cache = _DHCPQueryCache()\n+        cache.node_by_id[rack.id] = rack\n+\n+        # Retrieve relevant VLANs for this rack\n+        active_vlans = await self.vlans_service.get_many(\n+            QuerySpec(\n+                where=VlansClauseFactory.and_clauses(\n+                    [\n+                        VlansClauseFactory.with_dhcp_on(True),\n+                        VlansClauseFactory.with_primary_or_secondary_rack_id(\n+                            rack.id\n+                        ),\n+                    ]\n+                ),\n+                order_by=[OrderByClause(VlanTable.c.id)],\n+            )\n+        )\n+        interfaces = await self._get_rack_interfaces(rack, cache)\n+        interface_vlan_ids = {\n+            interface.vlan_id\n+            for interface in interfaces\n+            if interface.vlan_id is not None\n+        }\n+        active_vlans = [\n+            vlan for vlan in active_vlans if vlan.id in interface_vlan_ids\n+        ]\n+        vlans = {vlan.id: vlan for vlan in active_vlans}\n+        if vlans:\n+            relay_vlans = await self.vlans_service.get_many(\n+                query=QuerySpec(\n+                    where=VlansClauseFactory.with_relay_vlan_id_in(list(vlans))\n+                )\n+            )\n+            for relay in relay_vlans:\n+                vlans[relay.id] = relay\n+        cache.vlan_by_id.update(vlans)\n+\n+        # Retrieve relevant subnets for this rack\n+        subnets = await self.subnets_service.get_many(\n+            query=QuerySpec(\n+                where=SubnetClauseFactory.and_clauses(\n+                    [\n+                        SubnetClauseFactory.with_vlan_id_in(list(vlans)),\n+                        SubnetClauseFactory.with_managed(True),\n+                    ]\n+                )\n+            )\n+        )\n+        subnets.sort(\n+            key=lambda subnet: (\n+                subnet.vlan_id,\n+                subnet.cidr.version,\n+                str(subnet.cidr.network_address),\n+            )\n+        )\n+        cache.subnet_by_id.update({subnet.id: subnet for subnet in subnets})\n+\n+        # Retrieve relevant IP ranges for this rack\n+        ipranges = await self.ipranges_service.get_many(\n+            query=QuerySpec(\n+                where=IPRangeClauseFactory.with_subnet_ids(\n+                    [subnet.id for subnet in subnets]\n+                ),\n+                order_by=[OrderByClause(IPRangeTable.c.id)],\n+            )\n+        )\n+        ipranges.sort(key=lambda iprange: iprange.id)",
+        "html_url": "https://github.com/canonical/maas/pull/790#discussion_r4339753573",
+        "id": 4339753573,
+        "is_copilot_code_review": false,
+        "line": null,
+        "node_id": "PRRC_kwDOBSgIKM8AAAABAqtiZQ",
+        "original_commit_id": "8ae306af8f7425e9728beaab0d9f270a54b743cf",
+        "original_line": 206,
+        "original_position": 206,
+        "original_start_line": 203,
+        "path": "src/maasservicelayer/services/dhcp.py",
+        "position": 1,
+        "pull_request_review_id": 5602893580,
+        "pull_request_url": "https://api.github.com/repos/canonical/maas/pulls/790",
+        "reactions": {
+          "+1": 0,
+          "-1": 0,
+          "confused": 0,
+          "eyes": 0,
+          "heart": 0,
+          "hooray": 0,
+          "laugh": 0,
+          "rocket": 0,
+          "total_count": 0,
+          "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4339753573/reactions"
+        },
+        "side": "RIGHT",
+        "start_line": null,
+        "start_side": "RIGHT",
+        "subject_type": "line",
+        "updated_at": "2026-10-21T17:24:07Z",
+        "url": "https://api.github.com/repos/canonical/maas/pulls/comments/4339753573",
+        "user": {
+          "avatar_url": "https://avatars.githubusercontent.com/u/87246463?v=4",
+          "events_url": "https://api.github.com/users/MaikRe/events{/privacy}",
+          "followers_url": "https://api.github.com/users/MaikRe/followers",
+          "following_url": "https://api.github.com/users/MaikRe/following{/other_user}",
+          "gists_url": "https://api.github.com/users/MaikRe/gists{/gist_id}",
+          "gravatar_id": "",
+          "html_url": "https://github.com/MaikRe",
+          "id": 87246463,
+          "login": "MaikRe",
+          "node_id": "MDQ6VXNlcjg3MjQ2NDYz",
+          "organizations_url": "https://api.github.com/users/MaikRe/orgs",
+          "received_events_url": "https://api.github.com/users/MaikRe/received_events",
+          "repos_url": "https://api.github.com/users/MaikRe/repos",
+          "site_admin": false,
+          "starred_url": "https://api.github.com/users/MaikRe/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/MaikRe/subscriptions",
+          "type": "User",
+          "url": "https://api.github.com/users/MaikRe",
+          "user_view_type": "public"
+        }
+      },
+      "reason": "multiline range cannot be represented in single-line review JSON"
+    }
+  ]
+}

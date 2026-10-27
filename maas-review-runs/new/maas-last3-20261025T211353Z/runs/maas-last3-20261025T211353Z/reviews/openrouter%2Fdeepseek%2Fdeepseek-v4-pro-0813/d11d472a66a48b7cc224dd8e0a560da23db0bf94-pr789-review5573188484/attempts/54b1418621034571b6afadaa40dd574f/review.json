@@ -1,0 +1,18 @@
+{
+  "general_comment": "[maas-code-reviewer review]\n\n> LLM-generated review from https://github.com/canonical/maas-code-reviewer.\n> Intended to assist a human reviewer, not replace one \u2014 suggestions may be\n> incorrect, please verify before acting.\n\n\nThe direction is sound: rate limits now gate on an empty-string sentinel and only apply by default when hardening is active, fixing the silent-throttle regression for unhardened upgrades. However, the burst/connection sentinel is self-defeating. `if_missing=0` makes an explicitly configured `0` indistinguishable from 'unset' at read time, and the renderer's `or 60` / `or 100` then silently replaces an intentional `burst=0` (reject excess instead of queueing) with the default. This directly contradicts the commit message's claim that a burst of 0 'stays configurable'; a user who sets `api_rate_limit_burst: 0` will get 60 with no warning. Either use a collision-free sentinel (e.g. None/-1, or check presence in the store) or drop the burst=0 feature and document 0 strictly as 'use default'. Secondary: the rack controller still validates these with formencode `Number` (not `Int`), so a fractional value like `10.5` passes `min=0` and renders as `burst=10.5`, which NGINX rejects \u2014 the 'both are validated with Int' claim is inaccurate for cluster config.",
+  "inline_comments": {
+    "src/maasserver/regiondservices/http.py": {
+      "140": "`or 60` makes an explicit `api_rate_limit_burst: 0` impossible. Because `Int(if_missing=0)` returns 0 for both 'unset' and a real `burst=0`, a user who sets burst=0 (reject excess rather than queue) is silently given 60. This defeats the stated 'burst of 0 stays configurable' goal; use a sentinel that cannot collide with a valid value.",
+      "141": "Same sentinel collision for `api_conn_limit`: an explicit `0` is coerced to 100 and can never reach NGINX. `min=0` therefore only admits a value that is silently ignored (and `limit_conn \u2026 0` itself has no meaningful 'deny all' use case)."
+    },
+    "src/provisioningserver/rackdservices/http.py": {
+      "255": "Same bug as regiond: `api_rate_limit_burst or 60` turns an explicitly configured `0` into 60, so burst=0 (reject excess) cannot be configured on the rack controller either, contradicting the commit message."
+    },
+    "src/maasserver/config.py": {
+      "335": "`if_missing=0` makes 'unset' identical to an explicit `0`, so the downstream `or 60` cannot distinguish them. If burst=0 is meant to remain configurable, use a non-colliding sentinel (e.g. `None` / `-1`) here (and for `api_conn_limit` at line 341) rather than 0."
+    },
+    "src/provisioningserver/config.py": {
+      "902": "This is `Number`, not `Int`: formencode's `Number.to_python('10.5')` returns `10.5`, so a fractional burst passes `min=0` and is rendered into `burst={{api_rate_limit_burst}}`, producing `burst=10.5` which NGINX rejects (config load failure). The PR description's 'both are validated with Int' does not hold for the rack controller; switch to `Int` to match regiond."
+    }
+  }
+}

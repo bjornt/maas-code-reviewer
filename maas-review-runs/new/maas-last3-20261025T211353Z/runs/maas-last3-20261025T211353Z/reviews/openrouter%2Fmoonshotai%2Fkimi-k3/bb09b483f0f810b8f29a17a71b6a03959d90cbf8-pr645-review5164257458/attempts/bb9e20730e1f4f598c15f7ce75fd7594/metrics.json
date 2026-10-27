@@ -1,0 +1,16 @@
+{
+  "model_name": "openrouter/moonshotai/kimi-k3",
+  "agent_name": "omp",
+  "agent_version": "18.12.2",
+  "tokens_thinking": null,
+  "tokens_input": 15760,
+  "tokens_output": 6278,
+  "tokens_cache_read": 47104,
+  "tokens_cache_write": null,
+  "tokens_total": 69142,
+  "cost": 0.09894904000000002,
+  "cost_currency": "USD",
+  "agents_md_read": true,
+  "diff_lines": 30,
+  "diff_size_bytes": 1311
+}
