@@ -2,8 +2,10 @@
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
 import ast
+import json
 import os
 from collections.abc import Set
+from pathlib import Path
 from typing import cast
 
 REVIEW_JSON_SCHEMA: dict = {
@@ -237,6 +239,53 @@ def validate_review_json(
     return errors
 
 
+def repository_files(root: Path) -> frozenset[str]:
+    """List repository-relative files and symlinked directories under *root*."""
+    paths: set[str] = set()
+    for directory, directories, files in os.walk(root, followlinks=False):
+        directories[:] = [name for name in directories if name.casefold() != ".git"]
+        relative = Path(directory).relative_to(root)
+        paths.update(
+            (relative / name).as_posix() for name in files if name.casefold() != ".git"
+        )
+        paths.update(
+            (relative / name).as_posix()
+            for name in directories
+            if (Path(directory) / name).is_symlink()
+        )
+    return frozenset(paths)
+
+
+def parse_review_document(
+    text: str,
+    *,
+    diff_text: str,
+    path_prefix: str | None = None,
+    repository_files: Set[str] = frozenset(),
+) -> tuple[dict | None, str | None]:
+    """Parse one terminal review document and validate it against the diff.
+
+    Returns (document, None) when the document is publishable, otherwise
+    (None, failure) with a message describing every reason it is not.
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines[0] not in ("```", "```json") or lines[-1] != "```":
+            return None, "Review must contain one JSON object or exact JSON fence."
+        text = "\n".join(lines[1:-1])
+    try:
+        result = json.loads(text, parse_constant=_reject_json_constant)
+    except ValueError as exc:
+        return None, f"Invalid review JSON: {exc}"
+    errors = validate_review_json(
+        result, diff_text, path_prefix=path_prefix, repository_files=repository_files
+    )
+    if errors:
+        return None, "Invalid review document: " + "\n".join(errors)
+    return result, None
+
+
 def _decode_diff_path(value: str) -> str | None:
     value = value.partition("\t")[0]
     if not value.startswith('"'):
@@ -296,3 +345,7 @@ def _repository_path(
 def _hunk_range(value: str) -> tuple[int, int]:
     start, separator, count = value.partition(",")
     return int(start), int(count) if separator else 1
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Non-JSON numeric constant: {value}")

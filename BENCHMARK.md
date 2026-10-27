@@ -189,6 +189,11 @@ previous output, and the validation failure) up to `--repair-attempts` rounds
 attempts, and a repair that still fails validation is rejected as before —
 nothing unvalidated is ever published.
 
+The reviewing agent also gets a `validate_review` MCP tool in its session: the
+reviewer stages the reviewed diff in the snapshot and starts
+`maas-code-reviewer review-mcp` as an in-session MCP server, letting the agent
+validate its draft review against the diff before finishing.
+
 For a deterministic side-by-side view of every run, model, and case — wall
 time from the `invoke_agent` span, reported token usage, harness cost
 estimates, attempt status, and comment counts, next to the original baseline

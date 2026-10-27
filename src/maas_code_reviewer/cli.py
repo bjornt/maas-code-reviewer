@@ -15,12 +15,13 @@ from urllib.error import URLError
 from github import GithubException
 from lazr.restfulclient.errors import HTTPError
 
-from maas_code_reviewer import review_commands
+from maas_code_reviewer import review_commands, review_mcp
 from maas_code_reviewer.agent_runner import AgentRunnerError
 from maas_code_reviewer.git import GitClient
 from maas_code_reviewer.github_client import GitHubClient, parse_pr_url
 from maas_code_reviewer.launchpad_client import LaunchpadClient
 from maas_code_reviewer.metrics import ReviewMetrics, write_metrics
+from maas_code_reviewer.review_schema import repository_files
 from maas_code_reviewer.reviewer import review_diff, review_diff_structured
 from maas_code_reviewer.workshop_runner import ConfiguredAgentRunner
 
@@ -142,6 +143,19 @@ def handle_review_pr(args: argparse.Namespace) -> None:
         )
 
 
+def handle_review_mcp(args: argparse.Namespace) -> None:
+    """Serve the in-review validation tool over MCP stdio."""
+    diff = Path(args.diff_file).read_text(encoding="utf-8")
+    repo_dir = args.repo_dir or Path.cwd()
+    review_mcp.serve(
+        diff,
+        path_prefix=args.diff_prefix,
+        repository_files=repository_files(repo_dir),
+        reader=sys.stdin,
+        writer=sys.stdout,
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -157,6 +171,8 @@ def main(argv: list[str] | None = None) -> None:
             handle_review_diff(args)
         elif args.command == "review-pr":
             handle_review_pr(args)
+        elif args.command == "review-mcp":
+            handle_review_mcp(args)
     except KeyboardInterrupt:
         print("Review cancelled.", file=sys.stderr)
         sys.exit(130)
@@ -316,6 +332,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     diff_parser.add_argument(
         "diff_file", help="Path to a unified diff file, or '-' to read stdin."
+    )
+
+    mcp_parser = subparsers.add_parser(
+        "review-mcp",
+        help="Serve the in-review validation MCP tool on stdio for one review.",
+    )
+    _add_repo_option(mcp_parser)
+    mcp_parser.add_argument(
+        "--diff-file",
+        type=Path,
+        required=True,
+        metavar="FILE",
+        help="Unified diff the review is validated against.",
+    )
+    mcp_parser.add_argument(
+        "--diff-prefix",
+        metavar="PREFIX",
+        help="Explicit new-side diff path prefix used to resolve file paths.",
     )
 
     pr_parser = subparsers.add_parser(

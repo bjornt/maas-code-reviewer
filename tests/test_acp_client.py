@@ -154,6 +154,34 @@ def test_split_frames_chunks_and_real_session_contract(tmp_path):
         setattr(process, "cwd", Path("/elsewhere"))
 
 
+def test_session_receives_configured_mcp_servers(tmp_path: Path):
+    process, request, trace = configured(tmp_path)
+    request = replace(
+        request,
+        mcp_servers=(
+            {
+                "name": "review-validation",
+                "command": "maas-code-reviewer",
+                "args": [
+                    "review-mcp",
+                    "--diff-file",
+                    ".maas-code-reviewer/review-input.diff",
+                ],
+            },
+        ),
+    )
+    asyncio.run(run_acp(process, request, deadline=time.monotonic() + 10))
+    servers = json.loads(trace.read_text())[1]["params"]["mcpServers"]
+    assert len(servers) == 1
+    assert servers[0]["name"] == "review-validation"
+    assert servers[0]["command"] == "maas-code-reviewer"
+    assert servers[0]["args"] == [
+        "review-mcp",
+        "--diff-file",
+        ".maas-code-reviewer/review-input.diff",
+    ]
+
+
 @pytest.mark.parametrize(
     ("title", "arguments"),
     [
