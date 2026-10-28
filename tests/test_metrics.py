@@ -14,7 +14,6 @@ class TestReviewMetrics:
         assert metrics.tokens_thinking == 0
         assert metrics.tokens_input == 0
         assert metrics.tokens_output == 0
-        assert metrics.files_read == 0
         assert metrics.agents_md_read is False
         assert metrics.diff_lines == 0
         assert metrics.diff_size_bytes == 0
@@ -65,11 +64,10 @@ class TestReviewMetrics:
 class TestWriteMetrics:
     def test_writes_valid_json_that_round_trips(self, tmp_path: Path) -> None:
         metrics = ReviewMetrics(
-            model_name="gemini-3-flash-preview",
+            model_name="test-model",
             tokens_thinking=100,
             tokens_input=200,
             tokens_output=300,
-            files_read=5,
             agents_md_read=True,
             diff_lines=42,
             diff_size_bytes=2048,
@@ -78,11 +76,10 @@ class TestWriteMetrics:
         write_metrics(metrics, out)
 
         data = json.loads(out.read_text())
-        assert data["model_name"] == "gemini-3-flash-preview"
+        assert data["model_name"] == "test-model"
         assert data["tokens_thinking"] == 100
         assert data["tokens_input"] == 200
         assert data["tokens_output"] == 300
-        assert data["files_read"] == 5
         assert data["agents_md_read"] is True
         assert data["diff_lines"] == 42
         assert data["diff_size_bytes"] == 2048
@@ -119,7 +116,6 @@ class TestWriteMetrics:
         assert data["tokens_thinking"] == 0
         assert data["tokens_input"] == 0
         assert data["tokens_output"] == 0
-        assert data["files_read"] == 0
         assert data["agents_md_read"] is False
         assert data["diff_lines"] == 0
         assert data["diff_size_bytes"] == 0

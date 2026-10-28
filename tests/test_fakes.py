@@ -23,7 +23,6 @@ from tests.fake_launchpadlib import (
     make_fake_comment,
     make_fake_mp,
 )
-from tests.fake_llm import FakeLLMClient, ScriptedResponse, ToolCall
 
 
 def _make_request() -> ReviewRequest:
@@ -42,34 +41,6 @@ def _make_result(text: str = "{}") -> AgentRunResult:
         status=CompletionStatus.COMPLETED,
         agent_name="omp",
     )
-
-
-class TestFakeLLMClientErrors:
-    def test_raises_when_no_scripted_responses(self) -> None:
-        llm = FakeLLMClient()
-
-        with pytest.raises(
-            RuntimeError, match="FakeGenaiClient: no more scripted responses"
-        ):
-            llm.review("prompt", [])
-
-    def test_raises_when_tool_not_found(self) -> None:
-        def some_tool(path: str) -> str:
-            return path  # pragma: no cover
-
-        llm = FakeLLMClient(
-            [
-                ScriptedResponse(
-                    text="ok",
-                    tool_calls=[ToolCall(name="nonexistent", args={"x": "y"})],
-                ),
-            ]
-        )
-
-        with pytest.raises(
-            RuntimeError, match="FakeGenaiClient: tool 'nonexistent' not found"
-        ):
-            llm.review("prompt", [some_tool])
 
 
 class TestFakeLaunchpadlibEdgeCases:

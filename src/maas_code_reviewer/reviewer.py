@@ -2,11 +2,8 @@
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
 import json
-import sys
-from collections.abc import Callable, Set
+from collections.abc import Set
 from pathlib import Path
-
-from google.genai import types
 
 from maas_code_reviewer.agent_runner import (
     AgentRunner,
@@ -16,7 +13,6 @@ from maas_code_reviewer.agent_runner import (
     ReviewRequest,
     RunnerResultError,
 )
-from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS, GeminiClient
 from maas_code_reviewer.metrics import ReviewMetrics
 from maas_code_reviewer.review_schema import (
     parse_diff_files_and_lines,
@@ -33,14 +29,6 @@ REVIEW_PREAMBLE = """\
 """
 
 
-class NoReviewText(Exception):
-    """Raised when the LLM ends its turn without producing any review text.
-
-    This typically happens when automatic function calling stops on a
-    further tool call (the tool-call limit is reached) and, even after
-    resume attempts, the model still has not emitted a text answer.
-    """
-
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
@@ -55,11 +43,7 @@ STRUCTURED_SYSTEM_INSTRUCTION = _load_prompt(
     "shared_instruction.md", "structured_system_instruction.md"
 )
 
-SYSTEM_INSTRUCTION = _load_prompt("shared_instruction.md", "system_instruction.md")
-
 STRUCTURED_INSTRUCTIONS = _load_prompt("structured_instructions.md")
-
-INSTRUCTIONS = _load_prompt("instructions.md")
 
 TRUNCATION_NOTE = (
     "\n\n[Note: The diff was truncated because it exceeded the maximum size. "
@@ -74,200 +58,12 @@ TRUNCATION_NOTE_MID_FILE = (
 
 TRUNCATION_MANIFEST_HEADER = (
     "\nThe following changed files were omitted from the truncated diff above. "
-    "They ARE part of this change — use the native read tool and full diff "
-    "to inspect them before raising concerns that could be verified from "
-    "the actual file content:\n"
+    "They ARE part of this change — use your native read, grep, and glob tools "
+    "to inspect any of them before raising concerns that could be verified by "
+    "reading the actual file content:\n"
 )
 
 EMPTY_DIFF_GENERAL_COMMENT = "No changes to review: the provided diff is empty."
-
-
-def review_diff_structured(
-    llm: GeminiClient,
-    diff: str,
-    description: str | None,
-    read_file: Callable[[str], str],
-    list_directory: Callable[[str], str],
-    agents_md: str | None = None,
-    max_diff_chars: int = 200_000,
-    metrics: ReviewMetrics | None = None,
-    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
-    *,
-    diff_prefix: str | None = None,
-    repository_files: Set[str] = frozenset(),
-) -> dict:
-    """Orchestrate a structured code review of *diff* using the given LLM.
-
-    The LLM is instructed to produce a JSON object with a general comment and
-    inline comments keyed by file path and line number.  A ``validate_review``
-    tool is provided so the LLM can self-check its output before finalising.
-
-    Parameters
-    ----------
-    llm:
-        The LLM client to use for generating the review.
-    diff:
-        The unified diff text to review.
-    description:
-        The merge proposal description or commit message (may be ``None``).
-    read_file:
-        A callable that reads a file from the working tree.
-        Signature: ``(path: str) -> str``.
-    list_directory:
-        A callable that lists directory contents in the working tree.
-        Signature: ``(path: str) -> str``.
-    agents_md:
-        The contents of the repository's AGENTS.md file, if one exists, to
-        be sent to the LLM up front instead of relying on a ``read_file``
-        tool call (may be ``None``).
-    max_diff_chars:
-        Maximum number of characters for the diff before truncation.
-    diff_prefix:
-        Explicit new-side diff path prefix (the ``--diff-prefix`` option of
-        the ``review`` command); ``None`` (the default) infers the prefix
-        from the diff and the checkout listing.
-    repository_files:
-        Repository-relative paths of the review checkout's files, from
-        :func:`review_schema.repository_files`; used to resolve diff paths
-        to repository coordinates during validation.
-
-    Returns
-    -------
-    dict
-        The parsed JSON review object.  The document is raw: the review
-        marker/preamble are added at publish time (publish-mp/publish-pr),
-        not here.
-    """
-    if _is_empty_diff(diff):
-        _populate_metrics_without_llm(metrics, llm.model, diff)
-        return {
-            "general_comment": EMPTY_DIFF_GENERAL_COMMENT,
-            "inline_comments": {},
-        }
-
-    truncated_diff = _truncate_diff(diff, max_diff_chars)
-    prompt = _build_structured_prompt(truncated_diff, description)
-
-    def validate_review(json_text: str) -> str:
-        return _validate_review(
-            json_text,
-            truncated_diff,
-            path_prefix=diff_prefix,
-            repository_files=repository_files,
-        )
-
-    tools: list[Callable[..., str]] = [
-        validate_review, read_file, list_directory
-    ]
-    raw_text = llm.review(
-        prompt, tools, system_instruction=STRUCTURED_SYSTEM_INSTRUCTION,
-        agents_md=agents_md, max_tool_calls=max_tool_calls,
-    )
-
-    _populate_metrics(metrics, llm, diff)
-
-    cleaned = _extract_json(raw_text)
-    if not cleaned:
-        raise NoReviewText(
-            "LLM returned no review text: the model ended its turn without "
-            "producing a text answer (it may have exhausted its tool-call "
-            "budget)."
-        )
-    result = json.loads(cleaned)
-    result["general_comment"] = result.get("general_comment", "")
-    return result
-
-
-def _validate_review(
-    json_text: str,
-    diff_text: str,
-    *,
-    path_prefix: str | None = None,
-    repository_files: Set[str] = frozenset(),
-) -> str:
-    """Validate the review JSON against the schema and the diff.
-
-    Returns an empty string if valid, or a newline-separated list of
-    errors if invalid.
-    """
-    print(
-        f"Tool call: validate_review(json_text=<{len(json_text)} chars>)",
-        file=sys.stderr,
-    )
-    try:
-        data = json.loads(json_text)
-    except json.JSONDecodeError as exc:
-        return f"Invalid JSON: {exc}"
-    errors = validate_review_json(
-        data, diff_text, path_prefix=path_prefix, repository_files=repository_files
-    )
-    if errors:
-        return "\n".join(errors)
-    return ""
-
-
-def review_diff(
-    llm: GeminiClient,
-    diff: str,
-    description: str | None,
-    read_file: Callable[[str], str],
-    list_directory: Callable[[str], str],
-    agents_md: str | None = None,
-    max_diff_chars: int = 200_000,
-    metrics: ReviewMetrics | None = None,
-    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
-) -> str:
-    """Orchestrate a code review of *diff* using the given LLM.
-
-    Parameters
-    ----------
-    llm:
-        The LLM client to use for generating the review.
-    diff:
-        The unified diff text to review.
-    description:
-        The merge proposal description or commit message (may be ``None``).
-    read_file:
-        A callable that reads a file from the merged working tree.
-        Signature: ``(path: str) -> str``.
-    list_directory:
-        A callable that lists directory contents in the merged working tree.
-        Signature: ``(path: str) -> str``.
-    agents_md:
-        The contents of the repository's AGENTS.md file, if one exists, to
-        be sent to the LLM up front instead of relying on a ``read_file``
-        tool call (may be ``None``).
-    max_diff_chars:
-        Maximum number of characters for the diff before truncation.
-
-    Returns
-    -------
-    str
-        The formatted review comment, prefixed with the review marker.
-    """
-    if _is_empty_diff(diff):
-        _populate_metrics_without_llm(metrics, llm.model, diff)
-        return f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{EMPTY_DIFF_GENERAL_COMMENT}"
-
-    truncated_diff = _truncate_diff(diff, max_diff_chars)
-    prompt = _build_prompt(truncated_diff, description)
-
-    tools: list[Callable[..., str]] = [read_file, list_directory]
-    review_text = llm.review(
-        prompt, tools, system_instruction=SYSTEM_INSTRUCTION,
-        agents_md=agents_md, max_tool_calls=max_tool_calls,
-    )
-
-    _populate_metrics(metrics, llm, diff)
-
-    if not review_text:
-        raise NoReviewText(
-            "LLM returned no review text: the model ended its turn without "
-            "producing a text answer (it may have exhausted its tool-call "
-            "budget)."
-        )
-
-    return f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{review_text}"
 
 
 def render_review_document(document: dict) -> str:
@@ -400,27 +196,6 @@ def review_agent(
     return document
 
 
-def _build_structured_prompt(diff: str, description: str | None) -> list[types.Part]:
-    """Construct the user-turn prompt parts for structured JSON review output.
-
-    The system instruction (persona, task, output-format rules) is sent
-    separately via ``GenerateContentConfig.system_instruction``; this returns
-    only the diff, description, and per-call instructions as ``Part``s.
-    """
-    parts: list[types.Part] = [
-        types.Part.from_text(text=f"## Diff\n\n```\n{diff}\n```\n")
-    ]
-
-    if description:
-        parts.append(
-            types.Part.from_text(text=f"## Description\n\n{description}\n")
-        )
-
-    parts.append(types.Part.from_text(text=STRUCTURED_INSTRUCTIONS))
-
-    return parts
-
-
 def _build_agent_prompt(
     repo_dir: Path,
     diff_file: Path | None,
@@ -482,29 +257,6 @@ def _extract_json(text: str) -> str:
     return stripped
 
 
-def _build_prompt(diff: str, description: str | None) -> list[types.Part]:
-    """Construct the user-turn prompt parts containing the diff and description.
-
-    The system instruction (persona, task, tool guidance) is sent
-    separately via ``GenerateContentConfig.system_instruction``; this returns
-    only the diff, description, and per-call instructions as ``Part``s.
-    """
-    parts: list[types.Part] = [
-        types.Part.from_text(text=f"## Diff\n\n```\n{diff}\n```\n")
-    ]
-
-    if description:
-        parts.append(
-            types.Part.from_text(
-                text=f"## Merge Proposal Description\n\n{description}\n"
-            )
-        )
-
-    parts.append(types.Part.from_text(text=INSTRUCTIONS))
-
-    return parts
-
-
 def _extract_first_json_object(text: str) -> str | None:
     """Return the first parsable JSON object substring from *text*.
 
@@ -528,40 +280,6 @@ def _extract_first_json_object(text: str) -> str | None:
 def _is_empty_diff(diff: str) -> bool:
     """Return ``True`` when *diff* has no non-whitespace content."""
     return diff.strip() == ""
-
-
-def _populate_metrics_without_llm(
-    metrics: ReviewMetrics | None, model_name: str, diff: str
-) -> None:
-    """Fill *metrics* for paths that skip the LLM call entirely."""
-    if metrics is None:
-        return
-    metrics.model_name = model_name
-    metrics.tokens_thinking = 0
-    metrics.tokens_input = 0
-    metrics.tokens_output = 0
-    metrics.diff_lines = len(diff.splitlines())
-    metrics.diff_size_bytes = len(diff.encode("utf-8"))
-    metrics.tool_call_limit = 0
-    metrics.tool_call_limit_reached = False
-    metrics.resume_attempts = 0
-
-
-def _populate_metrics(
-    metrics: ReviewMetrics | None, llm: GeminiClient, diff: str
-) -> None:
-    """Fill *metrics* with LLM token counts and diff size info."""
-    if metrics is None:
-        return
-    metrics.model_name = llm.model
-    metrics.tokens_thinking = llm.last_tokens_thinking
-    metrics.tokens_input = llm.last_tokens_input
-    metrics.tokens_output = llm.last_tokens_output
-    metrics.tool_call_limit = llm.last_tool_call_limit
-    metrics.tool_call_limit_reached = llm.last_tool_call_limit_reached
-    metrics.resume_attempts = llm.last_resume_attempts
-    metrics.diff_lines = len(diff.splitlines())
-    metrics.diff_size_bytes = len(diff.encode("utf-8"))
 
 
 def _populate_agent_metrics(

@@ -8,7 +8,9 @@ Its purpose is to help a human reviewer by taking care of the initial review qui
 The person proposing the change can then make any changes they feel are necessary
 before a human reviewer picks up the PR/MP.
 
-It uses a Gemini LLM to review diffs and post findings as comments on the merge proposal or pull request. 
+It reviews diffs with an LLM agent (omp over ACP — see
+[Review runtime configuration](#review-runtime-configuration)) and posts
+findings as comments on the merge proposal or pull request.
 
 It's built and maintained by the [MAAS](https://maas.io/) team at
 [Canonical](https://canonical.com/). The tool's review defaults reflect what
@@ -27,11 +29,14 @@ to test out changes to the code reviewer itself.
 
 Copy the same workflow this project uses: [.github/workflows/review-pr.yml](.github/workflows/review-pr.yml) 
 
-It works as it is. The only thing you might change is `env.MODEL`, which controls
-which Gemini model is being used to do the code review.
+It works as it is. The review runs in a Workshop container through the
+omp agent harness; model selection is the
+[runtime configuration](#review-runtime-configuration)'s.
 
-You also need to create a secret in the repo called `GEMINI_API_KEY` which
-contains the API key that you can get from https://aistudio.google.com.
+You also need a `GEMINI_KEY` secret in the repo — the upstream provider
+credential, handed to the `omp-auth-gateway` snap on the runner host and
+never entering the review container (see
+[Inference gateway](#inference-gateway)).
 
 For split pipelines (reviewing in a separate container), `fetch-pr` writes the
 review inputs and `publish-pr` validates and posts a candidate review — see the
@@ -39,17 +44,24 @@ command reference.
 
 ### Launchpad
 
-There's currently no automation to run code reviews automatically on new merge proposals.
-At the moment you have to set up your own automation and then use the `review-mp` command.
-For split pipelines, `fetch-mp` writes the review inputs and `publish-mp` validates and
-posts a candidate review — see the command reference.
+There's currently no automation to run code reviews automatically on new merge
+proposals. Set up your own automation around the three commands: `fetch-mp`
+writes the review inputs, `review` produces the candidate review document, and
+`publish-mp` validates and posts it — see the command reference.
 
 ### Locally
 
-To use it locally, generate the diff that you want reviewed and use the `review-diff`
-command. For example
+To use it locally, generate the diff that you want reviewed and run the
+`review` command from the checkout. For example:
 
-  `git show HEAD | maas-code-reviewer review-diff -`
+```sh
+git show HEAD > diff.patch
+maas-code-reviewer review --repo-dir . --diff-file diff.patch
+```
+
+`git show HEAD | maas-code-reviewer review --diff-file -` reads the diff
+from stdin. Add `--json-output review.json` to write the structured
+document for `publish-mp`/`publish-pr` to validate and post.
 
 ## Installation
 
@@ -69,27 +81,9 @@ uv run maas-code-reviewer
 
 ## Configuration
 
-### Gemini API Key
-
-The legacy review commands require a Gemini API key; `review` does not (see
-[Review runtime configuration](#review-runtime-configuration)). Provide it in
-one of two ways:
-
-| Method | Details |
-|---|---|
-| `-g`, `--gemini-api-key-file FILE` | Path to a file containing the key. |
-| `GEMINI_API_KEY` | Set this environment variable to the key. Overridden by `--gemini-api-key-file`. |
-
-```sh
-maas-code-reviewer review-mp -g /path/to/gemini-api-key MP_URL
-```
-
-The `review` command no longer uses a Gemini key; `review-diff`,
-`review-mp`, and `review-pr` still do until step 16.
-
 ### GitHub Token
 
-The `review-pr`, `fetch-pr`, and `publish-pr` commands require a GitHub
+The `fetch-pr` and `publish-pr` commands require a GitHub
 personal access token. Provide it in one of two ways:
 
 | Method | Details |
@@ -118,6 +112,22 @@ with pull scope, provided in the `LP_GIT_TOKEN` environment variable.
 `fetch-mp` uses it as HTTP header authentication for the clone and never
 writes it to disk (no credential helper, no credential-bearing remote URLs).
 Without it, only public repositories can be fetched.
+
+### Migrating from the retired commands
+
+The composite `review-mp`, `review-pr`, and `review-diff` commands were
+removed together with the google-genai engine that backed them: the CI
+workflows have driven `fetch-*` → `review` → `publish-*` since the
+container migration, and the split pipeline reached feature parity.
+Run the three commands instead — see the command reference for
+end-to-end examples.
+
+| Retired | Replacement |
+|---|---|
+| `-g`, `--gemini-api-key-file` / `GEMINI_API_KEY` | None. Model access is the [runtime configuration](#review-runtime-configuration) plus the per-run gateway token ([Inference gateway](#inference-gateway)); no API key file is read anywhere. |
+| `--max-tool-calls` | `--review-timeout` — the tool-call cap became a finite review deadline. |
+| `--max-diff-chars` | None — `review` never exposed the flag; truncation keeps its built-in file-boundary budget. |
+| `--dry-run` on `review-mp`/`review-pr` | Run `review` without `publish-*` — it only ever prints or writes the candidate, never posts. |
 
 ## Inference gateway
 
@@ -272,74 +282,6 @@ exactly once, and posts it as an "Automated review" comment. `--dry-run`
 prints the comment instead. An invalid candidate exits nonzero with nothing
 posted.
 
-### `review-mp`
-
-Review a single Launchpad merge proposal using Gemini.
-
-```sh
-maas-code-reviewer review-mp [--launchpad-credentials FILE] -g KEY_FILE [--model MODEL] [--dry-run] [--metrics FILE] MP_URL
-```
-
-| Argument | Description |
-|---|---|
-| `MP_URL` | URL of the merge proposal to review. |
-| `-g`, `--gemini-api-key-file` | Path to file containing the Gemini API key. Falls back to `GEMINI_API_KEY` env var. |
-| `--model MODEL` | Gemini model to use (default: `gemini-3-flash-preview`). |
-| `--dry-run` | Print the review to stdout instead of posting it as a comment. |
-| `--metrics FILE` | Write review metrics as JSON to `FILE` (see [Review Metrics](#review-metrics)). |
-| `--launchpad-credentials FILE` | Path to Launchpad credentials file. |
-
-The tool will:
-
-1. Fetch the merge proposal metadata and comments from Launchpad.
-2. Skip if a review has already been posted by this tool.
-3. Clone the target repository and merge the source branch.
-4. Generate a diff.
-5. Send the diff to the LLM for review.
-6. Post the review as a comment (unless `--dry-run` is set).
-
-**Example:**
-
-```sh
-maas-code-reviewer review-mp -g gemini-api-key --dry-run \
-  https://code.launchpad.net/~user/project/+git/repo/+merge/123
-```
-
-### `review-diff`
-
-Review a unified diff file and print the result to stdout. The diff can be
-read from a file or from stdin (pass `-` as the filename).
-
-```sh
-maas-code-reviewer review-diff -g KEY_FILE [--model MODEL] [--repo-dir DIR] [--json-output FILE] [--metrics FILE] DIFF_FILE
-```
-
-| Argument | Description |
-|---|---|
-| `DIFF_FILE` | Path to a unified diff file, or `-` to read from stdin. |
-| `-g`, `--gemini-api-key-file` | Path to file containing the Gemini API key. Falls back to `GEMINI_API_KEY` env var. |
-| `--model MODEL` | Gemini model to use (default: `gemini-3-flash-preview`). |
-| `--repo-dir DIR` | Path to the local git repository (default: current working directory). Used for `read_file` and `list_directory` tool calls, and to proactively include the repository's `AGENTS.md` (if present) in the review context. |
-| `--json-output FILE` | Write structured JSON review output to `FILE` instead of plain text to stdout. |
-| `--metrics FILE` | Write review metrics as JSON to `FILE` (see [Review Metrics](#review-metrics)). |
-
-When `--json-output` is provided, the LLM produces structured output with a
-general comment and inline comments keyed by file path and line number (see
-[JSON Review Format](#json-review-format) below).
-
-**Examples:**
-
-```sh
-# Review a diff file, print plain text to stdout
-maas-code-reviewer review-diff -g gemini-api-key changes.diff
-
-# Review from stdin
-git diff HEAD~1 | maas-code-reviewer review-diff -g gemini-api-key -
-
-# Produce structured JSON output
-maas-code-reviewer review-diff -g gemini-api-key --json-output review.json changes.diff
-```
-
 ### `fetch-pr`
 
 Fetch a pull request's review inputs into a directory.
@@ -392,48 +334,6 @@ pull request review: the general comment as the review body and every inline
 finding as a structured review comment. `--dry-run` prints the decorated
 review JSON instead and needs no token. An invalid candidate exits nonzero
 with nothing posted.
-
-### `review-pr`
-
-Review a GitHub pull request using Gemini and post the review via the GitHub
-API.
-
-```sh
-maas-code-reviewer review-pr -g KEY_FILE [--github-token TOKEN] [--model MODEL] [--repo-dir DIR] [--dry-run] [--metrics FILE] PR_URL
-```
-
-| Argument | Description |
-|---|---|
-| `PR_URL` | Full GitHub PR URL, e.g. `https://github.com/owner/repo/pull/42`. |
-| `-g`, `--gemini-api-key-file` | Path to file containing the Gemini API key. Falls back to `GEMINI_API_KEY` env var. |
-| `--github-token TOKEN` | GitHub personal access token. Falls back to `GITHUB_TOKEN` env var. |
-| `--model MODEL` | Gemini model to use (default: `gemini-3-flash-preview`). |
-| `--repo-dir DIR` | Path to a local checkout of the repository (default: current working directory). Used for `read_file` and `list_directory` tool calls, and to proactively include the repository's `AGENTS.md` (if present) in the review context. The caller is responsible for having the repo checked out already. |
-| `--dry-run` | Print the review JSON to stdout instead of posting it. |
-| `--metrics FILE` | Write review metrics as JSON to `FILE` (see [Review Metrics](#review-metrics)). |
-
-The tool will:
-
-1. Parse the PR URL to extract the owner, repository, and PR number.
-2. Fetch the diff and description from GitHub.
-3. Send the diff to the LLM for a structured review.
-4. Post the review as a GitHub pull request review (unless `--dry-run`).
-
-**Examples:**
-
-```sh
-# Review a PR and post the result
-maas-code-reviewer review-pr -g gemini-api-key \
-  https://github.com/canonical/maas/pull/42
-
-# Dry run — print the JSON review to stdout
-maas-code-reviewer review-pr -g gemini-api-key --dry-run \
-  https://github.com/canonical/maas/pull/42
-
-# Use a local checkout for extra context
-maas-code-reviewer review-pr -g gemini-api-key --repo-dir /path/to/maas \
-  https://github.com/canonical/maas/pull/42
-```
 
 ### `review`
 
@@ -535,10 +435,8 @@ metrics, and a collection failure never masks the review result.
 
 ## JSON Review Format
 
-When `review --json-output` or `review-diff --json-output` is used, or when
-`review-pr` posts a review, the reviewing engine produces structured output
-with this schema — omp over ACP for `review`, google-genai for the legacy
-commands:
+When `review --json-output` is used (and when `publish-mp`/`publish-pr` post
+the validated candidate), the review document has this schema:
 
 ```json
 {
@@ -562,9 +460,9 @@ commands:
 
 ## Review Metrics
 
-All four review commands (`review-mp`, `review-diff`, `review-pr`, `review`)
-accept an optional `--metrics FILE` flag. When provided, a JSON file is written after
-the review completes containing usage and context metrics:
+The `review` command accepts an optional `--metrics FILE` flag. When
+provided, a JSON file is written after the review completes containing usage
+and context metrics:
 
 ```json
 {
@@ -572,7 +470,6 @@ the review completes containing usage and context metrics:
   "tokens_thinking": 1234,
   "tokens_input": 5678,
   "tokens_output": 910,
-  "files_read": 3,
   "agents_md_read": true,
   "diff_lines": 42,
   "diff_size_bytes": 2048,
@@ -588,12 +485,11 @@ the review completes containing usage and context metrics:
 
 | Field | Description |
 |---|---|
-| `model_name` | The model identity for the review: the resolved omp model for `review` (`null` when the agent did not report one), the Gemini model for the legacy commands. |
+| `model_name` | The model identity the review ran with, or `null` when none was reported. |
 | `tokens_thinking` | Number of internal thinking tokens used by the model. |
 | `tokens_input` | Number of input (prompt) tokens. |
 | `tokens_output` | Number of output (completion) tokens. |
-| `files_read` | Number of files read via the `read_file` tool during the review (google-genai commands only; removed in step 16). |
-| `agents_md_read` | Whether the repository's `AGENTS.md` file was included in the review (fetched proactively, or read via the `read_file` tool) (google-genai commands only; removed in step 16). |
+| `agents_md_read` | Whether the repository's `AGENTS.md` was included in the review context as untrusted conventions. |
 | `diff_lines` | Number of lines in the original diff (before any truncation). |
 | `diff_size_bytes` | Size of the original diff in bytes (UTF-8 encoded). |
 | `agent_name` | Name of the agent harness that produced the review (`review` only). |
@@ -605,17 +501,17 @@ the review completes containing usage and context metrics:
 | `cost_currency` | Currency of the reported cost (`review` only). |
 
 The agent-path fields (`agent_name` through `cost_currency`) are populated by
-`review`; the legacy fields above them stay populated by the legacy commands
-(both groups are visible until step 16). On the agent path, `null` means
-*unavailable* — the agent did not report a value — never a fabricated zero.
+`review`. On the agent path, `null` means *unavailable* — the agent did not
+report a value — never a fabricated zero.
 
 The metrics file is written after the review completes. If the review is
-skipped (e.g. an MP was already reviewed), no metrics file is written.
+skipped (e.g. `fetch-mp` reported an already-reviewed proposal), no metrics
+file is written.
 
 **Example:**
 
 ```sh
-maas-code-reviewer review-diff -g gemini-api-key --metrics metrics.json changes.diff
+maas-code-reviewer review --repo-dir . --diff-file diff.patch --metrics metrics.json
 cat metrics.json
 ```
 
@@ -623,7 +519,7 @@ cat metrics.json
 
 | Variable | Required | Description |
 |---|---|---|
-| `GITHUB_TOKEN` | No | GitHub personal access token. Overridden by `--github-token`. Used by `review-pr`, `fetch-pr`, and `publish-pr`. |
+| `GITHUB_TOKEN` | No | GitHub personal access token. Overridden by `--github-token`. Used by `fetch-pr` and `publish-pr`. |
 
 ## Development
 
