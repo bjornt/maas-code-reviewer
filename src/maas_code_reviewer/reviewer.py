@@ -258,6 +258,28 @@ def review_diff(
     return f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{review_text}"
 
 
+def render_review_document(document: dict) -> str:
+    """Render a raw review document as human-readable text.
+
+    The general comment leads, followed by one ``<path>:<line>: <comment>``
+    section per inline finding, in the document's key order. The document is
+    the raw candidate: no review marker or preamble is added here, and
+    entries the review schema would reject (a non-dict ``inline_comments``
+    or a non-dict per-file value) are skipped rather than rendered, because
+    the candidate has not been validated at this point.
+    """
+    sections = [str(document.get("general_comment", ""))]
+    inline_comments = document.get("inline_comments", {})
+    if not isinstance(inline_comments, dict):
+        inline_comments = {}
+    for file_path, line_comments in inline_comments.items():
+        if not isinstance(line_comments, dict):
+            continue
+        for line, comment in line_comments.items():
+            sections.append(f"{file_path}:{line}: {comment}")
+    return "\n\n".join(sections)
+
+
 def _build_structured_prompt(diff: str, description: str | None) -> list[types.Part]:
     """Construct the user-turn prompt parts for structured JSON review output.
 

@@ -17,6 +17,7 @@ from maas_code_reviewer.cli import (
     handle_list_lp_mps,
     handle_publish_mp,
     handle_publish_pr,
+    handle_review,
     handle_review_diff,
     handle_review_mp,
     handle_review_pr,
@@ -3162,3 +3163,757 @@ class TestMainReviewPr:
 
         reviews = github_client.get_posted_reviews("owner", "repo", 42)
         assert len(reviews) == 1
+
+
+_REVIEW_AMBIGUOUS_DIFF = (
+    "diff --git before/common/src/foo.py after/common/src/foo.py\n"
+    "--- before/common/src/foo.py\n"
+    "+++ after/common/src/foo.py\n"
+    "@@ -1,2 +1,2 @@\n"
+    " context\n"
+    "-old\n"
+    "+new\n"
+)
+
+
+class TestBuildParserReview:
+    def test_review_defaults(self, tmp_path: Path) -> None:
+        key_file = tmp_path / "key"
+        key_file.write_text("test-key")
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["review", "-g", str(key_file), "--diff-file", "patch.diff"]
+        )
+        assert args.command == "review"
+        assert args.diff_file == "patch.diff"
+        assert args.description_file is None
+        assert args.diff_prefix is None
+        assert args.repo_dir is None
+        assert args.json_output is None
+        assert args.metrics is None
+        assert args.model == "gemini-3-flash-preview"
+        assert args.gemini_api_key_file == str(key_file)
+
+    def test_review_gemini_api_key_file_defaults_to_none(self) -> None:
+        parser = _build_parser()
+        args = parser.parse_args(["review", "--diff-file", "patch.diff"])
+        assert args.gemini_api_key_file is None
+
+    def test_review_requires_diff_file(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(SystemExit) as exc_info:
+            _build_parser().parse_args(["review"])
+
+        assert exc_info.value.code == 2
+        assert "--diff-file" in capsys.readouterr().err
+
+    def test_review_diff_file_accepts_dash_for_stdin(self) -> None:
+        parser = _build_parser()
+        args = parser.parse_args(["review", "--diff-file", "-"])
+        assert args.diff_file == "-"
+
+    def test_review_parses_description_file(self, tmp_path: Path) -> None:
+        desc_file = tmp_path / "description.md"
+        desc_file.write_text("Adds the widget API.")
+        parser = _build_parser()
+        args = parser.parse_args(
+            [
+                "review",
+                "--diff-file",
+                "patch.diff",
+                "--description-file",
+                str(desc_file),
+            ]
+        )
+        assert args.description_file == str(desc_file)
+
+    @pytest.mark.parametrize("prefix", ["w/", ""])
+    def test_review_parses_diff_prefix(self, prefix: str) -> None:
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["review", "--diff-file", "patch.diff", "--diff-prefix", prefix]
+        )
+        assert args.diff_prefix == prefix
+
+    def test_review_parses_repo_dir(self, tmp_path: Path) -> None:
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["review", "--diff-file", "patch.diff", "--repo-dir", str(tmp_path)]
+        )
+        assert args.repo_dir == str(tmp_path)
+
+    def test_review_parses_json_output(self, tmp_path: Path) -> None:
+        output_file = tmp_path / "review.json"
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["review", "--diff-file", "patch.diff", "--json-output", str(output_file)]
+        )
+        assert args.json_output == str(output_file)
+
+    def test_review_parses_metrics(self) -> None:
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["review", "--diff-file", "patch.diff", "--metrics", "/tmp/m.json"]
+        )
+        assert args.metrics == "/tmp/m.json"
+
+    def test_review_parses_model(self) -> None:
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["review", "--diff-file", "patch.diff", "--model", "gemini-2.5-pro"]
+        )
+        assert args.model == "gemini-2.5-pro"
+
+
+class TestHandleReview:
+    def test_writes_raw_json_document(self, tmp_path: Path) -> None:
+        """--json-output writes the raw, undecorated document."""
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient([ScriptedResponse(text=_VALID_STRUCTURED_RESPONSE)])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+            handle_review(args)
+
+        assert json.loads(output_file.read_text()) == {
+            "general_comment": "Looks good.",
+            "inline_comments": {"src/foo.py": {"2": "Good addition."}},
+        }
+        assert REVIEW_MARKER not in output_file.read_text()
+
+    def test_json_output_prints_nothing_to_stdout(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """When --json-output is given, nothing is printed to stdout."""
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_STRUCTURED_RESPONSE)])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+            handle_review(args)
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_text_mode_renders_document_to_stdout(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Without --json-output the rendered document is printed, undecorated."""
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        llm = FakeLLMClient([ScriptedResponse(text=_VALID_STRUCTURED_RESPONSE)])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                ]
+            )
+            handle_review(args)
+
+        captured = capsys.readouterr()
+        assert captured.out == "Looks good.\n\nsrc/foo.py:2: Good addition.\n"
+        assert REVIEW_MARKER not in captured.out
+        assert not (tmp_path / "review.json").exists()
+
+    def test_reads_diff_from_stdin(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--diff-file - reads the diff from stdin."""
+        import io
+
+        monkeypatch.setattr("sys.stdin", io.StringIO(_STRUCTURED_DIFF))
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_STRUCTURED_RESPONSE)])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    "-",
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+            handle_review(args)
+
+        assert json.loads(output_file.read_text()) == {
+            "general_comment": "No issues.",
+            "inline_comments": {},
+        }
+
+    def test_description_file_content_reaches_prompt(self, tmp_path: Path) -> None:
+        """The --description-file content lands in the LLM prompt."""
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        description_file = tmp_path / "description.md"
+        description_file.write_text("Adds the widget API.")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_STRUCTURED_RESPONSE)])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                    "--description-file",
+                    str(description_file),
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+            handle_review(args)
+
+        prompt = _prompt_text(llm._client.received_prompts[0])
+        assert "## Description" in prompt
+        assert "Adds the widget API." in prompt
+
+    def test_no_description_file_passes_none_to_prompt(self, tmp_path: Path) -> None:
+        """Without --description-file the prompt has no Description section."""
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_STRUCTURED_RESPONSE)])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+            handle_review(args)
+
+        prompt = _prompt_text(llm._client.received_prompts[0])
+        assert "## Description" not in prompt
+
+    def test_diff_prefix_resolves_ambiguous_diff(self, tmp_path: Path) -> None:
+        """--diff-prefix threads into the validate_review tool and resolves paths."""
+        repo_dir = tmp_path / "checkout"
+        (repo_dir / "src").mkdir(parents=True)
+        (repo_dir / "src" / "foo.py").write_text("code\n")
+        (repo_dir / "common" / "src").mkdir(parents=True)
+        (repo_dir / "common" / "src" / "foo.py").write_text("code\n")
+
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_REVIEW_AMBIGUOUS_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient(
+            [
+                ScriptedResponse(
+                    text=_VALID_STRUCTURED_RESPONSE,
+                    tool_calls=[
+                        ToolCall(
+                            name="validate_review",
+                            args={"json_text": _VALID_STRUCTURED_RESPONSE},
+                        )
+                    ],
+                )
+            ]
+        )
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(repo_dir),
+                    "--diff-file",
+                    str(diff_file),
+                    "--diff-prefix",
+                    "after/common/",
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+            handle_review(args)
+
+        assert json.loads(output_file.read_text()) == {
+            "general_comment": "Looks good.",
+            "inline_comments": {"src/foo.py": {"2": "Good addition."}},
+        }
+
+    def test_ambiguous_diff_fails_with_clean_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An unresolvable diff path raises InvalidReviewError naming --diff-prefix."""
+        repo_dir = tmp_path / "checkout"
+        (repo_dir / "src").mkdir(parents=True)
+        (repo_dir / "src" / "foo.py").write_text("code\n")
+        (repo_dir / "common" / "src").mkdir(parents=True)
+        (repo_dir / "common" / "src" / "foo.py").write_text("code\n")
+
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_REVIEW_AMBIGUOUS_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient(
+            [
+                ScriptedResponse(
+                    text=_VALID_STRUCTURED_RESPONSE,
+                    tool_calls=[
+                        ToolCall(
+                            name="validate_review",
+                            args={"json_text": _VALID_STRUCTURED_RESPONSE},
+                        )
+                    ],
+                )
+            ]
+        )
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(repo_dir),
+                    "--diff-file",
+                    str(diff_file),
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+            with pytest.raises(InvalidReviewError) as exc_info:
+                handle_review(args)
+
+        assert "--diff-prefix" in str(exc_info.value)
+        assert not output_file.exists()
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_diff_prefix_mismatch_fails_cleanly(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A diff path not matching --diff-prefix raises InvalidReviewError."""
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient(
+            [
+                ScriptedResponse(
+                    text=_VALID_STRUCTURED_RESPONSE,
+                    tool_calls=[
+                        ToolCall(
+                            name="validate_review",
+                            args={"json_text": _VALID_STRUCTURED_RESPONSE},
+                        )
+                    ],
+                )
+            ]
+        )
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                    "--diff-prefix",
+                    "wrong/",
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+            with pytest.raises(InvalidReviewError) as exc_info:
+                handle_review(args)
+
+        assert "--diff-prefix" in str(exc_info.value)
+        assert not output_file.exists()
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_empty_diff_writes_empty_document(self, tmp_path: Path) -> None:
+        """An empty diff produces the standard empty document with no LLM call."""
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text("")
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient([ScriptedResponse(text=_VALID_STRUCTURED_RESPONSE)])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+            handle_review(args)
+
+        assert json.loads(output_file.read_text()) == {
+            "general_comment": EMPTY_DIFF_GENERAL_COMMENT,
+            "inline_comments": {},
+        }
+        assert llm._client.received_prompts == []
+
+    def test_empty_diff_text_mode(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An empty diff renders the standard empty document, undecorated."""
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text("")
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        llm = FakeLLMClient([ScriptedResponse(text=_VALID_STRUCTURED_RESPONSE)])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                ]
+            )
+            handle_review(args)
+
+        captured = capsys.readouterr()
+        assert EMPTY_DIFF_GENERAL_COMMENT in captured.out
+        assert REVIEW_MARKER not in captured.out
+
+    def test_missing_gemini_api_key_exits_with_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """When no Gemini API key is available, the command exits with an error."""
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+
+        args = _build_parser().parse_args(
+            ["review", "--repo-dir", str(tmp_path), "--diff-file", str(diff_file)]
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            handle_review(args)
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "GEMINI_API_KEY" in captured.err
+
+
+class TestHandleReviewMetrics:
+    def test_no_metrics_flag_no_file_written(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        llm = FakeLLMClient([ScriptedResponse(text=_VALID_STRUCTURED_RESPONSE)])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                ]
+            )
+            handle_review(args)
+
+        # No metrics file should exist
+        assert not (tmp_path / "metrics.json").exists()
+
+    def test_metrics_written_with_correct_fields(self, tmp_path: Path) -> None:
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+        metrics_file = tmp_path / "metrics.json"
+
+        llm = FakeLLMClient(
+            [
+                ScriptedResponse(
+                    text=_VALID_STRUCTURED_RESPONSE,
+                    tokens_input=10,
+                    tokens_output=20,
+                    tokens_thinking=30,
+                )
+            ]
+        )
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                    "--metrics",
+                    str(metrics_file),
+                ]
+            )
+            handle_review(args)
+
+        assert metrics_file.exists()
+        data = json.loads(metrics_file.read_text())
+        assert data["model_name"] == "gemini-3-flash-preview"
+        assert data["tokens_input"] == 10
+        assert data["tokens_output"] == 20
+        assert data["tokens_thinking"] == 30
+        assert data["diff_lines"] == _STRUCTURED_DIFF.count("\n")
+        assert data["diff_size_bytes"] == len(_STRUCTURED_DIFF.encode("utf-8"))
+        assert data["files_read"] == 0
+        assert data["agents_md_read"] is False
+
+    def test_metrics_tracks_files_read(self, tmp_path: Path) -> None:
+        repo_dir = tmp_path / "myrepo"
+        repo_dir.mkdir()
+        (repo_dir / "AGENTS.md").write_text("# Rules\nBe nice.\n")
+
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+        metrics_file = tmp_path / "metrics.json"
+
+        llm = FakeLLMClient(
+            [
+                ScriptedResponse(
+                    text=_VALID_STRUCTURED_RESPONSE,
+                    tool_calls=[
+                        ToolCall(name="read_file", args={"path": "AGENTS.md"})
+                    ],
+                )
+            ]
+        )
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(repo_dir),
+                    "--diff-file",
+                    str(diff_file),
+                    "--metrics",
+                    str(metrics_file),
+                ]
+            )
+            handle_review(args)
+
+        data = json.loads(metrics_file.read_text())
+        assert data["files_read"] == 1
+        assert data["agents_md_read"] is True
+
+
+class TestMainReview:
+    def test_review_command_delegates_to_handle_review(self, tmp_path: Path) -> None:
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient([ScriptedResponse(text=_VALID_STRUCTURED_RESPONSE)])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            main(
+                [
+                    "review",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+
+        assert output_file.exists()
+        assert json.loads(output_file.read_text()) == {
+            "general_comment": "Looks good.",
+            "inline_comments": {"src/foo.py": {"2": "Good addition."}},
+        }
+
+    def test_invalid_diff_exits_with_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An unresolvable diff path exits 1 with an error naming --diff-prefix."""
+        repo_dir = tmp_path / "checkout"
+        (repo_dir / "src").mkdir(parents=True)
+        (repo_dir / "src" / "foo.py").write_text("code\n")
+        (repo_dir / "common" / "src").mkdir(parents=True)
+        (repo_dir / "common" / "src" / "foo.py").write_text("code\n")
+
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_REVIEW_AMBIGUOUS_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        llm = FakeLLMClient(
+            [
+                ScriptedResponse(
+                    text=_VALID_STRUCTURED_RESPONSE,
+                    tool_calls=[
+                        ToolCall(
+                            name="validate_review",
+                            args={"json_text": _VALID_STRUCTURED_RESPONSE},
+                        )
+                    ],
+                )
+            ]
+        )
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            with pytest.raises(SystemExit) as exc_info:
+                main(
+                    [
+                        "review",
+                        "-g",
+                        str(api_key_file),
+                        "--repo-dir",
+                        str(repo_dir),
+                        "--diff-file",
+                        str(diff_file),
+                        "--json-output",
+                        str(output_file),
+                    ]
+                )
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "Error:" in captured.err
+        assert "--diff-prefix" in captured.err
+        assert not output_file.exists()
