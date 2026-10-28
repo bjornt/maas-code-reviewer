@@ -348,7 +348,7 @@ over ACP using the
 fallback.
 
 ```sh
-maas-code-reviewer review --diff-file DIFF_FILE [--description-file FILE] [--diff-prefix PREFIX] [--repo-dir DIR] [--model MODEL] [--runtime-config FILE] [--review-timeout SECONDS] [--json-output FILE] [--metrics FILE] [--otel-output DIR]
+maas-code-reviewer review --diff-file DIFF_FILE [--description-file FILE] [--diff-prefix PREFIX] [--repo-dir DIR] [--model MODEL] [--runtime-config FILE] [--review-timeout SECONDS] [--repair-attempts N] [--json-output FILE] [--metrics FILE] [--otel-output DIR]
 ```
 
 | Argument | Description |
@@ -359,10 +359,21 @@ maas-code-reviewer review --diff-file DIFF_FILE [--description-file FILE] [--dif
 | `--repo-dir DIR` | Path to the local git repository (default: current working directory). The agent inspects this tree with its native read/grep/glob tools, AGENTS.md is included as untrusted conventions, and validation resolves diff paths against this checkout. |
 | `--model MODEL` | Exact model identity to review with (default: the runtime profile). Must be allowed by the runtime profile's allowlist. |
 | `--runtime-config FILE` | Explicit trusted TOML runtime configuration overriding individual built-in review runtime defaults. |
-| `--review-timeout SECONDS` | Finite positive deadline in seconds for startup and the agent turn (default: the runtime profile). |
+| `--review-timeout SECONDS` | Finite positive deadline in seconds for startup and the agent turn of each attempt, including repair rounds (default: the runtime profile). |
+| `--repair-attempts N` | Bounded repair rounds for an invalid review document (default: 1; 0 disables repair). When the terminal JSON fails host validation, the agent is re-run with the rejected output and the full failure list, both marked as data, not instructions; usage is summed across attempts. |
 | `--json-output FILE` | Write the raw, undecorated JSON review document to `FILE` instead of printing human-readable text to stdout (see [JSON Review Format](#json-review-format)). `publish-mp`/`publish-pr` validate this candidate and add the review marker/preamble when posting. |
 | `--metrics FILE` | Write review metrics as JSON to `FILE` (see [Review Metrics](#review-metrics)). |
 | `--otel-output DIR` | Collect the agent's OpenTelemetry diagnostics as OTLP JSONL files (`traces.jsonl`, `metrics.jsonl`) in DIR. |
+
+When the agent's terminal document fails host validation, `review`
+re-runs the agent up to `--repair-attempts` times with the rejected
+output and the full validation failure list, both marked as data, not
+instructions. Token usage and cost are summed across attempts, and a
+field stays `null` when any attempt did not report it. Exhausting the
+rounds fails the review with the validation failure — nothing
+unvalidated is written or published. Runner failures (transport
+errors, timeouts, cancellations, refusals) are never repaired, and
+every attempt receives the full `--review-timeout` deadline.
 
 `review` always produces the structured document — there is no free-text
 mode. With `--json-output` the document is written raw: the review marker and

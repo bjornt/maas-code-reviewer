@@ -129,6 +129,7 @@ def handle_review(args: argparse.Namespace) -> None:
             metrics=metrics,
             model=args.model,
             diff_prefix=args.diff_prefix,
+            repair_attempts=args.repair_attempts,
         )
     except ValueError as exc:
         raise InvalidReviewError([str(exc)]) from exc
@@ -198,6 +199,21 @@ def _positive_timeout(value: str) -> float:
             "review timeout must be a finite positive number of seconds"
         )
     return seconds
+
+
+def _repair_attempt_count(value: str) -> int:
+    """Parse a non-negative --repair-attempts value (argparse type)."""
+    try:
+        count = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "repair attempts must be a non-negative integer"
+        ) from None
+    if count < 0:
+        raise argparse.ArgumentTypeError(
+            "repair attempts must be a non-negative integer"
+        )
+    return count
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -383,8 +399,21 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help=(
             "Finite positive deadline in seconds for startup and the "
-            "agent turn (default: the runtime profile; cleanup has a "
-            "separate bounded grace period)."
+            "agent turn of each attempt, including repair rounds "
+            "(default: the runtime profile; cleanup has a separate "
+            "bounded grace period)."
+        ),
+    )
+    review_pipeline_parser.add_argument(
+        "--repair-attempts",
+        type=_repair_attempt_count,
+        default=1,
+        metavar="N",
+        help=(
+            "Repair rounds for an invalid review document: when the "
+            "agent's terminal JSON fails host validation, re-run it up to "
+            "N more times with the rejected output and the failure list "
+            "as data (default: 1; 0 disables repair)."
         ),
     )
     review_pipeline_parser.add_argument(

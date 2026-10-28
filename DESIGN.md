@@ -438,7 +438,9 @@ runs first without cloning, and an empty diff produces known-zero metrics
 without a runner.
 
 Prefer fresh per-review environments over pooling: one agent process, one
-fresh session per review. Telemetry collection failures never mask a
+fresh session per review attempt. The bounded repair round (PLAN.md step 17)
+starts a fresh session for each repair — it never resumes or appends to a
+previous turn. Telemetry collection failures never mask a
 review failure, and cleanup never masks the primary error.
 
 ## Metrics
@@ -530,6 +532,17 @@ record the agent's reported identity and usage with `None`-for-unavailable
 semantics; PLAN.md step 16 then removed the legacy commands and
 the google-genai engine, leaving fetch → review → publish as the only
 review path.
+
+Step 17 has landed the bounded repair round: a terminal document
+that fails host validation is re-run up to `--repair-attempts` times
+(default 1; 0 is single-shot) on a fresh request carrying the
+original task, the rejected output, and the full failure list marked
+as data, with usage summed across attempts and exhaustion failing
+the review. This deliberately supersedes the spike design's original
+no-retry stance ("do not add automatic repair/review retries"); the
+boundary holds — runner failures are never repaired, non-completed
+turns fail immediately, each attempt is a fresh session, and
+retry/resume semantics beyond this single round remain out of scope.
 
 Evidence from the prior spike branch is historical and uncommitted; none
 of it is inherited as proof. Real-environment acceptance is re-collected
