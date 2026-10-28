@@ -847,9 +847,7 @@ class TestReviewDiffStructured:
             read_file=_make_read_file(),
             list_directory=_make_list_directory(),
         )
-        assert result["general_comment"] == (
-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
-        )
+        assert result["general_comment"] == "Looks good."
 
     def test_returns_inline_comments(self) -> None:
         llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
@@ -932,9 +930,7 @@ class TestReviewDiffStructured:
             read_file=_make_read_file(),
             list_directory=_make_list_directory(),
         )
-        assert result["general_comment"] == (
-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
-        )
+        assert result["general_comment"] == "Looks good."
 
     def test_diff_truncated_when_exceeding_max(self) -> None:
         big_diff = "x" * 200
@@ -977,9 +973,7 @@ class TestReviewDiffStructured:
             read_file=_make_read_file(),
             list_directory=_make_list_directory(),
         )
-        assert result["general_comment"] == (
-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
-        )
+        assert result["general_comment"] == "Looks good."
 
     def test_tool_threads_listing_from_arguments(self) -> None:
         # The validate_review closure must forward repository_files: without
@@ -1051,9 +1045,18 @@ class TestReviewDiffStructured:
             diff_prefix="after/common/",
             repository_files=frozenset({"src/file.py", "file.py"}),
         )
-        assert result["general_comment"] == (
-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
+        assert result["general_comment"] == "Looks good."
+
+    def test_missing_general_comment_defaults_to_empty(self) -> None:
+        llm = FakeLLMClient([ScriptedResponse(text='{"inline_comments": {}}')])
+        result = review_diff_structured(
+            llm,
+            diff=_SIMPLE_DIFF,
+            description=None,
+            read_file=_make_read_file(),
+            list_directory=_make_list_directory(),
         )
+        assert result["general_comment"] == ""
 
     def test_raises_on_invalid_json_response(self) -> None:
         llm = FakeLLMClient([ScriptedResponse(text="this is not json at all")])
@@ -1097,9 +1100,7 @@ class TestReviewDiffStructured:
             read_file=rf,
             list_directory=_make_list_directory(),
         )
-        assert result["general_comment"] == (
-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
-        )
+        assert result["general_comment"] == "Looks good."
 
     def test_google_search_tool_present(self) -> None:
         llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
@@ -1137,9 +1138,7 @@ class TestReviewDiffStructured:
             read_file=_make_read_file(),
             list_directory=_make_list_directory(),
         )
-        assert result["general_comment"] == (
-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
-        )
+        assert result["general_comment"] == "Looks good."
 
     def test_raises_clear_error_when_llm_never_returns_text(self) -> None:
         # When the model never produces text (even after resume attempts),

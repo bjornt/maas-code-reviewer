@@ -122,7 +122,9 @@ def review_diff_structured(
     Returns
     -------
     dict
-        The parsed JSON review object.
+        The parsed JSON review object.  The document is raw: the review
+        marker/preamble are added at publish time (publish-mp/publish-pr),
+        not here.
     """
     if _is_empty_diff(diff):
         _populate_metrics_without_llm(metrics, llm.model, diff)
@@ -160,9 +162,7 @@ def review_diff_structured(
             "budget)."
         )
     result = json.loads(cleaned)
-    result["general_comment"] = (
-        f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{result.get('general_comment', '')}"
-    )
+    result["general_comment"] = result.get("general_comment", "")
     return result
 
 
