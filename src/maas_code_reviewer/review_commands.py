@@ -15,6 +15,7 @@ from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS, GeminiClient
 from maas_code_reviewer.metrics import ReviewMetrics
 from maas_code_reviewer.models import Comment, MergeProposal
 from maas_code_reviewer.repo_tools import RepoTools
+from maas_code_reviewer.review_schema import repository_files
 from maas_code_reviewer.reviewer import (
     REVIEW_MARKER,
     review_diff,
@@ -158,6 +159,7 @@ def review_pull_request(
         max_diff_chars=max_diff_chars,
         metrics=metrics,
         max_tool_calls=max_tool_calls,
+        repository_files=repository_files(repo_dir),
     )
     if metrics is not None:
         metrics.files_read = tools.files_read_count

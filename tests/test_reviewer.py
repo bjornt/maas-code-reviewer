@@ -708,6 +708,61 @@ class TestValidateReview:
         result = _validate_review(review, _SIMPLE_DIFF)
         assert "nonexistent.py" in result
 
+    def test_threads_path_prefix_into_validation(self) -> None:
+        diff = "--- i/src/foo.py\n+++ w/src/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+        review = json.dumps(
+            {
+                "general_comment": "ok",
+                "inline_comments": {"src/foo.py": {"1": "some comment"}},
+            }
+        )
+        assert _validate_review(review, diff, path_prefix="w/") == ""
+
+    def test_threads_repository_files_into_validation(self) -> None:
+        diff = "--- i/src/foo.py\n+++ w/src/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+        review = json.dumps(
+            {
+                "general_comment": "ok",
+                "inline_comments": {"src/foo.py": {"1": "some comment"}},
+            }
+        )
+        assert (
+            _validate_review(
+                review, diff, repository_files=frozenset({"src/foo.py"})
+            )
+            == ""
+        )
+        # The parser resolved the diff coordinates; a review keyed with the
+        # prefixed diff path does not validate.
+        prefixed_review = json.dumps(
+            {
+                "general_comment": "ok",
+                "inline_comments": {"w/src/foo.py": {"1": "some comment"}},
+            }
+        )
+        assert _validate_review(
+            prefixed_review, diff, repository_files=frozenset({"src/foo.py"})
+        )
+
+    def test_ambiguous_diff_raises_value_error_from_the_tool(self) -> None:
+        diff = (
+            "--- before/common/src/file.py\n"
+            "+++ after/common/src/file.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        review = json.dumps(
+            {
+                "general_comment": "ok",
+                "inline_comments": {"src/file.py": {"1": "some comment"}},
+            }
+        )
+        with pytest.raises(ValueError, match="Ambiguous"):
+            _validate_review(
+                review, diff, repository_files=frozenset({"src/file.py", "file.py"})
+            )
+
 
 class TestExtractJson:
     def test_plain_json_unchanged(self) -> None:
@@ -921,6 +976,80 @@ class TestReviewDiffStructured:
             description=None,
             read_file=_make_read_file(),
             list_directory=_make_list_directory(),
+        )
+        assert result["general_comment"] == (
+            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
+        )
+
+    def test_tool_threads_listing_from_arguments(self) -> None:
+        # The validate_review closure must forward repository_files: without
+        # the threading, the ambiguous diff raises no ambiguity error.
+        diff = (
+            "--- before/common/src/file.py\n"
+            "+++ after/common/src/file.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        tool_input = json.dumps({"general_comment": "ok", "inline_comments": {}})
+        llm = FakeLLMClient(
+            [
+                ScriptedResponse(
+                    text=tool_input,
+                    tool_calls=[
+                        ToolCall(
+                            name="validate_review", args={"json_text": tool_input}
+                        )
+                    ],
+                )
+            ]
+        )
+        with pytest.raises(ValueError):
+            review_diff_structured(
+                llm,
+                diff=diff,
+                description=None,
+                read_file=_make_read_file(),
+                list_directory=_make_list_directory(),
+                repository_files=frozenset({"src/file.py", "file.py"}),
+            )
+
+    def test_tool_threads_diff_prefix_from_arguments(self) -> None:
+        # Together with the listing test above this pins both threading
+        # parameters through the validate_review closure.
+        diff = (
+            "--- before/common/src/file.py\n"
+            "+++ after/common/src/file.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        document = json.dumps(
+            {
+                "general_comment": "Looks good.",
+                "inline_comments": {"src/file.py": {"1": "some comment"}},
+            }
+        )
+        llm = FakeLLMClient(
+            [
+                ScriptedResponse(
+                    text=document,
+                    tool_calls=[
+                        ToolCall(
+                            name="validate_review", args={"json_text": document}
+                        )
+                    ],
+                )
+            ]
+        )
+        result = review_diff_structured(
+            llm,
+            diff=diff,
+            description=None,
+            read_file=_make_read_file(),
+            list_directory=_make_list_directory(),
+            diff_prefix="after/common/",
+            repository_files=frozenset({"src/file.py", "file.py"}),
         )
         assert result["general_comment"] == (
             f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."

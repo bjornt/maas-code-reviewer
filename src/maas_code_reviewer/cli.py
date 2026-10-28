@@ -21,6 +21,7 @@ from maas_code_reviewer.review_commands import (
     review_merge_proposal,
     review_pull_request,
 )
+from maas_code_reviewer.review_schema import repository_files
 from maas_code_reviewer.reviewer import (
     NoReviewText,
     review_diff,
@@ -102,6 +103,7 @@ def handle_review_diff(args: argparse.Namespace) -> None:
             max_diff_chars=args.max_diff_chars,
             metrics=metrics,
             max_tool_calls=args.max_tool_calls,
+            repository_files=repository_files(repo_dir),
         )
         Path(args.json_output).write_text(json.dumps(result_dict, indent=2))
     else:
