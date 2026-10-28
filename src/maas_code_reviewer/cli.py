@@ -5,9 +5,6 @@ import argparse
 import json
 import os
 import sys
-import tempfile
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
 
@@ -16,118 +13,26 @@ from maas_code_reviewer.github_client import GitHubClient, parse_pr_url
 from maas_code_reviewer.launchpad_client import LaunchpadClient
 from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS, GeminiClient
 from maas_code_reviewer.metrics import ReviewMetrics, write_metrics
-from maas_code_reviewer.models import Comment, MergeProposal
-from maas_code_reviewer.repo_tools import RepoTools
+from maas_code_reviewer.review_commands import (
+    format_merge_proposals,
+    list_merge_proposals,
+    post_pull_request_review,
+    read_agents_context,
+    review_merge_proposal,
+    review_pull_request,
+)
 from maas_code_reviewer.reviewer import (
-    REVIEW_MARKER,
     NoReviewText,
     review_diff,
     review_diff_structured,
 )
 
-_LP_GIT_BASE = "https://git.launchpad.net/"
 _MAX_TOOL_CALLS_HELP = (
     "Maximum number of automatic tool calls the LLM may make during a "
     "review (file reads, directory listings, searches). When the limit is "
     "reached the reviewer resumes the chat to elicit a text answer. "
     f"(default: {DEFAULT_MAX_TOOL_CALLS})."
 )
-
-
-@dataclass(frozen=True)
-class MergeProposalSummary:
-    url: str
-    status: str
-    last_reviewed: datetime | None
-
-
-def list_merge_proposals(
-    client: LaunchpadClient, project: str, status: str
-) -> list[MergeProposalSummary]:
-    """Fetch merge proposals and annotate each with its last review timestamp."""
-    proposals = client.get_merge_proposals(project, status)
-    bot_username = client.get_bot_username()
-    summaries = []
-    for mp in proposals:
-        comments = client.get_comments(mp)
-        last_reviewed = _find_last_review_date(comments, bot_username)
-        summaries.append(
-            MergeProposalSummary(
-                url=mp.url,
-                status=mp.status,
-                last_reviewed=last_reviewed,
-            )
-        )
-    return summaries
-
-
-def has_existing_review(client: LaunchpadClient, mp: MergeProposal) -> bool:
-    """Return True if the bot has already posted a review on this MP."""
-    comments = client.get_comments(mp)
-    bot_username = client.get_bot_username()
-    return _find_last_review_date(comments, bot_username) is not None
-
-
-def review_merge_proposal(
-    lp: LaunchpadClient,
-    git: GitClient,
-    llm: GeminiClient,
-    mp_url: str,
-    max_diff_chars: int = 200_000,
-    metrics: ReviewMetrics | None = None,
-    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
-) -> str | None:
-    """Review a single merge proposal end to end.
-
-    Returns the review comment body, or ``None`` if the MP was already
-    reviewed.  The caller is responsible for posting or printing the result.
-    """
-    mp = lp.get_merge_proposal(mp_url)
-
-    if has_existing_review(lp, mp):
-        return None
-
-    target_branch = _ref_to_branch(mp.target_git_path)
-    source_branch = _ref_to_branch(mp.source_git_path)
-    target_url = _lp_repo_url(mp.target_git_repository)
-    source_url = _lp_repo_url(mp.source_git_repository)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo_dir = Path(tmpdir) / "repo"
-        git.clone(target_url, repo_dir, target_branch)
-        git.merge_into(repo_dir, source_url, source_branch)
-
-        diff = git.diff(repo_dir, "ORIG_HEAD", "HEAD")
-
-        tools = RepoTools(repo_dir)
-        agents_md = tools.read_agents_md()
-        description = mp.description or mp.commit_message
-        review_comment = review_diff(
-            llm,
-            diff=diff,
-            description=description,
-            read_file=tools.read_file,
-            list_directory=tools.list_directory,
-            agents_md=agents_md,
-            max_diff_chars=max_diff_chars,
-            metrics=metrics,
-            max_tool_calls=max_tool_calls,
-        )
-
-        if metrics is not None:
-            metrics.files_read = tools.files_read_count
-            metrics.agents_md_read = tools.agents_md_read
-
-    return review_comment
-
-
-def format_merge_proposals(summaries: list[MergeProposalSummary]) -> str:
-    """Format summaries as human-readable text, one line per proposal."""
-    lines = []
-    for s in summaries:
-        reviewed = s.last_reviewed.isoformat() if s.last_reviewed else "never"
-        lines.append(f"{s.url} {s.status} {reviewed}")
-    return "\n".join(lines)
 
 
 def handle_list_lp_mps(args: argparse.Namespace) -> None:
@@ -183,8 +88,7 @@ def handle_review_diff(args: argparse.Namespace) -> None:
 
     llm_client = GeminiClient(api_key=api_key, model=args.model)
 
-    tools = RepoTools(repo_dir)
-    agents_md = tools.read_agents_md()
+    tools, agents_md = read_agents_context(repo_dir)
     metrics = ReviewMetrics()
 
     if args.json_output:
@@ -238,30 +142,20 @@ def handle_review_pr(args: argparse.Namespace) -> None:
         _exit_missing_gemini_api_key()
 
     github_client = GitHubClient(token)
-    diff = github_client.get_pr_diff(owner, repo, pr_number)
-    description = github_client.get_pr_description(owner, repo, pr_number)
-
     repo_dir = Path(args.repo_dir) if args.repo_dir else Path.cwd()
-    tools = RepoTools(repo_dir)
-    agents_md = tools.read_agents_md()
-
     llm_client = GeminiClient(api_key=api_key, model=args.model)
-
     metrics = ReviewMetrics()
-    result_dict = review_diff_structured(
+    result_dict = review_pull_request(
+        github_client,
         llm_client,
-        diff=diff,
-        description=description,
-        read_file=tools.read_file,
-        list_directory=tools.list_directory,
-        agents_md=agents_md,
+        owner,
+        repo,
+        pr_number,
+        repo_dir,
         max_diff_chars=args.max_diff_chars,
         metrics=metrics,
         max_tool_calls=args.max_tool_calls,
     )
-
-    metrics.files_read = tools.files_read_count
-    metrics.agents_md_read = tools.agents_md_read
     if args.metrics is not None:
         write_metrics(metrics, Path(args.metrics))
 
@@ -269,18 +163,7 @@ def handle_review_pr(args: argparse.Namespace) -> None:
         print(json.dumps(result_dict, indent=2))
         return
 
-    general_comment = result_dict.get("general_comment", "")
-    inline_comments = result_dict.get("inline_comments", {})
-
-    comments = [
-        {"path": file_path, "line": int(line_str), "body": comment_body}
-        for file_path, line_map in inline_comments.items()
-        for line_str, comment_body in line_map.items()
-    ]
-
-    github_client.post_review(
-        owner, repo, pr_number, body=general_comment, comments=comments
-    )
+    post_pull_request_review(github_client, owner, repo, pr_number, result_dict)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -325,44 +208,6 @@ def _exit_missing_gemini_api_key() -> NoReturn:
         file=sys.stderr,
     )
     sys.exit(1)
-
-
-def _lp_repo_url(unique_name: str) -> str:
-    """Convert a Launchpad repo unique name to a git clone URL.
-
-    If the provided name already looks like an absolute path or URL
-    (leading '/', 'file://', 'http://', or 'https://'), return it unchanged.
-    """
-    if (
-        unique_name.startswith("/")
-        or unique_name.startswith("file://")
-        or unique_name.startswith("http://")
-        or unique_name.startswith("https://")
-    ):
-        return unique_name
-    return _LP_GIT_BASE + unique_name
-
-
-def _find_last_review_date(
-    comments: list[Comment], bot_username: str
-) -> datetime | None:
-    """Find the timestamp of the most recent review comment by the bot."""
-    review_dates = [
-        comment.date
-        for comment in comments
-        if comment.author == bot_username and comment.body.startswith(REVIEW_MARKER)
-    ]
-    if not review_dates:
-        return None
-    return max(review_dates)
-
-
-def _ref_to_branch(git_path: str) -> str:
-    """Convert a refs/heads/branch-name path to just the branch name."""
-    prefix = "refs/heads/"
-    if git_path.startswith(prefix):
-        return git_path[len(prefix) :]
-    return git_path
 
 
 def _build_parser() -> argparse.ArgumentParser:
