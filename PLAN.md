@@ -36,9 +36,9 @@ flowchart LR
   `workshop exec --env`, never through `review`'s environment. The only
   secret entering `untrusted` is the per-run, gateway-scoped inference token
   (step 14), which authorizes exactly what the agent may do anyway.
-- Both containers install the same wheel, built once from the trusted
-  workflow SHA, so fetch/review/publish run the same package version by
-  construction.
+- Both containers select the same published `maas-code-reviewer` SDK
+  (pinned channel, adjacent launches), so fetch/review/publish run the same
+  code by construction — no per-job checkout, install, or artifact staging.
 - The Python package never talks to Workshop. The GitHub workflow (trusted —
   `pull_request_target` runs base-branch code) launches both containers and
   brokers files between their project directories. No container lifecycle
@@ -91,7 +91,7 @@ flowchart LR
 | 5 | feat: add fetch-mp and publish-mp commands | 3, 4 |
 | 6 | feat: add fetch-pr and publish-pr commands | 3, 4 |
 | 7 | feat: add the `review` command | 4 |
-| 8 | build: add wheel distribution | — |
+| 8 | build: author and publish the maas-code-reviewer Workshop SDK | — |
 | 9 | ci: three-phase workflows over trusted/untrusted Workshops | 5–8 |
 | 10 | feat: add vendor-neutral AgentRunner contract | — |
 | 11 | feat: add review runtime policy | 10 |
@@ -102,12 +102,16 @@ flowchart LR
 | 16 | chore: retire legacy commands and the google-genai engine | 9, 15 |
 | 17 | feat: add bounded repair round for invalid reviews | 15 |
 | 18 | feat: add in-session validate_review MCP tool | 15 |
-| 19 | build: add nightly builds and wheel index | 8 |
-| 20 | docs: final README/DESIGN/AGENTS consistency pass | 9, 16 |
-| 21 | feat: add review corpus collection | 15 |
-| 22 | feat: add corpus replay harness and trace export | 13, 21 |
-| 23 | feat: add corpus comparison report | 22 |
-| 24 | docs: add BENCHMARK.md runbook | 21–23 |
+
+Later work (deferred — not part of the current effort):
+
+| # | Commit | Depends on |
+| --- | --- | --- |
+| 19 | docs: final README/DESIGN/AGENTS consistency pass | 9, 16 |
+| 20 | feat: add review corpus collection | 15 |
+| 21 | feat: add corpus replay harness and trace export | 13, 20 |
+| 22 | feat: add corpus comparison report | 21 |
+| 23 | docs: add BENCHMARK.md runbook | 20–22 |
 
 ## Phase 0 — preparation
 
@@ -124,8 +128,9 @@ Revise the spike's `DESIGN.md` for the three-phase command architecture —
 the per-review container lifecycle, guardian, bootstrap, and shim sections
 are replaced by the command-level trust boundary across the
 trusted/untrusted containers and the brokered-file discipline, and the
-credential section moves to per-run gateway tokens (step 14). Keep the ACP
-integration requirements and metrics policy; they still apply.
+credential section moves to per-run gateway tokens (step 14), and the
+deployment section moves to the published Workshop SDK (step 8). Keep the
+ACP integration requirements, and metrics policy; they still apply.
 
 ## Phase A — split the commands (google-genai engine unchanged)
 
@@ -227,52 +232,85 @@ empty diff, metrics.
 
 ## Phase B — move the review step into Workshop (engine unchanged)
 
-### 8. build: add wheel distribution
+### 8. build: author and publish the maas-code-reviewer Workshop SDK
 
-Add `.github/workflows/wheel.yml` (`uv build`, artifact on main). The
-container-side `review` step installs the package from a wheel built from the
-trusted workflow SHA; this workflow proves the wheel builds and ships
-`prompts/` (and later `runtime/`) as packaged data.
+The Workshop-native distribution, replacing per-job checkout/install: an SDK
+built with [sdkcraft](https://github.com/canonical/sdkcraft) and published to
+the SDK Store, selected declaratively by the CI containers and by operator
+workshops alike.
+
+- Add `sdkcraft.yaml`: a Python ≥ 3.12 runtime with the package installed
+  from a locked `uv sync --frozen` environment, the `maas-code-reviewer`
+  entrypoint on PATH (omp later spawns `review-mcp` from it), and the
+  packaged prompts and `runtime/` policy resources included.
+- Publish from protected refs only: main pushes release to `latest/edge`;
+  tags promote to `latest/stable`. A publish workflow runs `sdkcraft pack` +
+  upload + release with Store credentials in CI secrets; PRs never publish.
+  One-time: register the SDK name under the team's publisher.
+- Channel is the only reproducibility control — the definition format has no
+  SDK revision field (DESIGN.md records this for omp; it now applies to our
+  own package). Promotion discipline (edge → stable after validation) is the
+  mitigation; rollback is re-promoting an older revision.
+- The review workflows pin `latest/stable`; the manual workflow gains an
+  optional channel input (`edge` validates a main push before promotion).
+  This restores a validation path, since the workflows no longer exercise
+  the workflow SHA's own code.
+- Verify the mechanics early — this is the plan's main external unknown:
+  name registration, build hooks, interface declarations, PATH entrypoints,
+  and `__file__`-relative resolution of `runtime/` resources on the SDK's
+  read-only mount. Gate: a smoke exec runs `maas-code-reviewer --help`
+  inside a workshop using the edge SDK.
+- Development still runs from a checkout (`uv sync`); the SDK is the
+  deployment artifact and `make check` is the shared gate for both.
 
 ### 9. ci: three-phase workflows over trusted/untrusted Workshops
 
-Rework `review-pr.yml` and `review-pr-manual.yml` on the dedicated ephemeral
-`maas-review-workshop` runner into fetch → review → publish over two
-containers. Commit two definitions as separate project directories,
-`ci/trusted/workshop.yaml` and `ci/untrusted/workshop.yaml` (base image +
-Python/uv only; the untrusted one gains the omp SDK and inference plug in
-step 15; never the dev `workshop.yaml` with its auth tunnel and mounts):
+Rework `review-pr.yml` and `review-pr-manual.yml` onto ephemeral
+GitHub-hosted `ubuntu-26.04` runners — Workshop installed and launched by
+the `canonical/launch-workshop` action, model access via the
+`omp-auth-gateway` snap — as fetch → review → publish over two
+containers. Commit two definitions as separate project directories:
+`ci/trusted/workshop.yaml` (the maas-code-reviewer SDK) and
+`ci/untrusted/workshop.yaml` (the maas-code-reviewer SDK now; the omp SDK and
+inference plug arrive in step 15) — never the dev `workshop.yaml` with its
+auth tunnel and mounts. The trusted-code source shifts from the workflow SHA
+to the Store channel; the protected publish pipeline (step 8) is what makes
+the SDK trusted. Record that in DESIGN.md.
 
-1. Build (host): checkout the coordinator from `github.workflow_sha`,
-   `uv build`, stage the wheel into both project directories, and install
-   that same wheel in both containers.
-2. Launch both Workshops (`trusted`, `untrusted`) and wait for readiness.
-3. Fetch (`trusted`): `workshop exec -I trusted --env … -- maas-code-reviewer
-   fetch-pr --output-dir /project/out …` with read-scope credentials.
-4. Broker (host): copy the diff/description into the untrusted project dir;
+1. Checkout the workflow repo at the trusted SHA (provides the `ci/`
+   definitions); install the `omp-auth-gateway` snap and log in with
+   `GEMINI_KEY` (the upstream credential never leaves the host); read the
+   install-generated gateway token; launch both Workshops (`trusted`,
+   `untrusted`) via `canonical/launch-workshop`.
+2. Fetch (`trusted`): `workshop run --env GITHUB_TOKEN trusted --
+   maas-code-reviewer fetch-pr --output-dir /project/out …` with read-scope
+   credentials.
+3. Broker (host): copy the diff/description into the untrusted project dir;
    `actions/checkout` the PR head into the untrusted project dir
    (credentials persistence disabled, never executed host-side).
-5. Review (`untrusted`): `workshop exec -I untrusted -- maas-code-reviewer
+4. Review (`untrusted`): `workshop run untrusted -- maas-code-reviewer
    review --json-output …` with no GitHub/Launchpad credentials.
-   Intermediate state: the Gemini API key is passed only to this exec's
+   Intermediate state: the Gemini API key is passed only to this run's
    environment — explicitly documented, safe under the base threat model (no
    code execution, repo-contained tools), replaced in step 15 by the per-run
    gateway token (step 14).
-6. Broker (host): copy `review.json` back into the trusted project dir.
-7. Publish (`trusted`): `publish-pr --review …` with write-scope
+5. Broker (host): copy `review.json` back into the trusted project dir.
+6. Publish (`trusted`): `publish-pr --review …` with write-scope
    credentials — validates the candidate against the authoritative diff in
    the trusted project dir before posting.
-8. Upload metrics/review artifacts from the trusted project dir; explicitly
-   stop/remove both containers (runner ephemerality is the backstop, not the
-   mechanism). Deliberate-failure handling (nonzero exit, no artifact, no
-   post) is preserved.
+7. Upload metrics/review artifacts from the trusted project dir. No teardown
+   steps: the ephemeral runner VM is destroyed after the job, taking both
+   containers with it. Deliberate-failure handling (nonzero exit, no
+   artifact, no post) is preserved.
 
 Retire `snap/snapcraft.yaml` + `snap.yml`: strict confinement cannot deliver
-the container side, and the wheel is the install path. The legacy
+the container side; installation is the published SDK (step 8). The legacy
 `review-mp`/`review-pr`/`review-diff` commands remain available for local
 rollback but are no longer invoked by any workflow; their removal waits for
 step 16, once parity is proven. Preserve automatic/manual triggers, dry runs,
-timeouts, and metrics artifacts. Update DESIGN.md's deployment section.
+timeouts, and metrics artifacts. Update DESIGN.md's deployment section. The
+full target workflow and container definitions are in the
+[appendix](#appendix-target-workflow-definitions).
 
 ## Phase C — swap the engine to omp over ACP
 
@@ -324,17 +362,19 @@ review failure. Add `opentelemetry-proto`. Inert until step 15 wires
 
 No package code — a deployment pattern plus a verification gate.
 
-The host runs the `omp-auth-gateway` snap, which holds the real upstream
-provider credentials and issues tokens valid only for the gateway itself.
-Each workflow run (and each operator benchmarking session) mints a fresh
-token; it dies with the job and rotation is trivial. The untrusted Workshop
-definition's inference plug tunnels to the gateway (127.0.0.1:4000)
-directly, and the token reaches the review exec via `--env`. The agent
-reading it is acceptable: it authorizes only what the agent may do anyway.
-(Note: localhost binding alone does not keep the token from the agent — the
-tunnel makes the agent a localhost client. The safety comes from per-run
-issuance, gateway scoping, and route-scoped authorization, not the bind
-address.)
+The host runs the `omp-auth-gateway` snap (a wrapper around `omp
+auth-gateway`), which holds the real upstream provider credentials. The snap
+generates a token at install time, valid only for the gateway itself;
+`sudo omp-auth-gateway token` prints it. In CI the runner is an ephemeral
+VM, so install-time generation is equivalent to per-run issuance — the token
+dies with the job. On persistent hosts (the benchmarking VM), rotate by
+regenerating it via the snap. The untrusted Workshop definition's inference
+plug tunnels to the gateway (127.0.0.1:4000) directly, and the token reaches
+the review run via `--env`. The agent reading it is acceptable: it
+authorizes only what the agent may do anyway. (Note: localhost binding alone
+does not keep the token from the agent — the tunnel makes the agent a
+localhost client. The safety comes from install-time/per-run issuance,
+gateway scoping, and route-scoped authorization, not the bind address.)
 
 Gate for step 15's deployment, recorded in phase E: enumerate what the
 per-run token class authorizes on the gateway. It must permit the
@@ -375,8 +415,9 @@ legacy commands (still Gemini-backed until step 16) are untouched:
   path; the legacy fields stay populated by the legacy path and are removed
   in step 16.
 - The untrusted CI Workshop definition gains the omp SDK and the inference
-  plug to the host gateway; the workflow mints a per-run gateway token
-  (step 14) for the review exec environment, replacing the Gemini key.
+  plug to the host gateway; the workflow passes the install-generated
+  gateway token (step 14) to the review run's environment, replacing the
+  Gemini key.
 - README: `review` command reference and runtime configuration. AGENTS.md
   and DESIGN.md: status update noting legacy retirement is still pending.
 - Tests: the `review` path is rewritten against `FakeAgentRunner`; legacy
@@ -437,31 +478,30 @@ Lands the spike's uncommitted work, made consistent:
 - Tests: `test_review_mcp.py` (protocol, verdicts, malformed input), reviewer
   staging/cleanup and prefix pass-through, ACP `mcp_servers` mapping.
 
-### 19. build: add nightly builds and wheel index
+## Later work — final docs and benchmarking (deferred, not scheduled)
 
-`nightly.yml` (version-bumped prerelease with `dist/*`, keep-last-15 pruning)
-plus `scripts/build_simple_index.py` (PEP 503 index from release assets →
-Pages) and `test_build_simple_index.py`. Extend Makefile lint/typecheck/
-format to `scripts/` (its first addition there). README installation section.
+The remaining steps are not part of the current effort; numbering continues
+for stable reference. Per-step documentation rides with each landed step
+meanwhile, so step 19 is a sweep rather than a prerequisite, and the
+benchmarking steps stand up the model-comparison tooling when it is wanted.
 
-### 20. docs: final README/DESIGN/AGENTS consistency pass
+### 19. docs: final README/DESIGN/AGENTS consistency pass
 
 Real Workshop host setup, CI definition provenance, omp-auth-gateway and
-per-run token setup (step 14), wheel/nightly installation, the
+per-run token setup (step 14), SDK distribution (step 8), the
 fetch/review/publish local flow, the trusted/untrusted security boundary,
 metrics schema. Verify no stale Gemini/legacy-command/nested-container
 wording remains.
 
-## Phase D — benchmarking (last)
-
-### 21. feat: add review corpus collection
+### 20. feat: add review corpus collection
 
 `scripts/collect_reviews.py` (stdlib only): immutable corpus from the last N
 landed `canonical/maas` commits — merged-PR diffs/descriptions, bot baselines,
 human reviews; write-once manifest (schema v2); bare `repository.git` cache;
-tokens via env only. Tests: `test_collect_reviews.py`.
+tokens via env only. Extend Makefile lint/typecheck/format to `scripts/`
+(its first addition there). Tests: `test_collect_reviews.py`.
 
-### 22. feat: add corpus replay harness and trace export
+### 21. feat: add corpus replay harness and trace export
 
 `scripts/replay_reviews.py`: per case×model, `git worktree` checkout and the
 installed `maas-code-reviewer review` subprocess (`--description-file`,
@@ -474,14 +514,14 @@ in BENCHMARK.md). Add `src/maas_code_reviewer/otel_export.py`
 the replay script. Tests: `test_replay_reviews.py` (fake reviewer executable,
 fake OTLP receiver), `test_otel_export.py`.
 
-### 23. feat: add corpus comparison report
+### 22. feat: add corpus comparison report
 
 `scripts/compare_reviews.py` (stdlib only): deterministic single-file HTML
 report — wall time from the `invoke_agent` root span, tokens/cost from
 metrics, statuses, comment counts beside baselines, optional LLM-classified
 issue tables. Tests: `test_compare_reviews.py`.
 
-### 24. docs: add BENCHMARK.md runbook
+### 23. docs: add BENCHMARK.md runbook
 
 The end-to-end runbook (VM setup, runtime profile allowing every
 gateway-advertised model via the host gateway with a benchmark-scoped token,
@@ -494,17 +534,18 @@ Before the new branch replaces the spike, re-collect rather than inherit the
 spike's proof:
 
 1. Real Workshop host: the three-phase flow completes a model-backed review
-   with the same wheel installed in both containers; no publication
-   credentials observable in the untrusted container (`env`, filesystem,
+   with both containers running the same published SDK revision (record the
+   resolved SDK identity at launch); no publication credentials observable
+   in the untrusted container (`env`, filesystem,
    `/proc` probes); the only secret present there is the per-run gateway
    token, verified to authorize the inference/catalog routes omp needs and
    nothing else (no token minting, credential export, or management routes);
    effective omp tool list exactly `read,grep,glob,web_search`;
    files written by the agent never reach the trusted container except the
    validated candidate; publish rejects a forged candidate; timeout/
-   cancellation/kill during the turn leave no running omp, and both
-   containers stop/remove cleanly (runner ephemerality is the backstop, not
-   the mechanism).
+   cancellation/kill during the turn leave no running omp; the ephemeral
+   runner VM's destruction ends both containers (no explicit teardown
+   steps).
 2. Authorized live GitHub run: automatic and manual workflow execution on a
    disposable private PR, including publication, dry-run isolation, metrics
    artifacts, and a deliberate nonzero failure, on a one-job ephemeral runner.
@@ -516,6 +557,9 @@ spike's proof:
 - Alternative ACP harnesses (the neutral contract is a seam, not a
   deliverable).
 - Snap packaging (retired in step 9, not silently re-confined).
+- Wheel/nightly CI distribution (`wheel.yml`, `nightly.yml`,
+  `scripts/build_simple_index.py`) — superseded by the Workshop SDK
+  (step 8); revisit only if a non-Workshop distribution is ever needed.
 - Container lifecycle management in the Python package (workshop_runner,
   runtime_guard, runtime_launch, shim) — replaced by workflow/operator-owned
   containers.
@@ -525,3 +569,209 @@ spike's proof:
 - The narrowing inference proxy (`scripts/review_inference_proxy.py` and its
   systemd unit) — superseded by per-run, route-scoped gateway tokens
   (step 14); reinstated only if the token-scope verification fails.
+
+## Appendix: target workflow definitions
+
+The final (post-step-15) shape, owned by step 9. Everything here runs from
+trusted sources: the workflow file and `ci/` definitions come from the base
+branch, and the package comes from the published SDK. PR content enters only
+as files in the untrusted project directory.
+
+### Container definitions
+
+```yaml
+# ci/trusted/workshop.yaml
+name: trusted
+base: ubuntu@26.04
+sdks:
+  - name: maas-code-reviewer
+    channel: latest/stable
+```
+
+```yaml
+# ci/untrusted/workshop.yaml
+name: untrusted
+base: ubuntu@26.04
+sdks:
+  - name: maas-code-reviewer
+    channel: latest/stable
+  - name: omp
+# Inference access: the container reaches the host's omp-auth-gateway
+# (127.0.0.1:4000) through an interface plug; exact syntax per the Workshop
+# definition reference, validated in step 9.
+```
+
+Phase-B intermediate (step 9 as landed): the untrusted definition omits the
+`omp` SDK and the inference plug until step 15 adds them.
+
+### `review-pr.yml` — automatic review
+
+```yaml
+# Trusted code only: workflow and ci/ definitions from the base branch,
+# package from the published SDK. PR content is data, never tooling.
+name: Review pull request
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  contents: read
+  pull-requests: write  # exercised only by the publish step
+
+jobs:
+  review:
+    runs-on: ubuntu-26.04  # GitHub-hosted ephemeral VM
+    timeout-minutes: 30
+    steps:
+      - name: Check out the trusted workflow revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}  # ci/ definitions, never the PR
+
+      - name: Install and log in the omp-auth-gateway
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+        # The snap wraps `omp auth-gateway`; login hands it the upstream
+        # Gemini credential, which never leaves the host.
+        run: |
+          sudo snap install omp-auth-gateway
+          sudo GEMINI_KEY="$GEMINI_KEY" omp-auth-gateway login
+
+      - name: Read the per-run inference token
+        id: inference
+        # Step 14. The snap generates the gateway-scoped token at install
+        # time; the runner is an ephemeral VM, so install-time == per-run.
+        # It authorizes inference routes only and dies with the job.
+        run: echo "token=$(sudo omp-auth-gateway token)" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare job project directories
+        run: |
+          mkdir -p ~/review
+          cp -r ci/trusted ~/review/trusted
+          cp -r ci/untrusted ~/review/untrusted
+          mkdir -p ~/review/untrusted/inputs ~/review/untrusted/outputs \
+                   ~/review/trusted/in
+
+      - name: Launch the trusted Workshop
+        uses: canonical/launch-workshop@v1
+        with:
+          project: ~/review/trusted
+          workshop: trusted
+
+      - name: Launch the untrusted Workshop
+        uses: canonical/launch-workshop@v1
+        with:
+          project: ~/review/untrusted
+          workshop: untrusted
+
+      - name: Fetch the PR (trusted)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          workshop run --env GITHUB_TOKEN trusted -- \
+            maas-code-reviewer fetch-pr \
+              --output-dir /project/out \
+              "${{ github.event.pull_request.html_url }}"
+
+      - name: Stage review inputs (host broker)
+        run: >
+          cp ~/review/trusted/out/diff.patch
+             ~/review/trusted/out/description.md
+             ~/review/untrusted/inputs/
+
+      - name: Check out the PR head as disposable agent context
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-head
+          persist-credentials: false
+
+      - name: Move the checkout into the untrusted project
+        run: mv pr-head ~/review/untrusted/repo
+
+      - name: Review (untrusted)
+        env:
+          GATEWAY_TOKEN: ${{ steps.inference.outputs.token }}
+        run: |
+          # No GitHub/Launchpad credentials here, by design.
+          # Phase-B intermediate: pass GEMINI_API_KEY via --env instead.
+          workshop run --env GATEWAY_TOKEN untrusted -- \
+            maas-code-reviewer review \
+              --repo-dir /project/repo \
+              --diff-file /project/inputs/diff.patch \
+              --description-file /project/inputs/description.md \
+              --review-timeout 600 \
+              --json-output /project/outputs/review.json \
+              --metrics /project/outputs/metrics.json
+
+      - name: Collect the candidate review (host broker)
+        run: >
+          cp ~/review/untrusted/outputs/review.json
+             ~/review/trusted/in/review.json
+
+      - name: Publish the review (trusted)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Re-validates the candidate against the authoritative diff in
+          # ~/review/trusted/out before anything is posted.
+          workshop run --env GITHUB_TOKEN trusted -- \
+            maas-code-reviewer publish-pr \
+              --review /project/in/review.json \
+              --input-dir /project/out \
+              "${{ github.event.pull_request.html_url }}"
+
+      - name: Collect artifacts
+        if: always()
+        run: >
+          mkdir -p artifacts && cp
+             ~/review/untrusted/outputs/metrics.json artifacts/ || true
+
+      - name: Upload metrics artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-metrics
+          path: artifacts/
+```
+
+No teardown step: the GitHub-hosted runner is an ephemeral VM, so both
+Workshops are destroyed with it. A failing review step (invalid candidate,
+timeout, transport error) aborts the job before publish: nonzero exit, no
+artifact, no comment. Deadlines are the CLI's `--review-timeout` inside the
+container with the job's `timeout-minutes` as the hard backstop.
+
+### `review-pr-manual.yml` — dispatched review
+
+Same job shape, with the trigger and input plumbing changed:
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      pr_url:
+        description: Pull request URL
+        required: true
+      model:
+        description: Exact model identity allowed by the runtime profile
+        required: false
+      review_timeout:
+        description: Total review deadline in seconds
+        default: "600"
+      sdk_channel:
+        description: maas-code-reviewer SDK channel (edge validates main)
+        default: latest/stable
+      dry_run:
+        description: Run the review but do not publish
+        type: boolean
+        default: false
+```
+
+Deltas against the automatic job: `fetch-pr`/`publish-pr` take
+`${{ inputs.pr_url }}`; the review exec adds `--model "${{ inputs.model }}"`
+when set, `--review-timeout ${{ inputs.review_timeout }}`, and a matching
+job `timeout-minutes`; the
+launch step rewrites the copied definitions' `channel` when `sdk_channel`
+differs; the publish step adds `--dry-run` when requested; a
+`pull_request_target`-style PR head checkout uses the URL's owner/repo.
