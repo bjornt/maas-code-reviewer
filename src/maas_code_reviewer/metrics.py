@@ -9,21 +9,20 @@ from pathlib import Path
 
 @dataclass
 class ReviewMetrics:
-    # google-genai (legacy) fields — populated by review-diff/review-mp/
-    # review-pr; scheduled for removal in step 16.
+    """One review's metrics: host-known diff facts plus the agent's report.
+
+    Populated by the ``review`` agent path. ``None`` means unavailable,
+    never a fabricated zero; the empty-diff short-circuit records known
+    zeros because nothing ran.
+    """
+
     model_name: str | None = ""
     tokens_thinking: int | None = 0
     tokens_input: int | None = 0
     tokens_output: int | None = 0
-    files_read: int = 0
     agents_md_read: bool = False
     diff_lines: int = 0
     diff_size_bytes: int = 0
-    tool_call_limit: int = 0
-    tool_call_limit_reached: bool = False
-    resume_attempts: int = 0
-    # Agent-path fields — populated by `review`; None = unavailable,
-    # never a fabricated zero (a measured 0 stays 0).
     agent_name: str | None = None
     agent_version: str | None = None
     tokens_cache_read: int | None = None

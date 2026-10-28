@@ -1,11 +1,10 @@
 # Copyright 2026 Canonical Ltd.  This software is licensed under the
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
-"""Merge-proposal and pull-request acquisition, review, and publication."""
+"""Merge-proposal and pull-request acquisition and publication."""
 
 import base64
 import json
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,16 +12,12 @@ from pathlib import Path
 from maas_code_reviewer.git import GitClient
 from maas_code_reviewer.github_client import GitHubClient, parse_pr_url
 from maas_code_reviewer.launchpad_client import LaunchpadClient
-from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS, GeminiClient
-from maas_code_reviewer.metrics import ReviewMetrics
 from maas_code_reviewer.models import Comment, MergeProposal
 from maas_code_reviewer.repo_tools import RepoTools
-from maas_code_reviewer.review_schema import repository_files, validate_review_json
+from maas_code_reviewer.review_schema import validate_review_json
 from maas_code_reviewer.reviewer import (
     REVIEW_MARKER,
     REVIEW_PREAMBLE,
-    review_diff,
-    review_diff_structured,
 )
 
 
@@ -69,16 +64,14 @@ def has_existing_review(client: LaunchpadClient, mp: MergeProposal) -> bool:
     return _find_last_review_date(comments, bot_username) is not None
 
 
-def read_agents_context(repo_dir: Path) -> tuple[RepoTools, str | None]:
+def read_agents_context(repo_dir: Path) -> str | None:
     """Load the repository's AGENTS.md guidance as review context.
 
-    Returns the path-scoped RepoTools (used for the read_file /
-    list_directory agent callbacks) together with the AGENTS.md
-    contents, or None when the repository has no AGENTS.md.
+    Reads through the path-scoped RepoTools, so a symlinked AGENTS.md
+    cannot pull content in from outside the repository tree. Returns
+    None when the repository has no readable AGENTS.md.
     """
-    tools = RepoTools(repo_dir)
-    agents_md = tools.read_agents_md()
-    return tools, agents_md
+    return RepoTools(repo_dir).read_agents_md()
 
 
 def fetch_merge_proposal(
@@ -144,50 +137,6 @@ def fetch_merge_proposal(
         )
     )
     return True
-
-
-def review_merge_proposal(
-    lp: LaunchpadClient,
-    git: GitClient,
-    llm: GeminiClient,
-    mp_url: str,
-    max_diff_chars: int = 200_000,
-    metrics: ReviewMetrics | None = None,
-    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
-) -> str | None:
-    """Review a single merge proposal end to end.
-
-    Returns the review comment body, or ``None`` if the MP was already
-    reviewed.  The caller is responsible for posting or printing the result.
-    """
-    mp = lp.get_merge_proposal(mp_url)
-
-    if has_existing_review(lp, mp):
-        return None
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo_dir = Path(tmpdir) / "repo"
-        diff = _clone_merge_diff(git, mp, repo_dir)
-
-        tools, agents_md = read_agents_context(repo_dir)
-        description = mp.description or mp.commit_message
-        review_comment = review_diff(
-            llm,
-            diff=diff,
-            description=description,
-            read_file=tools.read_file,
-            list_directory=tools.list_directory,
-            agents_md=agents_md,
-            max_diff_chars=max_diff_chars,
-            metrics=metrics,
-            max_tool_calls=max_tool_calls,
-        )
-
-        if metrics is not None:
-            metrics.files_read = tools.files_read_count
-            metrics.agents_md_read = tools.agents_md_read
-
-    return review_comment
 
 
 class InvalidReviewError(Exception):
@@ -293,49 +242,6 @@ def render_pull_request_review(review: dict) -> dict:
     rendered = dict(review)
     rendered["general_comment"] = _decorate_review_text(review["general_comment"])
     return rendered
-
-
-def review_pull_request(
-    github: GitHubClient,
-    llm: GeminiClient,
-    owner: str,
-    repo: str,
-    pr_number: int,
-    repo_dir: Path,
-    max_diff_chars: int = 200_000,
-    metrics: ReviewMetrics | None = None,
-    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
-) -> dict:
-    """Acquire a pull request's diff and description and review them.
-
-    Returns the structured review document — with the review marker and
-    preamble prepended to its general comment for nonempty diffs, as the
-    composite review-pr command posts today; the caller decides whether
-    to print or post it.
-    """
-    diff = github.get_pr_diff(owner, repo, pr_number)
-    description = github.get_pr_description(owner, repo, pr_number)
-    tools, agents_md = read_agents_context(repo_dir)
-    result_dict = review_diff_structured(
-        llm,
-        diff=diff,
-        description=description,
-        read_file=tools.read_file,
-        list_directory=tools.list_directory,
-        agents_md=agents_md,
-        max_diff_chars=max_diff_chars,
-        metrics=metrics,
-        max_tool_calls=max_tool_calls,
-        repository_files=repository_files(repo_dir),
-    )
-    if diff.strip():
-        result_dict["general_comment"] = _decorate_review_text(
-            result_dict["general_comment"]
-        )
-    if metrics is not None:
-        metrics.files_read = tools.files_read_count
-        metrics.agents_md_read = tools.agents_md_read
-    return result_dict
 
 
 def post_pull_request_review(

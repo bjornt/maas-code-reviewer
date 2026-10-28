@@ -24,9 +24,9 @@ not part of this deliverable or its acceptance gates.
 The `review` path uses the synchronous `AgentRunner` boundary, strict
 terminal-JSON/full-diff validation, and an explicit operator TOML runtime
 profile. The legacy composite commands (`review-mp`, `review-pr`,
-`review-diff`) keep working on the google-genai engine during the
-transition and are retired once the workflows have migrated and feature
-parity is proven (PLAN.md steps 9, 15, and 16). There is no Gemini
+`review-diff`) and the google-genai engine were retired in
+PLAN.md step 16, after the workflows migrated (step 9) and the new
+pipeline's parity checklist passed (step 15). There is no Gemini
 fallback inside the new `review` path and no aliases pretending removed
 options still work.
 
@@ -527,9 +527,9 @@ Status (2026-10-28, PLAN.md step 15): `review` now builds its agent process
 from the trusted runtime profile and drives one ACP conversation with omp;
 the terminal JSON is host-validated against the original full diff; metrics
 record the agent's reported identity and usage with `None`-for-unavailable
-semantics. The legacy `review-mp`/`review-pr`/`review-diff` commands and the
-google-genai engine are still present, and their retirement (step 16) is
-pending until phase-E re-collection confirms the parity checklist.
+semantics; PLAN.md step 16 then removed the legacy commands and
+the google-genai engine, leaving fetch → review → publish as the only
+review path.
 
 Evidence from the prior spike branch is historical and uncommitted; none
 of it is inherited as proof. Real-environment acceptance is re-collected
