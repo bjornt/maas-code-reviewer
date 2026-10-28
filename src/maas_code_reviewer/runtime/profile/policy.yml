@@ -1,0 +1,26 @@
+# Copyright 2026 Canonical Ltd.  This software is licensed under the
+# GNU Affero General Public License version 3 (see the file LICENSE).
+
+# Trusted omp 18.12.2 review profile; never sourced from the reviewed
+# checkout. The packaged omp acp argv template enforces the native tool
+# allowlist (read,grep,glob,web_search) through --tools; this overlay pins
+# the switchable allowlist members on, turns the ambient extras off, and
+# fixes the web-search role.
+tools:
+  xdev: false
+dev:
+  autoqa: false
+vault:
+  enabled: false
+security:
+  enabled: false
+modelRoles:
+  web: web/duckduckgo
+autolearn:
+  enabled: false
+grep:
+  enabled: true
+glob:
+  enabled: true
+web_search:
+  enabled: true
