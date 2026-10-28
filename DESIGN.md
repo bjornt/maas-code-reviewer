@@ -372,6 +372,14 @@ those processes only via `workshop exec --env`, never through `review`'s
 environment. The untrusted container receives zero publication
 credentials.
 
+Phase-B intermediate (PLAN.md steps 9–15): until the engine swap, the
+untrusted review runs the google-genai engine, and the workflow passes the
+Gemini API key to the review run's environment via `workshop exec --env` —
+the only secret entering `untrusted` in that phase. It reaches only the
+review process, and it is safe under the base threat model: no PR code
+executes anywhere, and the review's tools are repo-contained reads. Step 15
+replaces it with the per-run gateway token described next.
+
 The only secret entering `untrusted` is the per-run, gateway-scoped
 inference token (PLAN.md step 14). The `omp-auth-gateway` snap holds the
 upstream credential on the host; the runner obtains an install-time token
@@ -497,6 +505,16 @@ workflows pin `latest/stable`; the manual workflow gains an optional
 channel input so an edge build validates a main push before promotion —
 this restores a validation path, since the workflows no longer exercise
 the workflow SHA's own code.
+
+The CI deployment is the three-phase fetch → review → publish flow (PLAN.md
+step 9): `review-pr.yml` (`pull_request_target`) and
+`review-pr-manual.yml` (`workflow_dispatch`) launch the `ci/trusted` and
+`ci/untrusted` definitions on GitHub-hosted ephemeral `ubuntu-26.04` runners
+via `canonical/launch-workshop`, and the runner host only brokers files
+between the two containers' project directories. The phase-B `ci/untrusted`
+definition carries only the maas-code-reviewer SDK — the omp SDK and the
+inference plug arrive with the engine swap (PLAN.md step 15). There are no
+teardown steps: the ephemeral runner VM's destruction ends both containers.
 
 Strict Snap packaging is retired (PLAN.md step 9), and wheel/nightly CI
 distribution is superseded by the SDK. Do not silently re-confine or
