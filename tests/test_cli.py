@@ -1098,6 +1098,7 @@ class TestBuildParserReview:
         assert args.model is None
         assert args.runtime_config is None
         assert args.review_timeout is None
+        assert args.repair_attempts == 1
         assert args.otel_output is None
 
     def test_review_requires_diff_file(
@@ -1186,6 +1187,29 @@ class TestBuildParserReview:
             ["review", "--diff-file", "patch.diff", "--review-timeout", "600"]
         )
         assert args.review_timeout == 600.0
+
+    def test_review_repair_attempts_parses(self) -> None:
+        parser = _build_parser()
+        zero = parser.parse_args(
+            ["review", "--diff-file", "patch.diff", "--repair-attempts", "0"]
+        )
+        seven = parser.parse_args(
+            ["review", "--diff-file", "patch.diff", "--repair-attempts", "7"]
+        )
+        assert zero.repair_attempts == 0
+        assert seven.repair_attempts == 7
+
+    @pytest.mark.parametrize("value", ["-1", "abc", "1.5"])
+    def test_review_repair_attempts_rejects_invalid_values(
+        self, value: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(SystemExit) as exc_info:
+            _build_parser().parse_args(
+                ["review", "--diff-file", "patch.diff", "--repair-attempts", value]
+            )
+
+        assert exc_info.value.code == 2
+        assert "repair attempts" in capsys.readouterr().err
 
     def test_review_parses_otel_output(self, tmp_path: Path) -> None:
         otel_dir = tmp_path / "otel"
@@ -1718,6 +1742,101 @@ class TestHandleReview:
         assert "Error:" in captured.err
         assert not output_file.exists()
         assert not metrics_file.exists()
+
+    def test_repair_attempts_default_repairs_invalid_review(
+        self, tmp_path: Path
+    ) -> None:
+        """Without --repair-attempts an invalid document is repaired once."""
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+
+        output_file = tmp_path / "review.json"
+        invalid = json.dumps(
+            {
+                "general_comment": "Hmm.",
+                "inline_comments": {"src/bar.py": {"1": "Fix."}},
+            }
+        )
+        fake = FakeAgentRunner(
+            outcomes=[
+                AgentRunResult(
+                    terminal_text=invalid,
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="omp",
+                ),
+                AgentRunResult(
+                    terminal_text=_VALID_STRUCTURED_RESPONSE,
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="omp",
+                ),
+            ]
+        )
+
+        with patch(
+            "maas_code_reviewer.cli.ConfiguredAgentRunner", return_value=fake
+        ):
+            args = _build_parser().parse_args(
+                [
+                    "review",
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--diff-file",
+                    str(diff_file),
+                    "--json-output",
+                    str(output_file),
+                ]
+            )
+            handle_review(args)
+
+        assert len(fake.requests) == 2
+        assert "## Repair request" in fake.requests[1].task_prompt
+        assert json.loads(output_file.read_text()) == {
+            "general_comment": "Looks good.",
+            "inline_comments": {"src/foo.py": {"2": "Good addition."}},
+        }
+
+    def test_zero_repair_attempts_fails_single_shot(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--repair-attempts 0 fails on the first invalid document."""
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+
+        output_file = tmp_path / "review.json"
+        invalid = json.dumps(
+            {
+                "general_comment": "Hmm.",
+                "inline_comments": {"src/bar.py": {"1": "Fix."}},
+            }
+        )
+        fake = _fake_agent_runner(invalid)
+
+        with patch(
+            "maas_code_reviewer.cli.ConfiguredAgentRunner", return_value=fake
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                main(
+                    [
+                        "review",
+                        "--repo-dir",
+                        str(tmp_path),
+                        "--diff-file",
+                        str(diff_file),
+                        "--repair-attempts",
+                        "0",
+                        "--json-output",
+                        str(output_file),
+                    ]
+                )
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "Error:" in captured.err
+        assert "Invalid review document" in captured.err
+        assert len(fake.requests) == 1
+        assert not output_file.exists()
 
 
 class TestMainReview:

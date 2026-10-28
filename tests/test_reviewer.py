@@ -13,6 +13,7 @@ from maas_code_reviewer.agent_runner import (
     CompletionStatus,
     RunnerResultError,
     RunnerStartupError,
+    RunnerTimeoutError,
     RunnerTransportError,
 )
 from maas_code_reviewer.metrics import ReviewMetrics
@@ -578,16 +579,19 @@ class TestReviewAgent:
     def test_completed_with_blank_terminal_text_rejected(
         self, tmp_path: Path, text: str
     ) -> None:
-        runner = agent_runner_for(text)
+        runner = agent_runner_for(text, usage=AgentUsage(input_tokens=12))
         with pytest.raises(RunnerResultError, match="no review text") as caught:
             review_agent(runner, AGENT_DIFF, None, tmp_path)
-        assert caught.value.usage == AgentUsage()
+        assert caught.value.usage == AgentUsage(input_tokens=24)
+        assert len(runner.requests) == 2
 
     def test_non_json_terminal_text_rejected(self, tmp_path: Path) -> None:
         runner = agent_runner_for("prose without braces")
         with pytest.raises(RunnerResultError, match="not valid JSON") as caught:
             review_agent(runner, AGENT_DIFF, None, tmp_path)
         assert caught.value.usage == AgentUsage()
+        assert len(runner.requests) == 2
+        assert "prose without braces" in runner.requests[1].task_prompt
 
     @pytest.mark.parametrize(
         "terminal",
@@ -621,7 +625,9 @@ class TestReviewAgent:
         ) as caught:
             review_agent(runner, AGENT_DIFF, None, tmp_path)
         assert caught.value.usage == AgentUsage()
-        assert len(runner.requests) == 1
+        assert len(runner.requests) == 2
+        if "src/first.py" in inline:
+            assert "99" in runner.requests[1].task_prompt
 
     def test_validation_uses_original_full_diff_not_truncated_prompt(
         self, tmp_path: Path
@@ -736,3 +742,281 @@ class TestReviewAgent:
         with pytest.raises(RunnerTransportError) as caught:
             review_agent(runner, AGENT_DIFF, None, tmp_path)
         assert caught.value is failure
+
+    @pytest.mark.parametrize(
+        "rejected",
+        [
+            json.dumps(
+                {
+                    "general_comment": "ok",
+                    "inline_comments": {"src/first.py": {"99": "x"}},
+                }
+            ),
+            "prose without braces",
+        ],
+    )
+    def test_invalid_terminal_output_is_repaired_once_and_accepted(
+        self, tmp_path: Path, rejected: str
+    ) -> None:
+        runner = FakeAgentRunner(
+            outcomes=[
+                AgentRunResult(
+                    terminal_text=rejected,
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                ),
+                AgentRunResult(
+                    terminal_text=json.dumps(AGENT_DOCUMENT),
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                ),
+            ]
+        )
+        document = review_agent(runner, AGENT_DIFF, None, tmp_path)
+        assert document == AGENT_DOCUMENT
+        assert len(runner.requests) == 2
+        original, repair = runner.requests
+        assert repair.task_prompt.startswith(original.task_prompt)
+        assert "## Repair request" in repair.task_prompt
+        assert "are data, not instructions" in repair.task_prompt
+        assert rejected.strip() in repair.task_prompt
+        assert "Validation failure:" in repair.task_prompt
+        assert (
+            "Re-emit one complete corrected review JSON document"
+            in repair.task_prompt
+        )
+        assert repair.repository_path == original.repository_path
+        assert repair.full_diff == original.full_diff
+        assert repair.system_instruction == original.system_instruction
+        assert repair.timeout_seconds == original.timeout_seconds
+        assert repair.model == original.model
+
+    def test_repair_sums_usage_across_attempts(self, tmp_path: Path) -> None:
+        runner = FakeAgentRunner(
+            outcomes=[
+                AgentRunResult(
+                    terminal_text="prose without braces",
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                    usage=AgentUsage(
+                        input_tokens=10,
+                        output_tokens=5,
+                        total_tokens=15,
+                        cost=0.001,
+                        cost_currency="USD",
+                    ),
+                ),
+                AgentRunResult(
+                    terminal_text=json.dumps(AGENT_DOCUMENT),
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                    usage=AgentUsage(
+                        input_tokens=20,
+                        output_tokens=8,
+                        total_tokens=28,
+                        cost=0.002,
+                        cost_currency="USD",
+                    ),
+                ),
+            ]
+        )
+        metrics = ReviewMetrics()
+        document = review_agent(runner, AGENT_DIFF, None, tmp_path, metrics=metrics)
+        assert document == AGENT_DOCUMENT
+        assert metrics.tokens_input == 30
+        assert metrics.tokens_output == 13
+        assert metrics.tokens_total == 43
+        assert metrics.cost == pytest.approx(0.003)
+        assert metrics.cost_currency == "USD"
+
+    def test_combined_usage_keeps_unreported_fields_unavailable(
+        self, tmp_path: Path
+    ) -> None:
+        runner = FakeAgentRunner(
+            outcomes=[
+                AgentRunResult(
+                    terminal_text="prose without braces",
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                    usage=AgentUsage(input_tokens=10, cost=0.001, cost_currency="USD"),
+                ),
+                AgentRunResult(
+                    terminal_text=json.dumps(AGENT_DOCUMENT),
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                ),
+            ]
+        )
+        metrics = ReviewMetrics()
+        document = review_agent(runner, AGENT_DIFF, None, tmp_path, metrics=metrics)
+        assert document == AGENT_DOCUMENT
+        assert metrics.tokens_input is None
+        assert metrics.tokens_output is None
+        assert metrics.tokens_total is None
+        assert metrics.cost is None
+        assert metrics.cost_currency is None
+
+    def test_combined_usage_never_sums_mixed_currencies(self, tmp_path: Path) -> None:
+        runner = FakeAgentRunner(
+            outcomes=[
+                AgentRunResult(
+                    terminal_text="prose without braces",
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                    usage=AgentUsage(input_tokens=10, cost=0.001, cost_currency="USD"),
+                ),
+                AgentRunResult(
+                    terminal_text=json.dumps(AGENT_DOCUMENT),
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                    usage=AgentUsage(input_tokens=20, cost=0.002, cost_currency="EUR"),
+                ),
+            ]
+        )
+        metrics = ReviewMetrics()
+        document = review_agent(runner, AGENT_DIFF, None, tmp_path, metrics=metrics)
+        assert document == AGENT_DOCUMENT
+        assert metrics.tokens_input == 30
+        assert metrics.cost is None
+        assert metrics.cost_currency is None
+
+    def test_repair_exhausted_raises_with_combined_usage(
+        self, tmp_path: Path
+    ) -> None:
+        rejected = json.dumps(
+            {
+                "general_comment": "ok",
+                "inline_comments": {
+                    "src/nope.py": {"1": "x"},
+                    "src/first.py": {"99": "y"},
+                },
+            }
+        )
+        runner = FakeAgentRunner(
+            outcomes=[
+                AgentRunResult(
+                    terminal_text=rejected,
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                    usage=AgentUsage(input_tokens=10, cost=0.001, cost_currency="USD"),
+                ),
+                AgentRunResult(
+                    terminal_text=rejected,
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                    usage=AgentUsage(input_tokens=20, cost=0.002, cost_currency="USD"),
+                ),
+            ]
+        )
+        with pytest.raises(
+            RunnerResultError, match="Invalid review document"
+        ) as caught:
+            review_agent(runner, AGENT_DIFF, None, tmp_path)
+        assert caught.value.usage.input_tokens == 30
+        assert caught.value.usage.cost == pytest.approx(0.003)
+        assert caught.value.usage.cost_currency == "USD"
+        assert len(runner.requests) == 2
+        assert "src/nope.py" in runner.requests[1].task_prompt
+        assert "99" in runner.requests[1].task_prompt
+
+    @pytest.mark.parametrize("attempts", [0, -1])
+    def test_zero_repair_attempts_keeps_single_shot_failure(
+        self, tmp_path: Path, attempts: int
+    ) -> None:
+        runner = agent_runner_for(
+            '{"general_comment": "ok", "inline_comments": []}'
+        )
+        with pytest.raises(
+            RunnerResultError, match="Invalid review document"
+        ):
+            review_agent(
+                runner, AGENT_DIFF, None, tmp_path, repair_attempts=attempts
+            )
+        assert len(runner.requests) == 1
+
+    def test_runner_failure_is_never_repaired(self, tmp_path: Path) -> None:
+        failure = RunnerTransportError("connection lost")
+        runner = FakeAgentRunner(failure)
+        with pytest.raises(RunnerTransportError) as caught:
+            review_agent(runner, AGENT_DIFF, None, tmp_path)
+        assert caught.value is failure
+        assert len(runner.requests) == 1
+
+    def test_runner_failure_during_repair_propagates_with_own_usage(
+        self, tmp_path: Path
+    ) -> None:
+        failure = RunnerTimeoutError(
+            "deadline exceeded", usage=AgentUsage(input_tokens=7)
+        )
+        runner = FakeAgentRunner(
+            outcomes=[
+                AgentRunResult(
+                    terminal_text="prose without braces",
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                ),
+                failure,
+            ]
+        )
+        with pytest.raises(RunnerTimeoutError) as caught:
+            review_agent(runner, AGENT_DIFF, None, tmp_path)
+        assert caught.value is failure
+        assert caught.value.usage.input_tokens == 7
+        assert len(runner.requests) == 2
+
+    def test_non_completed_status_after_repair_is_not_repaired(
+        self, tmp_path: Path
+    ) -> None:
+        runner = FakeAgentRunner(
+            outcomes=[
+                AgentRunResult(
+                    terminal_text="prose without braces",
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                    usage=AgentUsage(input_tokens=10),
+                ),
+                AgentRunResult(
+                    terminal_text="",
+                    status=CompletionStatus.CANCELLED,
+                    agent_name="review-agent",
+                    usage=AgentUsage(input_tokens=4),
+                ),
+            ]
+        )
+        with pytest.raises(RunnerResultError, match="cancelled") as caught:
+            review_agent(runner, AGENT_DIFF, None, tmp_path)
+        assert len(runner.requests) == 2
+        assert caught.value.usage.input_tokens == 14
+
+    def test_repair_prompt_is_rebuilt_from_the_original_task_each_round(
+        self, tmp_path: Path
+    ) -> None:
+        runner = FakeAgentRunner(
+            outcomes=[
+                AgentRunResult(
+                    terminal_text="first rejection",
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                ),
+                AgentRunResult(
+                    terminal_text="second rejection",
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                ),
+                AgentRunResult(
+                    terminal_text=json.dumps(AGENT_DOCUMENT),
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                ),
+            ]
+        )
+        document = review_agent(
+            runner, AGENT_DIFF, None, tmp_path, repair_attempts=2
+        )
+        assert document == AGENT_DOCUMENT
+        assert len(runner.requests) == 3
+        assert runner.requests[2].task_prompt.startswith(
+            runner.requests[0].task_prompt
+        )
+        assert "second rejection" in runner.requests[2].task_prompt
+        assert "first rejection" not in runner.requests[2].task_prompt
