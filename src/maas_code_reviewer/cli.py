@@ -30,6 +30,7 @@ from maas_code_reviewer.review_commands import (
 from maas_code_reviewer.review_schema import repository_files
 from maas_code_reviewer.reviewer import (
     NoReviewText,
+    render_review_document,
     review_diff,
     review_diff_structured,
 )
@@ -220,6 +221,55 @@ def handle_review_pr(args: argparse.Namespace) -> None:
     post_pull_request_review(github_client, owner, repo, pr_number, result_dict)
 
 
+def handle_review(args: argparse.Namespace) -> None:
+    """Handle the review subcommand."""
+    api_key = _get_gemini_api_key(args)
+    if api_key is None:
+        _exit_missing_gemini_api_key()
+
+    if args.diff_file == "-":
+        diff = sys.stdin.read()
+    else:
+        diff = Path(args.diff_file).read_text()
+
+    if args.description_file is None:
+        description = None
+    else:
+        description = Path(args.description_file).read_text(encoding="utf-8")
+
+    repo_dir = Path(args.repo_dir) if args.repo_dir else Path.cwd()
+
+    llm_client = GeminiClient(api_key=api_key, model=args.model)
+
+    tools, agents_md = read_agents_context(repo_dir)
+    metrics = ReviewMetrics()
+
+    try:
+        document = review_diff_structured(
+            llm_client,
+            diff=diff,
+            description=description,
+            read_file=tools.read_file,
+            list_directory=tools.list_directory,
+            agents_md=agents_md,
+            metrics=metrics,
+            diff_prefix=args.diff_prefix,
+            repository_files=repository_files(repo_dir),
+        )
+    except ValueError as exc:
+        raise InvalidReviewError([str(exc)]) from exc
+
+    if args.json_output:
+        Path(args.json_output).write_text(json.dumps(document, indent=2))
+    else:
+        print(render_review_document(document))
+
+    metrics.files_read = tools.files_read_count
+    metrics.agents_md_read = tools.agents_md_read
+    if args.metrics is not None:
+        write_metrics(metrics, Path(args.metrics))
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -244,6 +294,8 @@ def main(argv: list[str] | None = None) -> None:
             handle_publish_pr(args)
         elif args.command == "review-pr":
             handle_review_pr(args)
+        elif args.command == "review":
+            handle_review(args)
     except (NoReviewText, InvalidReviewError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -649,6 +701,86 @@ def _build_parser() -> argparse.ArgumentParser:
     pr_parser.add_argument(
         "pr_url",
         help="Full GitHub PR URL, e.g. https://github.com/owner/repo/pull/42.",
+    )
+
+    review_pipeline_parser = subparsers.add_parser(
+        "review",
+        help="Review a unified diff and produce the structured review document.",
+    )
+    review_pipeline_parser.add_argument(
+        "-g",
+        "--gemini-api-key-file",
+        type=str,
+        default=None,
+        help=(
+            "Path to file containing the Gemini API key. If not provided, "
+            "read from the GEMINI_API_KEY environment variable."
+        ),
+    )
+    review_pipeline_parser.add_argument(
+        "--model",
+        type=str,
+        default="gemini-3-flash-preview",
+        help="Gemini model to use (default: 'gemini-3-flash-preview').",
+    )
+    review_pipeline_parser.add_argument(
+        "--diff-file",
+        type=str,
+        required=True,
+        metavar="FILE",
+        help="Path to a unified diff file, or '-' to read from stdin.",
+    )
+    review_pipeline_parser.add_argument(
+        "--description-file",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help=(
+            "Path to a UTF-8 file with the change description (e.g. the "
+            "merge proposal or pull request description)."
+        ),
+    )
+    review_pipeline_parser.add_argument(
+        "--diff-prefix",
+        type=str,
+        default=None,
+        metavar="PREFIX",
+        help=(
+            "Explicit new-side path prefix in the diff (e.g. 'w/'). Without "
+            "it, the prefix is inferred from the diff and the --repo-dir "
+            "listing; pass an empty string for prefix-free paths."
+        ),
+    )
+    review_pipeline_parser.add_argument(
+        "--repo-dir",
+        type=str,
+        default=None,
+        help=(
+            "Path to the local git repository (default: current working "
+            "directory). Used for read_file and list_directory tool calls, "
+            "to proactively include the repository's AGENTS.md (if present) "
+            "in the review context, and to resolve diff paths during "
+            "validation."
+        ),
+    )
+    review_pipeline_parser.add_argument(
+        "--json-output",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help=(
+            "Write the raw structured JSON review document to FILE instead "
+            "of printing human-readable text to stdout. The document is "
+            "undecorated: publish-mp/publish-pr add the review marker when "
+            "posting."
+        ),
+    )
+    review_pipeline_parser.add_argument(
+        "--metrics",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Write review metrics (model, tokens, diff stats) as JSON to FILE.",
     )
 
     return parser

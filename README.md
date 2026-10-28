@@ -356,10 +356,54 @@ maas-code-reviewer review-pr -g gemini-api-key --repo-dir /path/to/maas \
   https://github.com/canonical/maas/pull/42
 ```
 
+### `review`
+
+Review a unified diff and produce the structured review document. This is the
+pipeline-facing command: `fetch-mp`/`fetch-pr` acquire the diff and
+description, `review` produces the candidate document, and
+`publish-mp`/`publish-pr` validate, decorate, and post it. `review` itself
+never posts anything and talks to no Git forge. The diff can be read from a
+file or from stdin (pass `-`).
+
+```sh
+maas-code-reviewer review -g KEY_FILE --diff-file DIFF_FILE [--description-file FILE] [--diff-prefix PREFIX] [--repo-dir DIR] [--model MODEL] [--json-output FILE] [--metrics FILE]
+```
+
+| Argument | Description |
+|---|---|
+| `--diff-file FILE` | Required. Path to a unified diff file, or `-` to read from stdin. |
+| `--description-file FILE` | Path to a UTF-8 file with the change description (e.g. the merge proposal or pull request description). |
+| `--diff-prefix PREFIX` | Explicit new-side path prefix in the diff (e.g. `w/`). Without it, the prefix is inferred from the diff and the `--repo-dir` listing; pass an empty string for prefix-free paths. |
+| `-g`, `--gemini-api-key-file` | Path to file containing the Gemini API key. Falls back to `GEMINI_API_KEY` env var. |
+| `--model MODEL` | Gemini model to use (default: `gemini-3-flash-preview`). |
+| `--repo-dir DIR` | Path to the local git repository (default: current working directory). Used for `read_file` and `list_directory` tool calls, to proactively include the repository's `AGENTS.md` (if present) in the review context, and to resolve diff paths against the checkout listing during validation. |
+| `--json-output FILE` | Write the raw, undecorated JSON review document to `FILE` instead of printing human-readable text to stdout (see [JSON Review Format](#json-review-format)). `publish-mp`/`publish-pr` validate this candidate and add the review marker/preamble when posting. |
+| `--metrics FILE` | Write review metrics as JSON to `FILE` (see [Review Metrics](#review-metrics)). |
+
+`review` always produces the structured document — there is no free-text
+mode. With `--json-output` the document is written raw: the review marker and
+preamble are added by the publish commands, never here. Without
+`--json-output`, a human-readable rendering (the general comment, then one
+`<path>:<line>: <comment>` line per inline finding) is printed to stdout.
+
+**Examples:**
+
+```sh
+# Pipeline: write the candidate document for publish-pr to validate and post
+maas-code-reviewer review -g gemini-api-key \
+  --repo-dir /path/to/checkout --diff-file diff.patch \
+  --description-file description.md \
+  --json-output review.json --metrics metrics.json
+
+# Review from stdin, human-readable text to stdout
+git diff HEAD~1 | maas-code-reviewer review -g gemini-api-key --diff-file -
+```
+
 ## JSON Review Format
 
-When `review-diff --json-output` is used, or when `review-pr` posts a review,
-the LLM produces structured output with this schema:
+When `review --json-output` or `review-diff --json-output` is used, or when
+`review-pr` posts a review, the LLM produces structured output with this
+schema:
 
 ```json
 {
@@ -383,8 +427,8 @@ the LLM produces structured output with this schema:
 
 ## Review Metrics
 
-All three review commands (`review-mp`, `review-diff`, `review-pr`) accept an
-optional `--metrics FILE` flag. When provided, a JSON file is written after
+All four review commands (`review-mp`, `review-diff`, `review-pr`, `review`)
+accept an optional `--metrics FILE` flag. When provided, a JSON file is written after
 the review completes containing usage and context metrics:
 
 ```json

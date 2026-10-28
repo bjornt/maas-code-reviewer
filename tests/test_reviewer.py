@@ -21,6 +21,7 @@ from maas_code_reviewer.reviewer import (
     _extract_json,
     _truncate_diff,
     _validate_review,
+    render_review_document,
     review_diff,
     review_diff_structured,
 )
@@ -1186,6 +1187,43 @@ class TestReviewDiffStructured:
         assert isinstance(message, list)
         assert "Be nice." in message[0].text
         assert _SIMPLE_DIFF in _prompt_text(message)
+
+
+class TestRenderReviewDocument:
+    def test_renders_general_comment_then_findings(self) -> None:
+        document = {
+            "general_comment": "Looks good.",
+            "inline_comments": {
+                "src/foo.py": {"2": "Good addition."},
+                "src/bar.py": {"17": "Always true."},
+            },
+        }
+        assert render_review_document(document) == (
+            "Looks good.\n\nsrc/foo.py:2: Good addition."
+            "\n\nsrc/bar.py:17: Always true."
+        )
+
+    @pytest.mark.parametrize(
+        "document",
+        [
+            {"general_comment": "Only general.", "inline_comments": {}},
+            {"general_comment": "Only general."},
+            {"general_comment": "Only general.", "inline_comments": None},
+        ],
+    )
+    def test_renders_document_without_findings(self, document: dict) -> None:
+        assert render_review_document(document) == "Only general."
+
+    def test_renders_non_dict_inline_comments_as_general_comment_only(self) -> None:
+        document = {"general_comment": "G.", "inline_comments": ["junk"]}
+        assert render_review_document(document) == "G."
+
+    def test_skips_non_dict_line_comment_entries(self) -> None:
+        document = {
+            "general_comment": "G.",
+            "inline_comments": {"a.py": "junk", "b.py": {"1": "ok"}},
+        }
+        assert render_review_document(document) == "G.\n\nb.py:1: ok"
 
 
 class TestReviewDiffMetrics:
