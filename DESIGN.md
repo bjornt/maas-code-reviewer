@@ -372,14 +372,6 @@ those processes only via `workshop exec --env`, never through `review`'s
 environment. The untrusted container receives zero publication
 credentials.
 
-Phase-B intermediate (PLAN.md steps 9–15): until the engine swap, the
-untrusted review runs the google-genai engine, and the workflow passes the
-Gemini API key to the review run's environment via `workshop exec --env` —
-the only secret entering `untrusted` in that phase. It reaches only the
-review process, and it is safe under the base threat model: no PR code
-executes anywhere, and the review's tools are repo-contained reads. Step 15
-replaces it with the per-run gateway token described next.
-
 The only secret entering `untrusted` is the per-run, gateway-scoped
 inference token (PLAN.md step 14). The `omp-auth-gateway` snap holds the
 upstream credential on the host; the runner obtains an install-time token
@@ -530,6 +522,14 @@ moves (PLAN.md step 2). The plan is the authoritative implementation
 sequence; each of its steps lands green under `make check` (ruff, ty, and
 pytest at the unchanged 100% package coverage threshold), with CI needing
 no credentials and no real container — tests use fakes, not mocks.
+
+Status (2026-10-28, PLAN.md step 15): `review` now builds its agent process
+from the trusted runtime profile and drives one ACP conversation with omp;
+the terminal JSON is host-validated against the original full diff; metrics
+record the agent's reported identity and usage with `None`-for-unavailable
+semantics. The legacy `review-mp`/`review-pr`/`review-diff` commands and the
+google-genai engine are still present, and their retirement (step 16) is
+pending until phase-E re-collection confirms the parity checklist.
 
 Evidence from the prior spike branch is historical and uncommitted; none
 of it is inherited as proof. Real-environment acceptance is re-collected
