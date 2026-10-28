@@ -1,0 +1,11 @@
+#!/bin/bash
+# maas-code-reviewer SDK — setup-base (root, at install and when the
+# revision changes; runs before plugs/slots are connected).
+#
+# PATH wiring only: the venv mount ($SDK/venv) is not connected yet, so the
+# environment itself is created by setup-project. Hooks run in a bash login
+# session, so /etc/profile.d is sourced for subsequent shells and execs.
+set -eu
+
+printf 'export PATH="%s/venv/bin:$PATH"\n' "$SDK" \
+    > /etc/profile.d/maas-code-reviewer.sh

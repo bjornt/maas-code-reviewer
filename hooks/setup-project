@@ -1,0 +1,27 @@
+#!/bin/bash
+# maas-code-reviewer SDK — setup-project (workshop user, after the project
+# directory is mounted and plugs are connected).
+#
+# Install the package from the locked environment into the venv mount.
+# $SDK is the read-only payload: pyproject.toml + uv.lock + src/ are primed
+# there, and UV_PROJECT_ENVIRONMENT redirects the target venv to the
+# host-persisted $SDK/venv mount. --no-dev keeps pytest/ruff/ty out of
+# review containers; --frozen installs exactly the committed lockfile
+# (requires-python >= 3.12).
+set -eu
+
+export UV_PROJECT_ENVIRONMENT="$SDK/venv"
+cd "$SDK"
+"$SDK/bin/uv" sync --frozen --no-dev
+
+# Fail closed on an interpreter below the package floor.
+"$SDK/venv/bin/python3" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'
+
+# Expose the entrypoint for non-login execs (workshop run -- …) as well;
+# /etc/profile.d already covers login shells. sudo is available in hooks.
+sudo ln -sf "$SDK/venv/bin/maas-code-reviewer" /usr/local/bin/maas-code-reviewer
+
+# Self-check: the entrypoint must resolve and run from this hook's own PATH
+# (login session → profile.d). A failure here fails the launch loudly
+# instead of surfacing as a broken review job later.
+maas-code-reviewer --help > /dev/null

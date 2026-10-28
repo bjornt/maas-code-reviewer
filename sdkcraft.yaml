@@ -1,0 +1,69 @@
+# Workshop SDK definition for maas-code-reviewer, built and published with
+# sdkcraft (PLAN.md step 8). Both CI containers (ci/trusted, ci/untrusted,
+# step 9) and operator workshops select this SDK by channel; the payload
+# carries the source tree and the locked uv.lock so every install runs the
+# same code as development/CI by construction.
+#
+# Publish model (DESIGN.md "Deployment"): main pushes release latest/edge,
+# version tags promote the validated latest/edge revision to latest/stable
+# (release-promotion, never a rebuild), PRs never publish. Channel is the
+# only reproducibility control — the definition format has no revision field.
+name: maas-code-reviewer
+adopt-info: maas-code-reviewer
+license: AGPL-3.0-only
+website: https://github.com/canonical/maas-code-reviewer
+summary: LLM-powered code reviewer for Launchpad MPs and GitHub PRs  # <= 78 chars (craft-application SummaryStr max_length=78; the snap's wording)
+description: |
+  This SDK provides the maas-code-reviewer CLI for automated code review
+  inside Workshop. The Python package is installed from the project's locked
+  uv.lock via uv sync --frozen into a virtual environment persisted on the
+  host, so the maas-code-reviewer entrypoint is available on PATH. The
+  packaged prompts and runtime policy resources are resolved relative to the
+  package on the SDK's read-only mount.
+
+platforms:
+  ubuntu@26.04:amd64:
+
+plugs:
+  # Host-persisted venv (same pattern as canonical/jupyter-sdk): created at
+  # setup-project time, after auto-connect, because setup-base runs before
+  # plugs are connected. Survives workshop refresh; on ephemeral CI runners
+  # the VM dies with the job, so persistence is irrelevant but harmless.
+  venv:
+    interface: mount
+    workshop-target: $SDK/venv
+
+parts:
+  # The payload: source tree + lockfile. Deliberately the whole src/ tree so
+  # resources added later (runtime/ policy files, PLAN.md step 11) ride
+  # along without touching this definition. No stage-packages (not
+  # supported by sdkcraft); apt goes in hooks/setup-base.
+  maas-code-reviewer:
+    plugin: dump
+    source: .
+    source-type: local
+    override-pull: |
+      VERSION="$(python3 -c "import tomllib; print(tomllib.load(open('$CRAFT_PROJECT_DIR/pyproject.toml', 'rb'))['project']['version'])")"
+      craftctl set version="$VERSION"
+      craftctl default
+    override-prime: |
+      craftctl default
+      mkdir -p venv
+    prime:
+      - README.md
+      - pyproject.toml
+      - uv.lock
+      - src/**
+  # uv is not in the Ubuntu archive; ship a pinned binary so setup-time
+  # needs no version-floating installer. Pin + checksum filled at
+  # implementation time from the upstream release page
+  # https://github.com/astral-sh/uv/releases (docs.astral.sh/uv for reference).
+  uv:
+    plugin: dump
+    source: https://github.com/astral-sh/uv/releases/download/0.13.6/uv-x86_64-unknown-linux-gnu.tar.gz
+    source-type: tar
+    source-checksum: sha256/f29c3e94ffabd7e6f3ba521dba169a9b7ec12100bf3257087f0f24f6123f3645
+    organize:
+      uv: bin/uv
+    prime:
+      - bin/uv
