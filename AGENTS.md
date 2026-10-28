@@ -16,8 +16,9 @@ The `review` command runs its reviews through the omp agent harness over ACP (se
   - `github_client.py` — `GitHubClient` class and `parse_pr_url()` free function
   - `models.py` — `MergeProposal` and `Comment` dataclasses
   - `repo_tools.py` — `RepoTools`: host-only, path-traversal-safe AGENTS.md loading scoped to a repo directory
-  - `review_schema.py` — JSON review schema, `validate_review_json()`, `parse_diff_files_and_lines()`
+  - `review_schema.py` — JSON review schema, `validate_review_json()`, `parse_diff_files_and_lines()`, `parse_review_document()`
   - `reviewer.py` — `review_agent()` review orchestration plus rendering/truncation helpers
+  - `review_mcp.py` — the in-session `validate_review` MCP stdio server (spawned by the agent harness via `review-mcp`; advisory only)
   - `agent_runner.py` — vendor-neutral `AgentRunner` contract, request/result dataclasses, and error hierarchy
   - `acp_client.py` — one unattended ACP conversation over the agent subprocess
   - `acp_runner.py` — `ConfiguredAgentRunner`, the production `AgentRunner` over ACP

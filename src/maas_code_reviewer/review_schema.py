@@ -2,6 +2,7 @@
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
 import ast
+import json
 import os
 from collections.abc import Set
 from pathlib import Path
@@ -249,6 +250,41 @@ def validate_review_json(
     return errors
 
 
+def parse_review_document(
+    text: str,
+    *,
+    diff_text: str,
+    path_prefix: str | None = None,
+    repository_files: Set[str] = frozenset(),
+) -> tuple[dict | None, str | None]:
+    """Parse one terminal review document and validate it against the diff.
+
+    The text must be exactly one JSON object, optionally inside one exact
+    code fence: an opening line of ``` or ```json and a closing ``` line,
+    with no prose before or after. Non-JSON numeric constants (NaN,
+    Infinity, -Infinity) are rejected. Returns (document, None) when the
+    document is publishable, otherwise (None, failure) with a message
+    describing every reason it is not. Shared by the reviewer (host
+    validation) and the in-session validate_review tool.
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines[0] not in ("```", "```json") or lines[-1] != "```":
+            return None, "Review must contain one JSON object or exact JSON fence."
+        text = "\n".join(lines[1:-1])
+    try:
+        result = json.loads(text, parse_constant=_reject_json_constant)
+    except ValueError as exc:
+        return None, f"Invalid review JSON: {exc}"
+    errors = validate_review_json(
+        result, diff_text, path_prefix=path_prefix, repository_files=repository_files
+    )
+    if errors:
+        return None, "Invalid review document: " + "\n".join(errors)
+    return result, None
+
+
 def repository_files(root: Path) -> frozenset[str]:
     """List repository-relative files and symlinked directories under *root*."""
     paths: set[str] = set()
@@ -325,3 +361,7 @@ def _repository_path(
 def _hunk_range(value: str) -> tuple[int, int]:
     start, separator, count = value.partition(",")
     return int(start), int(count) if separator else 1
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Non-JSON numeric constant: {value}")

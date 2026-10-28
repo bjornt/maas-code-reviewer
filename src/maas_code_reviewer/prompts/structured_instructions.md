@@ -9,6 +9,9 @@ read the omitted files and the authoritative full diff named in the task
 before raising concerns that could be resolved from them.
 
 Return exactly one JSON review document as your terminal answer, following
-the schema and output rules in the system instructions. Do not call any
-validation tool first; the host validates your terminal answer against the
-schema and the full original diff.
+the schema and output rules in the system instructions. A `validate_review`
+MCP tool is available in this session: before finishing, pass your complete
+review JSON document to it to verify structure, file paths, and line numbers
+against the diff, and correct anything it reports. The tool is advisory —
+the host validates your terminal answer against the schema and the full
+original diff.

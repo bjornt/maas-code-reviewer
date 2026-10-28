@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from maas_code_reviewer import runtime_config
+from maas_code_reviewer import review_mcp, runtime_config
 from maas_code_reviewer.agent_runner import RunnerConfigurationError
+from maas_code_reviewer.reviewer import _review_validation_server
 from maas_code_reviewer.runtime_config import (
     DEFAULT_ALLOWED_MODELS,
     DEFAULT_HARNESS_ARGV,
@@ -28,10 +29,17 @@ PACKAGED_POLICY = """\
 # Trusted omp 18.12.2 review profile; never sourced from the reviewed
 # checkout. The packaged omp acp argv template enforces the native tool
 # allowlist (read,grep,glob,web_search) through --tools; this overlay pins
-# the switchable allowlist members on, turns the ambient extras off, and
-# fixes the web-search role.
+# the switchable allowlist members on, turns the ambient extras off, fixes
+# the web-search role, and pre-approves the one in-session validation tool
+# (tools.approval overrides are honored in every approval mode, keyed by
+# omp's mcp__<server>_<tool> identity for the review-validation descriptor),
+# so its calls are not denied by the host client's deterministic deny-all
+# permission policy. Every other permission request still reaches the host
+# client, which denies it.
 tools:
   xdev: false
+  approval:
+    mcp__review_validation_validate_review: allow
 dev:
   autoqa: false
 vault:
@@ -410,3 +418,22 @@ class TestPackagedProfile:
         )
 
         assert policy.read_text() == PACKAGED_POLICY
+
+    def test_packaged_policy_pre_approves_exactly_the_validation_tool(self) -> None:
+        # omp reports MCP tools under the mangled identity
+        # mcp__<server>_<tool> (QA trace: mcp__review_validation_validate_review)
+        # and honors per-tool tools.approval overrides in every approval
+        # mode. The overlay must name exactly the tool the review
+        # descriptor configures: renaming the server or the tool breaks
+        # this test, forcing the policy to follow.
+        policy = (
+            Path(runtime_config.__file__).parent / "runtime" / "profile" / "policy.yml"
+        )
+        text = policy.read_text()
+        server = _review_validation_server(Path("/repo"), Path("/repo"), None)["name"]
+        expected = f"mcp__{server.replace('-', '_')}_{review_mcp.TOOL_NAME}: allow"
+
+        assert expected == "mcp__review_validation_validate_review: allow"
+        assert text.count("\n    mcp__") == 1
+        assert f"  approval:\n    {expected}\n" in text
+        assert "--approval-mode=always-ask" in DEFAULT_HARNESS_ARGV

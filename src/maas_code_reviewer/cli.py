@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+from maas_code_reviewer import review_mcp
 from maas_code_reviewer.acp_runner import ConfiguredAgentRunner
 from maas_code_reviewer.agent_runner import AgentRunnerError
 from maas_code_reviewer.git import GitClient
@@ -27,7 +28,9 @@ from maas_code_reviewer.review_commands import (
     render_merge_proposal_comment,
     render_pull_request_review,
 )
+from maas_code_reviewer.review_schema import repository_files
 from maas_code_reviewer.reviewer import (
+    REVIEW_STAGING_RELATIVE_PATH,
     render_review_document,
     review_agent,
 )
@@ -143,6 +146,19 @@ def handle_review(args: argparse.Namespace) -> None:
         write_metrics(metrics, Path(args.metrics))
 
 
+def handle_review_mcp(args: argparse.Namespace) -> None:
+    """Serve the in-session review validation tool over MCP stdio."""
+    diff = Path(args.diff_file).read_text(encoding="utf-8")
+    repo_dir = (Path(args.repo_dir) if args.repo_dir else Path.cwd()).resolve()
+    review_mcp.serve(
+        diff,
+        path_prefix=args.diff_prefix,
+        repository_files=(repository_files(repo_dir) - {REVIEW_STAGING_RELATIVE_PATH}),
+        reader=sys.stdin,
+        writer=sys.stdout,
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -163,6 +179,8 @@ def main(argv: list[str] | None = None) -> None:
             handle_publish_pr(args)
         elif args.command == "review":
             handle_review(args)
+        elif args.command == "review-mcp":
+            handle_review_mcp(args)
     except (InvalidReviewError, AgentRunnerError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         for note in getattr(exc, "__notes__", ()):
@@ -481,6 +499,34 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="FILE",
         help="Write review metrics (model, tokens, diff stats) as JSON to FILE.",
+    )
+
+    mcp_parser = subparsers.add_parser(
+        "review-mcp",
+        help="Serve the in-session review validation tool over MCP stdio.",
+    )
+    mcp_parser.add_argument(
+        "--diff-file",
+        type=str,
+        required=True,
+        metavar="FILE",
+        help="Unified diff the review documents are validated against.",
+    )
+    mcp_parser.add_argument(
+        "--diff-prefix",
+        type=str,
+        default=None,
+        metavar="PREFIX",
+        help="Explicit new-side diff path prefix used to resolve file paths.",
+    )
+    mcp_parser.add_argument(
+        "--repo-dir",
+        type=str,
+        default=None,
+        help=(
+            "Path to the local git repository whose file listing validates "
+            "review paths (default: current working directory)."
+        ),
     )
 
     return parser

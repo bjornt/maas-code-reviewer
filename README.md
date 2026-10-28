@@ -394,6 +394,20 @@ maas-code-reviewer review \
 git diff HEAD~1 | maas-code-reviewer review --diff-file -
 ```
 
+### `review-mcp`
+
+```
+maas-code-reviewer review-mcp --diff-file FILE [--diff-prefix PREFIX] [--repo-dir DIR]
+```
+
+Internal plumbing for the in-session validation tool: `review` stages the
+reviewed diff at `.maas-code-reviewer/review-input.diff` inside the
+checkout and has the agent harness spawn this command as an MCP stdio
+server in the review session, exposing one `validate_review` tool whose
+verdict reuses the same schema validation as the host. It is not meant
+for direct use; the tool is advisory and `publish-mp`/`publish-pr` host
+validation against the authoritative diff remains the authority.
+
 ## Review runtime configuration
 
 `review` is configured by a trusted runtime profile owned by the package —

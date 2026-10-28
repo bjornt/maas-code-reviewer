@@ -32,6 +32,7 @@ from acp.schema import (
     ClientCapabilities,
     DeniedOutcome,
     Implementation,
+    McpServerStdio,
     PermissionOption,
     RequestPermissionResponse,
     ToolCallProgress,
@@ -499,7 +500,18 @@ async def _exchange(
         info = initialized.agent_info
         if info is None or not info.name.strip():
             raise RunnerStartupError("Agent did not advertise its identity")
-        session = await connection.new_session(cwd=client.session_cwd)
+        session = await connection.new_session(
+            cwd=client.session_cwd,
+            mcp_servers=[
+                McpServerStdio(
+                    name=server["name"],
+                    command=server["command"],
+                    args=list(server["args"]),
+                    env=[],
+                )
+                for server in request.mcp_servers
+            ],
+        )
         client.session_id = session.session_id
         if not client.session_id:
             raise RunnerTransportError("Agent returned an empty session identity")

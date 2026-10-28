@@ -4,10 +4,17 @@
 # Trusted omp 18.12.2 review profile; never sourced from the reviewed
 # checkout. The packaged omp acp argv template enforces the native tool
 # allowlist (read,grep,glob,web_search) through --tools; this overlay pins
-# the switchable allowlist members on, turns the ambient extras off, and
-# fixes the web-search role.
+# the switchable allowlist members on, turns the ambient extras off, fixes
+# the web-search role, and pre-approves the one in-session validation tool
+# (tools.approval overrides are honored in every approval mode, keyed by
+# omp's mcp__<server>_<tool> identity for the review-validation descriptor),
+# so its calls are not denied by the host client's deterministic deny-all
+# permission policy. Every other permission request still reaches the host
+# client, which denies it.
 tools:
   xdev: false
+  approval:
+    mcp__review_validation_validate_review: allow
 dev:
   autoqa: false
 vault:

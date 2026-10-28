@@ -25,6 +25,7 @@ optional enclosing code fence must open with exactly ```json or ``` and
 close with exactly ``` on its own line. Do not output prose before or after
 the JSON, multiple JSON objects, or non-JSON constants. The host validates
 your terminal answer against this schema and the full original diff before
-anything is published; no validation tool is exposed to you. Do not add a
-review marker or generated-review preamble; the host adds those at publish
-time.
+anything is published; the in-session `validate_review` tool can check a
+draft, but its verdict is advisory — only host validation decides what is
+published. Do not add a review marker or generated-review preamble; the
+host adds those at publish time.
