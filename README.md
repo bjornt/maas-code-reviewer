@@ -495,6 +495,17 @@ make test        # pytest
 make coverage    # pytest with 100% coverage enforcement
 ```
 
+### Workshop SDK
+
+The deployment artifact is a Workshop SDK (`sdkcraft.yaml` + `hooks/`, built
+and published with `sdkcraft`/LXD): `latest/edge` tracks main, and version
+tags promote the validated edge revision to `latest/stable` — a channel-pointer
+move, never a rebuild. One-time operator prerequisites: register the SDK name
+under the team's publisher (`sdkcraft register maas-code-reviewer`) and store
+exported Store credentials as the `SDKCRAFT_STORE_CREDENTIALS` secret
+(see DESIGN.md "Deployment"). Development still runs from a checkout
+(`uv sync`); `make check` is the shared gate for both.
+
 ## License
 
 Copyright MAAS Developers.

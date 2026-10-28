@@ -1,0 +1,140 @@
+name: SDK publish
+
+# Publishes the maas-code-reviewer Workshop SDK to the SDK Store
+# (PLAN.md step 8; DESIGN.md "Deployment").
+#
+# Protected refs only, three jobs:
+#   pull_request  → pack and lint only; never references Store credentials,
+#                   so fork PRs cannot reach them.
+#   push to main  → pack + upload --release latest/edge (fresh revision;
+#                   validated via the manual workflow's optional edge
+#                   channel, PLAN.md step 9, before any promotion).
+#   push to a version tag (bare release tags, e.g. 0.1.0 / 0.10 — the
+#                   repo convention) → promote the current latest/edge
+#                   revision to latest/stable with `sdkcraft release`
+#                   (channel-pointer move, never a rebuild).
+#
+# One-time operator setup (recorded in the step 8 commit message):
+#   sdkcraft login                       # Ubuntu One, team publisher
+#   sdkcraft register maas-code-reviewer
+#   sdkcraft login --export credentials.txt
+#   -> GitHub secret SDKCRAFT_STORE_CREDENTIALS
+
+on:
+  push:
+    branches: [main]
+    tags: ['*']  # release tags are the repo convention; any tag promotes
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack:
+    name: Pack SDK (validation only)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install LXD
+        uses: canonical/setup-lxd@8c6a87bfb56aa48f3fb9b830baa18562d8bfd4ee # v1
+        with:
+          channel: 6/stable
+
+      - name: Install sdkcraft
+        run: sudo snap install --classic sdkcraft
+
+      # Schema validation, ShellCheck on hooks/, part builds — no Store
+      # access, no secrets. This is the PR-side half of the SDK gate.
+      - name: Pack the SDK
+        run: sdkcraft --verbose pack
+
+  publish:
+    name: Pack and publish SDK (latest/edge)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install LXD
+        uses: canonical/setup-lxd@8c6a87bfb56aa48f3fb9b830baa18562d8bfd4ee # v1
+        with:
+          channel: 6/stable
+
+      - name: Install sdkcraft
+        run: sudo snap install --classic sdkcraft
+
+      - name: Pack the SDK
+        run: sdkcraft --verbose pack
+
+      # upload --release pushes the fresh revision and points latest/edge at
+      # it in one step. Validation of that revision happens through the
+      # manual review workflow's optional edge channel (PLAN.md step 9)
+      # before any tag promotes it to latest/stable below.
+      - name: Upload and release to latest/edge
+        env:
+          SDKCRAFT_STORE_CREDENTIALS: ${{ secrets.SDKCRAFT_STORE_CREDENTIALS }}
+        run: |
+          for sdk in *.sdk; do
+            sdkcraft --verbose upload "$sdk" --release latest/edge
+          done
+
+  promote:
+    name: Promote edge revision to latest/stable
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # No LXD and no pack here: release-promotion never rebuilds or
+      # re-uploads, it only moves the channel pointer
+      # (sdkcraft/commands/release.py).
+      - name: Install sdkcraft
+        run: sudo snap install --classic sdkcraft
+
+      # Resolve the revision currently released to latest/edge for this
+      # platform. `sdkcraft revisions` prints a plain two-space-aligned
+      # table (CHANNEL REVISION ARCHITECTURE UPLOADED —
+      # sdkcraft/commands/_formatters.py); channel/architecture cells can
+      # be comma-joined lists, hence substring matches rather than
+      # equality. Verify against live output at first promotion (§10.5);
+      # the empty check below keeps this fail-closed in the meantime.
+      - name: Resolve the latest/edge revision
+        env:
+          SDKCRAFT_STORE_CREDENTIALS: ${{ secrets.SDKCRAFT_STORE_CREDENTIALS }}
+        run: |
+          REVISION="$(sdkcraft revisions maas-code-reviewer | awk '
+            index($1, "latest/edge") != 0 && index($3, "amd64") != 0 { rev = $2 }
+            END { print rev }')"
+          if [ -z "$REVISION" ]; then
+            echo "No amd64 revision found on latest/edge - refusing to promote." >&2
+            exit 1
+          fi
+          echo "Promoting revision $REVISION: latest/edge -> latest/stable"
+          echo "REVISION=$REVISION" >> "$GITHUB_ENV"
+
+      # Pointer move on the validated edge revision; `sdkcraft release`
+      # prints the resulting channel map to the job log as evidence.
+      - name: Release to latest/stable
+        env:
+          SDKCRAFT_STORE_CREDENTIALS: ${{ secrets.SDKCRAFT_STORE_CREDENTIALS }}
+        run: |
+          sdkcraft --verbose release maas-code-reviewer "$REVISION" latest/stable
