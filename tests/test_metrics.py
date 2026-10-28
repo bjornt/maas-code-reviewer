@@ -18,6 +18,48 @@ class TestReviewMetrics:
         assert metrics.agents_md_read is False
         assert metrics.diff_lines == 0
         assert metrics.diff_size_bytes == 0
+        assert metrics.agent_name is None
+        assert metrics.agent_version is None
+        assert metrics.tokens_cache_read is None
+        assert metrics.tokens_cache_write is None
+        assert metrics.tokens_total is None
+        assert metrics.cost is None
+        assert metrics.cost_currency is None
+
+    def test_agent_fields_round_trip_and_none_serialises_as_null(
+        self, tmp_path: Path
+    ) -> None:
+        metrics = ReviewMetrics(
+            model_name=None,
+            agent_name="omp",
+            agent_version="18.12.2",
+            tokens_cache_read=5,
+            tokens_cache_write=2,
+            tokens_total=31,
+            cost=0.125,
+            cost_currency="USD",
+        )
+        out = tmp_path / "metrics.json"
+        write_metrics(metrics, out)
+
+        data = json.loads(out.read_text())
+        assert data["model_name"] is None
+        assert data["agent_name"] == "omp"
+        assert data["agent_version"] == "18.12.2"
+        assert data["tokens_cache_read"] == 5
+        assert data["tokens_cache_write"] == 2
+        assert data["tokens_total"] == 31
+        assert data["cost"] == 0.125
+        assert data["cost_currency"] == "USD"
+
+        default_out = tmp_path / "default-metrics.json"
+        write_metrics(ReviewMetrics(), default_out)
+
+        default_data = json.loads(default_out.read_text())
+        assert default_data["agent_name"] is None
+        assert default_data["cost"] is None
+        assert '"agent_name": null' in default_out.read_text()
+        assert '"cost": null' in default_out.read_text()
 
 
 class TestWriteMetrics:

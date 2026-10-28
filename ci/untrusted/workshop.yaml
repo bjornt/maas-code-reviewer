@@ -2,11 +2,12 @@
 #
 # `review` runs here with zero GitHub/Launchpad credentials: the runner host
 # only brokers files into and out of this project directory, and PR content
-# enters as data, never tooling. Phase-B intermediate: this definition
-# carries ONLY the maas-code-reviewer SDK — the omp SDK and the inference
-# plug to the host omp-auth-gateway arrive with the engine swap (PLAN.md
-# step 15), when the workflow passes the per-run gateway token (PLAN.md
-# step 14) to the review run's environment in place of the Gemini API key.
+# enters as data, never tooling. Since the engine swap (PLAN.md step 15) the
+# definition also selects the omp SDK — the agent harness for `review` — and
+# the inference plug below tunnels to the host's omp-auth-gateway
+# (127.0.0.1:4000, PLAN.md step 14): the only secret entering this container
+# is the per-run, gateway-scoped token passed to the review run's
+# environment, and it authorizes exactly what the agent may do anyway.
 #
 # Never use the root workshop.yaml (the dev environment) here.
 name: untrusted
@@ -14,3 +15,8 @@ base: ubuntu@26.04
 sdks:
   - name: maas-code-reviewer
     channel: latest/stable
+  - name: omp
+    plugs:
+      inference:
+        interface: tunnel
+        endpoint: 127.0.0.1:4000

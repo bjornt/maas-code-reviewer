@@ -20,12 +20,11 @@ on:
         required: true
         type: string
       model:
-        description: "Gemini model name (e.g. gemini-3.1-pro-preview, gemini-2.5-flash)"
+        description: "Exact model identity allowed by the runtime profile"
         required: false
         type: string
-        default: gemini-3.1-pro-preview
       review_timeout:
-        description: "Total review deadline in seconds (in-container exec timeout; --review-timeout arrives with PLAN.md step 15)"
+        description: "Total review deadline in seconds (--review-timeout)"
         required: false
         type: string
         default: "600"
@@ -82,6 +81,29 @@ jobs:
         with:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
+
+      - name: Install the omp-auth-gateway and load the upstream credential
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_KEY }}
+        # The gateway app has no credential-loading action (verified live,
+        # QA step-15 B4): API keys are handed to the gateway vault by the
+        # broker app — `migrate --from-local --include-env` captures
+        # GEMINI_API_KEY from this step's environment. The credential never
+        # leaves the host. latest/candidate (18.13.2 at verification) is the
+        # working revision; stable 15.12.3 lacks the needed surface.
+        run: |
+          sudo snap install omp-auth-gateway --channel=latest/candidate
+          sudo snap alias omp-auth-gateway.broker omp-auth-broker
+          sudo env GEMINI_API_KEY="$GEMINI_API_KEY" \
+            OMP_AUTH_BROKER_URL=http://127.0.0.1:8765 \
+            omp-auth-broker migrate --from-local --include-env
+
+      - name: Read the per-run inference token
+        id: inference
+        # Step 14. The snap generates the gateway-scoped token at install
+        # time; the runner is an ephemeral VM, so install-time == per-run.
+        # It authorizes inference routes only and dies with the job.
+        run: echo "token=$(sudo omp-auth-gateway token)" >> "$GITHUB_OUTPUT"
 
       # Same two project directories as the automatic workflow, plus the
       # SDK channel rewrite in the copies (never the checkout): edge
@@ -153,7 +175,7 @@ jobs:
 
       - name: Review (untrusted)
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GATEWAY_TOKEN: ${{ steps.inference.outputs.token }}
           MODEL: ${{ inputs.model }}
           REVIEW_TIMEOUT: ${{ inputs.review_timeout }}
         run: |
@@ -161,15 +183,20 @@ jobs:
           case "$REVIEW_TIMEOUT" in
             "" | *[!0-9]*) echo "Invalid review timeout: $REVIEW_TIMEOUT" >&2; exit 1 ;;
           esac
-          workshop --project "$RUNNER_TEMP/review/untrusted" exec \
-            --env GEMINI_API_KEY --timeout "${REVIEW_TIMEOUT}s" untrusted -- \
-            maas-code-reviewer review \
-            --repo-dir /project/repo \
-            --diff-file /project/inputs/diff.patch \
-            --description-file /project/inputs/description.md \
-            --model "$MODEL" \
-            --json-output /project/outputs/review.json \
+          review_args=(
+            --repo-dir /project/repo
+            --diff-file /project/inputs/diff.patch
+            --description-file /project/inputs/description.md
+            --review-timeout "$REVIEW_TIMEOUT"
+            --json-output /project/outputs/review.json
             --metrics /project/outputs/metrics.json
+          )
+          if [ -n "$MODEL" ]; then
+            review_args+=(--model "$MODEL")
+          fi
+          workshop --project "$RUNNER_TEMP/review/untrusted" exec \
+            --env GATEWAY_TOKEN untrusted -- \
+            maas-code-reviewer review "${review_args[@]}"
 
       - name: Collect the candidate review (host broker)
         run: |

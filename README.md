@@ -71,7 +71,9 @@ uv run maas-code-reviewer
 
 ### Gemini API Key
 
-All review commands require a Gemini API key. Provide it in one of two ways:
+The legacy review commands require a Gemini API key; `review` does not (see
+[Review runtime configuration](#review-runtime-configuration)). Provide it in
+one of two ways:
 
 | Method | Details |
 |---|---|
@@ -81,6 +83,9 @@ All review commands require a Gemini API key. Provide it in one of two ways:
 ```sh
 maas-code-reviewer review-mp -g /path/to/gemini-api-key MP_URL
 ```
+
+The `review` command no longer uses a Gemini key; `review-diff`,
+`review-mp`, and `review-pr` still do until step 16.
 
 ### GitHub Token
 
@@ -127,9 +132,12 @@ The snap generates a gateway token at install time. That token is valid for
 the gateway itself — never for the upstream credential:
 
 ```sh
-sudo snap install omp-auth-gateway
-sudo GEMINI_KEY="$GEMINI_KEY" omp-auth-gateway login  # upstream credential, host-only
-sudo omp-auth-gateway token                           # the gateway-scoped token
+sudo snap install omp-auth-gateway --channel=latest/candidate
+sudo snap alias omp-auth-gateway.broker omp-auth-broker
+sudo env GEMINI_API_KEY="$GEMINI_API_KEY" \
+  OMP_AUTH_BROKER_URL=http://127.0.0.1:8765 \
+  omp-auth-broker migrate --from-local --include-env   # upstream credential, host-only
+sudo omp-auth-gateway token                            # the gateway-scoped token
 ```
 
 The runner passes that token — and nothing else — into the review
@@ -434,10 +442,13 @@ pipeline-facing command: `fetch-mp`/`fetch-pr` acquire the diff and
 description, `review` produces the candidate document, and
 `publish-mp`/`publish-pr` validate, decorate, and post it. `review` itself
 never posts anything and talks to no Git forge. The diff can be read from a
-file or from stdin (pass `-`).
+file or from stdin (pass `-`). The review runs through the omp agent harness
+over ACP using the
+[runtime configuration](#review-runtime-configuration); there is no Gemini
+fallback.
 
 ```sh
-maas-code-reviewer review -g KEY_FILE --diff-file DIFF_FILE [--description-file FILE] [--diff-prefix PREFIX] [--repo-dir DIR] [--model MODEL] [--json-output FILE] [--metrics FILE]
+maas-code-reviewer review --diff-file DIFF_FILE [--description-file FILE] [--diff-prefix PREFIX] [--repo-dir DIR] [--model MODEL] [--runtime-config FILE] [--review-timeout SECONDS] [--json-output FILE] [--metrics FILE] [--otel-output DIR]
 ```
 
 | Argument | Description |
@@ -445,11 +456,13 @@ maas-code-reviewer review -g KEY_FILE --diff-file DIFF_FILE [--description-file 
 | `--diff-file FILE` | Required. Path to a unified diff file, or `-` to read from stdin. |
 | `--description-file FILE` | Path to a UTF-8 file with the change description (e.g. the merge proposal or pull request description). |
 | `--diff-prefix PREFIX` | Explicit new-side path prefix in the diff (e.g. `w/`). Without it, the prefix is inferred from the diff and the `--repo-dir` listing; pass an empty string for prefix-free paths. |
-| `-g`, `--gemini-api-key-file` | Path to file containing the Gemini API key. Falls back to `GEMINI_API_KEY` env var. |
-| `--model MODEL` | Gemini model to use (default: `gemini-3-flash-preview`). |
-| `--repo-dir DIR` | Path to the local git repository (default: current working directory). Used for `read_file` and `list_directory` tool calls, to proactively include the repository's `AGENTS.md` (if present) in the review context, and to resolve diff paths against the checkout listing during validation. |
+| `--repo-dir DIR` | Path to the local git repository (default: current working directory). The agent inspects this tree with its native read/grep/glob tools, AGENTS.md is included as untrusted conventions, and validation resolves diff paths against this checkout. |
+| `--model MODEL` | Exact model identity to review with (default: the runtime profile). Must be allowed by the runtime profile's allowlist. |
+| `--runtime-config FILE` | Explicit trusted TOML runtime configuration overriding individual built-in review runtime defaults. |
+| `--review-timeout SECONDS` | Finite positive deadline in seconds for startup and the agent turn (default: the runtime profile). |
 | `--json-output FILE` | Write the raw, undecorated JSON review document to `FILE` instead of printing human-readable text to stdout (see [JSON Review Format](#json-review-format)). `publish-mp`/`publish-pr` validate this candidate and add the review marker/preamble when posting. |
 | `--metrics FILE` | Write review metrics as JSON to `FILE` (see [Review Metrics](#review-metrics)). |
+| `--otel-output DIR` | Collect the agent's OpenTelemetry diagnostics as OTLP JSONL files (`traces.jsonl`, `metrics.jsonl`) in DIR. |
 
 `review` always produces the structured document — there is no free-text
 mode. With `--json-output` the document is written raw: the review marker and
@@ -461,20 +474,71 @@ preamble are added by the publish commands, never here. Without
 
 ```sh
 # Pipeline: write the candidate document for publish-pr to validate and post
-maas-code-reviewer review -g gemini-api-key \
+maas-code-reviewer review \
   --repo-dir /path/to/checkout --diff-file diff.patch \
   --description-file description.md \
   --json-output review.json --metrics metrics.json
 
 # Review from stdin, human-readable text to stdout
-git diff HEAD~1 | maas-code-reviewer review -g gemini-api-key --diff-file -
+git diff HEAD~1 | maas-code-reviewer review --diff-file -
 ```
+
+## Review runtime configuration
+
+`review` is configured by a trusted runtime profile owned by the package —
+never by the reviewed checkout, the environment, or the working directory.
+Policy loading is lazy (an ordinary review starts nothing until it runs) and
+never reads the reviewed checkout. The built-in defaults:
+
+- Default model `openai-codex/gpt-6.1-sol` with a one-entry allowlist.
+- The omp `acp` argv template from the packaged
+  `runtime/profile/policy.yml` overlay, which enforces the native tool
+  allowlist `read,grep,glob,web_search`.
+- Inference endpoint `http://127.0.0.1:4000` (see
+  [Inference gateway](#inference-gateway)).
+- A 300-second review timeout covering agent startup and the turn.
+
+One explicitly selected TOML file (`--runtime-config FILE`) overrides
+individual values, fail-closed: unknown keys are rejected. Supported keys:
+
+```toml
+review_timeout_seconds = 600.0
+
+[model]
+default = "provider/model"
+allowed = ["provider/model"]
+
+[harness]
+argv = ["/path/to/omp", "acp", "--model={model}", "..."]
+
+[inference]
+endpoint = "http://127.0.0.1:4000"
+
+[profile]
+directory = "./profile"
+```
+
+`--review-timeout` and `--model` take precedence over the profile: the CLI
+timeout must be a finite positive number of seconds, and an explicit model
+identity is validated against the profile's allowlist.
+
+The review run's environment is built from scratch — the only secret it
+receives is the per-run gateway token, read from the invoking environment's
+`GATEWAY_TOKEN` variable and referenced by name in the per-run provider
+configuration. A missing or empty `GATEWAY_TOKEN` fails closed before any
+agent starts (see [Inference gateway](#inference-gateway)).
+
+With `--otel-output DIR`, the agent's OpenTelemetry diagnostics are
+collected by a loopback OTLP receiver into `traces.jsonl` and
+`metrics.jsonl` in DIR; the files are flushed before the command writes
+metrics, and a collection failure never masks the review result.
 
 ## JSON Review Format
 
 When `review --json-output` or `review-diff --json-output` is used, or when
-`review-pr` posts a review, the LLM produces structured output with this
-schema:
+`review-pr` posts a review, the reviewing engine produces structured output
+with this schema — omp over ACP for `review`, google-genai for the legacy
+commands:
 
 ```json
 {
@@ -504,27 +568,46 @@ the review completes containing usage and context metrics:
 
 ```json
 {
-  "model_name": "gemini-3-flash-preview",
+  "model_name": "openai-codex/gpt-6.1-sol",
   "tokens_thinking": 1234,
   "tokens_input": 5678,
   "tokens_output": 910,
   "files_read": 3,
   "agents_md_read": true,
   "diff_lines": 42,
-  "diff_size_bytes": 2048
+  "diff_size_bytes": 2048,
+  "agent_name": "omp",
+  "agent_version": "18.12.2",
+  "tokens_cache_read": null,
+  "tokens_cache_write": null,
+  "tokens_total": null,
+  "cost": 0.0125,
+  "cost_currency": "USD"
 }
 ```
 
 | Field | Description |
 |---|---|
-| `model_name` | The Gemini model used for the review. |
+| `model_name` | The model identity for the review: the resolved omp model for `review` (`null` when the agent did not report one), the Gemini model for the legacy commands. |
 | `tokens_thinking` | Number of internal thinking tokens used by the model. |
 | `tokens_input` | Number of input (prompt) tokens. |
 | `tokens_output` | Number of output (completion) tokens. |
-| `files_read` | Number of files read via the `read_file` tool during the review. |
-| `agents_md_read` | Whether the repository's `AGENTS.md` file was included in the review (fetched proactively, or read via the `read_file` tool). |
+| `files_read` | Number of files read via the `read_file` tool during the review (google-genai commands only; removed in step 16). |
+| `agents_md_read` | Whether the repository's `AGENTS.md` file was included in the review (fetched proactively, or read via the `read_file` tool) (google-genai commands only; removed in step 16). |
 | `diff_lines` | Number of lines in the original diff (before any truncation). |
 | `diff_size_bytes` | Size of the original diff in bytes (UTF-8 encoded). |
+| `agent_name` | Name of the agent harness that produced the review (`review` only). |
+| `agent_version` | Version of the agent harness (`review` only). |
+| `tokens_cache_read` | Number of cache-read tokens reported by the agent (`review` only). |
+| `tokens_cache_write` | Number of cache-write tokens reported by the agent (`review` only). |
+| `tokens_total` | Total token count reported by the agent (`review` only). |
+| `cost` | Inference cost reported by the agent (`review` only). |
+| `cost_currency` | Currency of the reported cost (`review` only). |
+
+The agent-path fields (`agent_name` through `cost_currency`) are populated by
+`review`; the legacy fields above them stay populated by the legacy commands
+(both groups are visible until step 16). On the agent path, `null` means
+*unavailable* — the agent did not report a value — never a fabricated zero.
 
 The metrics file is written after the review completes. If the review is
 skipped (e.g. an MP was already reviewed), no metrics file is written.

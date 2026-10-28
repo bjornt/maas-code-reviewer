@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-`maas-code-reviewer` is a Python CLI tool that reviews [Launchpad](https://launchpad.net/) merge proposals and [GitHub](https://github.com/) pull requests using a Gemini LLM. See `SPEC.md` for the full specification.
+`maas-code-reviewer` is a Python CLI tool that reviews [Launchpad](https://launchpad.net/) merge proposals and [GitHub](https://github.com/) pull requests using an LLM. See `SPEC.md` for the full specification.
+
+The `review` command runs its reviews through the omp agent harness over ACP (see `DESIGN.md`); the legacy `review-mp`, `review-pr`, and `review-diff` commands remain on the google-genai engine during the transition and are retired once the new pipeline's parity is proven (`PLAN.md` step 16).
 
 ## Project Structure
 
@@ -16,7 +18,13 @@
   - `models.py` — `MergeProposal` and `Comment` dataclasses
   - `repo_tools.py` — `RepoTools`: file-system access scoped to a repo directory
   - `review_schema.py` — JSON review schema, `validate_review_json()`, `parse_diff_files_and_lines()`
-  - `reviewer.py` — `review_diff()` and `review_diff_structured()` orchestration logic
+  - `reviewer.py` — `review_diff()`/`review_diff_structured()` (google-genai) and `review_agent()` (omp over ACP) orchestration logic
+  - `agent_runner.py` — vendor-neutral `AgentRunner` contract, request/result dataclasses, and error hierarchy
+  - `acp_client.py` — one unattended ACP conversation over the agent subprocess
+  - `acp_runner.py` — `ConfiguredAgentRunner`, the production `AgentRunner` over ACP
+  - `runtime_config.py` — trusted review runtime policy and its TOML override
+  - `telemetry.py` — review-scoped loopback OTLP collector
+  - `metrics.py` — `ReviewMetrics` dataclass and `write_metrics()`; populated by both engine paths this step
 - `tests/` — tests and fakes
   - `factory.py` — test data factories
   - `fake_git.py` — `FakeGitClient` (uses real temp git repos)
@@ -24,6 +32,8 @@
   - `fake_launchpad.py` — `FakeLaunchpadClient`
   - `fake_launchpadlib.py` — low-level launchpadlib fake
   - `fake_llm.py` — `FakeLLMClient` / `ScriptedResponse`
+  - `fake_agent_runner.py` — `FakeAgentRunner` for the `AgentRunner` contract
+  - `fake_acp.py` — wire-level adversarial ACP subprocess peer
 - `pyproject.toml` — project config (hatchling build, uv for deps)
 - `Makefile` — lint, typecheck, test, and build targets
 

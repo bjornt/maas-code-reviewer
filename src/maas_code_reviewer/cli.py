@@ -3,11 +3,14 @@
 
 import argparse
 import json
+import math
 import os
 import sys
 from pathlib import Path
 from typing import NoReturn
 
+from maas_code_reviewer.acp_runner import ConfiguredAgentRunner
+from maas_code_reviewer.agent_runner import AgentRunnerError
 from maas_code_reviewer.git import GitClient
 from maas_code_reviewer.github_client import GitHubClient, parse_pr_url
 from maas_code_reviewer.launchpad_client import LaunchpadClient
@@ -31,6 +34,7 @@ from maas_code_reviewer.review_schema import repository_files
 from maas_code_reviewer.reviewer import (
     NoReviewText,
     render_review_document,
+    review_agent,
     review_diff,
     review_diff_structured,
 )
@@ -223,38 +227,40 @@ def handle_review_pr(args: argparse.Namespace) -> None:
 
 def handle_review(args: argparse.Namespace) -> None:
     """Handle the review subcommand."""
-    api_key = _get_gemini_api_key(args)
-    if api_key is None:
-        _exit_missing_gemini_api_key()
-
     if args.diff_file == "-":
         diff = sys.stdin.read()
+        diff_file = None
     else:
         diff = Path(args.diff_file).read_text()
+        diff_file = Path(args.diff_file).absolute()
 
     if args.description_file is None:
         description = None
     else:
         description = Path(args.description_file).read_text(encoding="utf-8")
 
-    repo_dir = Path(args.repo_dir) if args.repo_dir else Path.cwd()
+    repo_dir = (Path(args.repo_dir) if args.repo_dir else Path.cwd()).resolve()
 
-    llm_client = GeminiClient(api_key=api_key, model=args.model)
-
-    tools, agents_md = read_agents_context(repo_dir)
+    runner = ConfiguredAgentRunner(
+        Path(args.runtime_config) if args.runtime_config else None,
+        model=args.model,
+        timeout_seconds=args.review_timeout,
+        otel_output=Path(args.otel_output) if args.otel_output else None,
+    )
     metrics = ReviewMetrics()
+    _, agents_md = read_agents_context(repo_dir)
 
     try:
-        document = review_diff_structured(
-            llm_client,
-            diff=diff,
-            description=description,
-            read_file=tools.read_file,
-            list_directory=tools.list_directory,
+        document = review_agent(
+            runner,
+            diff,
+            description,
+            repo_dir,
+            diff_file=diff_file,
             agents_md=agents_md,
             metrics=metrics,
+            model=args.model,
             diff_prefix=args.diff_prefix,
-            repository_files=repository_files(repo_dir),
         )
     except ValueError as exc:
         raise InvalidReviewError([str(exc)]) from exc
@@ -264,8 +270,6 @@ def handle_review(args: argparse.Namespace) -> None:
     else:
         print(render_review_document(document))
 
-    metrics.files_read = tools.files_read_count
-    metrics.agents_md_read = tools.agents_md_read
     if args.metrics is not None:
         write_metrics(metrics, Path(args.metrics))
 
@@ -296,8 +300,10 @@ def main(argv: list[str] | None = None) -> None:
             handle_review_pr(args)
         elif args.command == "review":
             handle_review(args)
-    except (NoReviewText, InvalidReviewError) as exc:
+    except (NoReviewText, InvalidReviewError, AgentRunnerError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
+        for note in getattr(exc, "__notes__", ()):
+            print(note, file=sys.stderr)
         sys.exit(1)
 
 
@@ -338,6 +344,21 @@ def _exit_missing_github_token() -> NoReturn:
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _positive_timeout(value: str) -> float:
+    """Parse a finite positive --review-timeout value (argparse type)."""
+    try:
+        seconds = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "review timeout must be a finite positive number of seconds"
+        ) from None
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError(
+            "review timeout must be a finite positive number of seconds"
+        )
+    return seconds
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -708,20 +729,38 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Review a unified diff and produce the structured review document.",
     )
     review_pipeline_parser.add_argument(
-        "-g",
-        "--gemini-api-key-file",
+        "--model",
         type=str,
         default=None,
+        help="Exact model identity to review with (default: the runtime profile).",
+    )
+    review_pipeline_parser.add_argument(
+        "--runtime-config",
+        type=str,
+        default=None,
+        metavar="FILE",
         help=(
-            "Path to file containing the Gemini API key. If not provided, "
-            "read from the GEMINI_API_KEY environment variable."
+            "Explicit trusted TOML runtime configuration overriding "
+            "individual built-in review runtime defaults."
         ),
     )
     review_pipeline_parser.add_argument(
-        "--model",
+        "--review-timeout",
+        type=_positive_timeout,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "Finite positive deadline in seconds for startup and the "
+            "agent turn (default: the runtime profile; cleanup has a "
+            "separate bounded grace period)."
+        ),
+    )
+    review_pipeline_parser.add_argument(
+        "--otel-output",
         type=str,
-        default="gemini-3-flash-preview",
-        help="Gemini model to use (default: 'gemini-3-flash-preview').",
+        default=None,
+        metavar="DIR",
+        help="Collect omp OpenTelemetry diagnostics as OTLP JSONL files in DIR.",
     )
     review_pipeline_parser.add_argument(
         "--diff-file",

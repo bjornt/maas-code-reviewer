@@ -17,14 +17,6 @@ permissions:
   contents: read
   pull-requests: write  # exercised only by the publish step
 
-env:
-  # Model can be any Gemini model name that your GEMINI_API_KEY has access
-  # to. For example:
-  #  - gemini-3.1-pro-preview
-  #  - gemini-3-flash-preview
-  #  - gemini-2.5-flash
-  MODEL: gemini-3.1-pro-preview
-
 jobs:
   review:
     runs-on: ubuntu-26.04  # GitHub-hosted ephemeral VM
@@ -37,6 +29,29 @@ jobs:
         with:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
+
+      - name: Install the omp-auth-gateway and load the upstream credential
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_KEY }}
+        # The gateway app has no credential-loading action (verified live,
+        # QA step-15 B4): API keys are handed to the gateway vault by the
+        # broker app — `migrate --from-local --include-env` captures
+        # GEMINI_API_KEY from this step's environment. The credential never
+        # leaves the host. latest/candidate (18.13.2 at verification) is the
+        # working revision; stable 15.12.3 lacks the needed surface.
+        run: |
+          sudo snap install omp-auth-gateway --channel=latest/candidate
+          sudo snap alias omp-auth-gateway.broker omp-auth-broker
+          sudo env GEMINI_API_KEY="$GEMINI_API_KEY" \
+            OMP_AUTH_BROKER_URL=http://127.0.0.1:8765 \
+            omp-auth-broker migrate --from-local --include-env
+
+      - name: Read the per-run inference token
+        id: inference
+        # Step 14. The snap generates the gateway-scoped token at install
+        # time; the runner is an ephemeral VM, so install-time == per-run.
+        # It authorizes inference routes only and dies with the job.
+        run: echo "token=$(sudo omp-auth-gateway token)" >> "$GITHUB_OUTPUT"
 
       # Job project directories: a copy of each ci/ definition (so job
       # state — fetch output, staged inputs, candidate, metrics — never
@@ -109,24 +124,24 @@ jobs:
           mv "$GITHUB_WORKSPACE/pr-head" "$RUNNER_TEMP/review/untrusted/repo"
 
       # Review (untrusted): zero GitHub/Launchpad credentials by design.
-      # Phase-B intermediate (PLAN.md step 9): the review runs the
-      # google-genai engine, so the Gemini API key is passed to this run's
-      # environment only — safe under the base threat model (no PR code
-      # executes anywhere; the review's tools are repo-contained reads) and
-      # replaced in step 15 by the per-run omp-auth-gateway token. The exec
-      # --timeout is the phase-B review deadline (--review-timeout arrives
-      # with step 15); the job's timeout-minutes is the hard backstop.
+      # The only secret entering this container is the per-run,
+      # gateway-scoped inference token (PLAN.md step 14), spent at the host
+      # omp-auth-gateway through the omp SDK's inference plug — it
+      # authorizes exactly what the agent may do anyway. Model selection is
+      # the runtime profile's (PLAN.md step 11); no --model here. The job's
+      # timeout-minutes is the hard backstop around the in-container
+      # --review-timeout.
       - name: Review (untrusted)
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GATEWAY_TOKEN: ${{ steps.inference.outputs.token }}
         run: |
           workshop --project "$RUNNER_TEMP/review/untrusted" exec \
-            --env GEMINI_API_KEY --timeout 600s untrusted -- \
+            --env GATEWAY_TOKEN untrusted -- \
             maas-code-reviewer review \
             --repo-dir /project/repo \
             --diff-file /project/inputs/diff.patch \
             --description-file /project/inputs/description.md \
-            --model "$MODEL" \
+            --review-timeout 600 \
             --json-output /project/outputs/review.json \
             --metrics /project/outputs/metrics.json
 
