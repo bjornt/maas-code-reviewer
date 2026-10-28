@@ -114,6 +114,77 @@ with pull scope, provided in the `LP_GIT_TOKEN` environment variable.
 writes it to disk (no credential helper, no credential-bearing remote URLs).
 Without it, only public repositories can be fetched.
 
+## Inference gateway
+
+The containerized review pipeline reaches the model through the
+`omp-auth-gateway` snap on the host — never through provider credentials in
+the container. The snap wraps `omp auth-gateway`: it holds the real upstream
+provider credential on the host and serves inference from `127.0.0.1:4000`.
+The review container reaches it through its Workshop inference plug, which
+tunnels to that address.
+
+The snap generates a gateway token at install time. That token is valid for
+the gateway itself — never for the upstream credential:
+
+```sh
+sudo snap install omp-auth-gateway
+sudo GEMINI_KEY="$GEMINI_KEY" omp-auth-gateway login  # upstream credential, host-only
+sudo omp-auth-gateway token                           # the gateway-scoped token
+```
+
+The runner passes that token — and nothing else — into the review
+container's environment with `workshop exec --env`. No GitHub, Launchpad, or
+upstream-provider credential ever reaches the agent. The agent reading the
+gateway token is acceptable: it authorizes exactly what the agent may do
+anyway.
+
+On ephemeral CI runners the token is generated at install time and dies with
+the job, so install-time issuance is per-run issuance. On persistent hosts,
+rotate it by regenerating it via the snap.
+
+Loopback binding is not the boundary: the inference plug makes the container
+a localhost client of the gateway. What makes the token safe is per-run
+issuance, the gateway's scoping, and route-scoped authorization — not the
+bind address.
+
+### Verifying the token scope
+
+Before trusting this deployment pattern, verify what the per-run token class
+authorizes on the gateway: it must permit the inference and catalog routes
+omp needs, and nothing else. This verification gate is part of
+real-environment acceptance (PLAN.md, phase E) and must pass before the
+containerized `review` deployment (PLAN.md, step 15) is trusted.
+
+| Route | Purpose | Expected |
+|---|---|---|
+| `GET /v1/models` | Model catalog | Token accepted |
+| `POST /v1/pi/stream` | Native inference | Token accepted |
+| Any token-minting route | Issuing further tokens | Refused |
+| Any credential-export route | Reading the upstream credential | Refused |
+| Any management route | Gateway administration | Refused |
+
+```sh
+TOKEN=$(sudo omp-auth-gateway token)
+
+# Catalog — the token must be accepted (expect 200):
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:4000/v1/models
+
+# Every other route the gateway advertises must refuse the same token
+# (401/403/404/405):
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:4000/ROUTE
+```
+
+A real inference turn through the gateway (the phase-E model-backed
+`review`) completes the positive side of the matrix. If any minting,
+credential-export, or management route accepts the token, the gate fails: do
+not proceed — either fix the gateway or reinstate a narrowing proxy in front
+of it (a loopback allowlisting proxy that forwards only the catalog and
+inference routes and injects the gateway bearer itself), then re-verify.
+
 
 ## Command reference
 
