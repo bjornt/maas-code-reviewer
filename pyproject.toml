@@ -12,6 +12,7 @@ dependencies = [
     "google-genai",
     "keyring",
     "launchpadlib",
+    "opentelemetry-proto>=1.45.1",
     "PyGithub",
 ]
 
