@@ -1,0 +1,18 @@
+# ci/trusted/workshop.yaml — the CI trusted container (PLAN.md step 9).
+#
+# fetch-pr and publish-pr run here, with the GitHub credentials passed
+# per-process via `workshop exec --env` — never ambient in this container.
+# The package comes from the published SDK Store channel (PLAN.md step 8):
+# the same maas-code-reviewer SDK revision the untrusted container selects,
+# by construction — same channel, adjacent launches. The definition format
+# has no SDK revision field; the channel is the only reproducibility
+# control (DESIGN.md "Deployment").
+#
+# Never use the root workshop.yaml (the dev environment) here: it carries
+# the dev auth tunnel and mounts. This directory is a complete,
+# single-definition Workshop project.
+name: trusted
+base: ubuntu@26.04
+sdks:
+  - name: maas-code-reviewer
+    channel: latest/stable

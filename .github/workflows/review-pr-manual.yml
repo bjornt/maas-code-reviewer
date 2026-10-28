@@ -1,117 +1,210 @@
 name: Manual PR Review
 
-# Manually dispatched re-review of a pull request in this repository.
+# Manually dispatched re-review of a pull request, on demand from the Actions
+# tab. Unlike review-pr.yml (which fires automatically when a PR is opened
+# and reviews it once), this workflow can re-review after substantial
+# follow-up changes, run the maas-code-reviewer SDK from a non-default
+# channel (edge validates a main push before its promotion to latest/stable,
+# PLAN.md step 8), and dry-run the review without publishing. It takes a full
+# PR URL: the PR may live in another repository, but the job's GITHUB_TOKEN
+# only reaches repositories it can read and write.
 #
-# Unlike review-pr.yml (which fires automatically when a PR is opened and, by
-# design, only reviews once), this workflow can be triggered on demand from the
-# Actions tab so a fresh review can be posted after substantial follow-up
-# changes.  It takes a PR *number* (not a URL): the PR always belongs to the
-# current repository, which is the scope that the default GITHUB_TOKEN can read
-# and post to, so cross-repository review is not supported (and a 403 is not
-# possible).
-#
-# Untrusted inputs are never interpolated directly into run blocks; they are
-# passed through environment variables and read as shell variables to avoid
-# command injection.
+# Untrusted inputs are never interpolated directly into run blocks; they
+# are passed through environment variables and read as shell variables to
+# avoid command injection.
 on:
   workflow_dispatch:
     inputs:
-      pr_number:
-        description: "Pull request number in this repository to re-review"
+      pr_url:
+        description: "Full GitHub PR URL to review (https://github.com/owner/repo/pull/N)"
         required: true
-        type: number
+        type: string
       model:
         description: "Gemini model name (e.g. gemini-3.1-pro-preview, gemini-2.5-flash)"
         required: false
         type: string
         default: gemini-3.1-pro-preview
-      max_tool_calls:
-        description: "Maximum automatic tool calls the LLM may make during a review"
-        required: false
-        type: number
-        default: 30
-      max_diff_chars:
-        description: "Maximum diff size in characters before truncation"
-        required: false
-        type: number
-        default: 200000
-      snap_channel:
-        description: "Snap channel from which to install maas-code-reviewer"
+      review_timeout:
+        description: "Total review deadline in seconds (in-container exec timeout; --review-timeout arrives with PLAN.md step 15)"
         required: false
         type: string
-        default: edge
+        default: "600"
+      sdk_channel:
+        description: "maas-code-reviewer SDK channel (edge validates a main push before promotion)"
+        required: false
+        type: string
+        default: latest/stable
       dry_run:
-        description: "Print the review JSON to the workflow log instead of posting it to the PR"
+        description: "Run the review but do not publish it to the PR"
         required: false
         type: boolean
         default: false
 
 permissions:
   contents: read
-  pull-requests: write
-
-env:
-  SNAP_CHANNEL: ${{ inputs.snap_channel }}
+  pull-requests: write  # exercised only by the publish step
 
 jobs:
   review:
-    runs-on: ubuntu-latest
-
+    runs-on: ubuntu-26.04  # GitHub-hosted ephemeral VM
+    timeout-minutes: 30
     steps:
-      # Resolve the PR ref and full URL from the validated PR number and the
-      # current repository.  pr_number is a numeric input (GitHub validates it
-      # before the job starts), so it needs no further sanitising.
+      # Resolve the PR repository and head ref from the validated URL.
+      # pr_url is operator input: parsed here with shell string operations
+      # and consumed downstream only via env/GITHUB_OUTPUT, never
+      # interpolated into a run block.
       - name: Resolve PR ref
         id: pr
         env:
-          REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_URL: ${{ inputs.pr_url }}
         run: |
-          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "head_ref=refs/pull/$PR_NUMBER/head" >> "$GITHUB_OUTPUT"
-          echo "url=https://github.com/$REPOSITORY/pull/$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          set -eu
+          prefix="https://github.com/"
+          case "$PR_URL" in
+            "$prefix"*"/pull/"*) ;;
+            *) echo "Not a GitHub PR URL: $PR_URL" >&2; exit 1 ;;
+          esac
+          rest="${PR_URL#"$prefix"}"
+          owner="${rest%%/*}"
+          rest="${rest#"$owner"/}"
+          repo="${rest%%/*}"
+          rest="${rest#"$repo"/pull/}"
+          number="${rest%%[!0-9]*}"
+          case "$number" in
+            "" | *[!0-9]*) echo "Invalid PR number in URL: $PR_URL" >&2; exit 1 ;;
+          esac
+          echo "owner_repo=$owner/$repo" >> "$GITHUB_OUTPUT"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "head_ref=refs/pull/$number/head" >> "$GITHUB_OUTPUT"
 
-      - name: Check out PR head (for file context)
+      - name: Check out the trusted workflow revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Check out the PR repo so that maas-code-reviewer can read it for more context. We
-          # only ever read the files. Nothing is built or executed.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      # Same two project directories as the automatic workflow, plus the
+      # SDK channel rewrite in the copies (never the checkout): edge
+      # validates a main push before its promotion.
+      - name: Prepare job project directories
+        env:
+          SDK_CHANNEL: ${{ inputs.sdk_channel }}
+        run: |
+          set -eu
+          case "$SDK_CHANNEL" in
+            latest/stable | latest/edge) ;;
+            stable | edge) SDK_CHANNEL="latest/$SDK_CHANNEL" ;;
+            *)
+              echo "Invalid maas-code-reviewer SDK channel: $SDK_CHANNEL" >&2
+              exit 1
+              ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/review"
+          cp -r ci/trusted "$RUNNER_TEMP/review/trusted"
+          cp -r ci/untrusted "$RUNNER_TEMP/review/untrusted"
+          sed -i "s|channel: .*|channel: $SDK_CHANNEL|" \
+            "$RUNNER_TEMP/review/trusted/workshop.yaml" \
+            "$RUNNER_TEMP/review/untrusted/workshop.yaml"
+          mkdir -p "$RUNNER_TEMP/review/untrusted/inputs" \
+                   "$RUNNER_TEMP/review/untrusted/outputs" \
+                   "$RUNNER_TEMP/review/trusted/in"
+
+      - name: Launch the trusted Workshop
+        uses: canonical/launch-workshop@b9e184e38f49808ced78e25de19483fe02484c46 # v1.0.1
+        with:
+          project: ${{ runner.temp }}/review/trusted
+          workshop: trusted
+
+      - name: Launch the untrusted Workshop
+        uses: canonical/launch-workshop@b9e184e38f49808ced78e25de19483fe02484c46 # v1.0.1
+        with:
+          project: ${{ runner.temp }}/review/untrusted
+          workshop: untrusted
+
+      - name: Fetch the PR (trusted)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ inputs.pr_url }}
+        run: |
+          workshop --project "$RUNNER_TEMP/review/trusted" exec \
+            --env GITHUB_TOKEN trusted -- \
+            maas-code-reviewer fetch-pr \
+            --output-dir /project/out \
+            "$PR_URL"
+
+      - name: Stage review inputs (host broker)
+        run: |
+          cp "$RUNNER_TEMP/review/trusted/out/diff.patch" \
+             "$RUNNER_TEMP/review/trusted/out/description.md" \
+             "$RUNNER_TEMP/review/untrusted/inputs/"
+
+      - name: Check out the PR head as disposable agent context
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.pr.outputs.owner_repo }}
           ref: ${{ steps.pr.outputs.head_ref }}
+          path: pr-head
           persist-credentials: false
           allow-unsafe-pr-checkout: true
 
-      - name: Install maas-code-reviewer
-        env:
-          SNAP_CHANNEL: ${{ inputs.snap_channel }}
-        run: sudo snap install maas-code-reviewer --channel "$SNAP_CHANNEL"
+      - name: Move the checkout into the untrusted project
+        run: |
+          mv "$GITHUB_WORKSPACE/pr-head" "$RUNNER_TEMP/review/untrusted/repo"
 
-      - name: Run maas-code-reviewer
+      - name: Review (untrusted)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MODEL: ${{ inputs.model }}
+          REVIEW_TIMEOUT: ${{ inputs.review_timeout }}
+        run: |
+          set -eu
+          case "$REVIEW_TIMEOUT" in
+            "" | *[!0-9]*) echo "Invalid review timeout: $REVIEW_TIMEOUT" >&2; exit 1 ;;
+          esac
+          workshop --project "$RUNNER_TEMP/review/untrusted" exec \
+            --env GEMINI_API_KEY --timeout "${REVIEW_TIMEOUT}s" untrusted -- \
+            maas-code-reviewer review \
+            --repo-dir /project/repo \
+            --diff-file /project/inputs/diff.patch \
+            --description-file /project/inputs/description.md \
+            --model "$MODEL" \
+            --json-output /project/outputs/review.json \
+            --metrics /project/outputs/metrics.json
+
+      - name: Collect the candidate review (host broker)
+        run: |
+          cp "$RUNNER_TEMP/review/untrusted/outputs/review.json" \
+             "$RUNNER_TEMP/review/trusted/in/review.json"
+
+      - name: Publish the review (trusted)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          PR_URL: ${{ steps.pr.outputs.url }}
-          MODEL: ${{ inputs.model }}
-          MAX_TOOL_CALLS: ${{ inputs.max_tool_calls }}
-          MAX_DIFF_CHARS: ${{ inputs.max_diff_chars }}
+          PR_URL: ${{ inputs.pr_url }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           args=(
-            --model "$MODEL"
-            --max-tool-calls "$MAX_TOOL_CALLS"
-            --max-diff-chars "$MAX_DIFF_CHARS"
-            --repo-dir "$GITHUB_WORKSPACE"
-            --metrics "$RUNNER_TEMP/metrics.json"
+            --review /project/in/review.json
+            --input-dir /project/out
           )
           if [ "$DRY_RUN" = "true" ]; then
             args+=(--dry-run)
           fi
-          maas-code-reviewer review-pr "${args[@]}" "$PR_URL"
+          workshop --project "$RUNNER_TEMP/review/trusted" exec \
+            --env GITHUB_TOKEN trusted -- \
+            maas-code-reviewer publish-pr "${args[@]}" "$PR_URL"
 
-      - name: Upload metrics
+      - name: Collect metrics artifact
+        if: always()
+        run: |
+          mkdir -p artifacts
+          cp "$RUNNER_TEMP/review/untrusted/outputs/metrics.json" \
+             artifacts/ || true
+
+      - name: Upload metrics artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: review-metrics-manual-pr${{ steps.pr.outputs.number }}
-          path: ${{ runner.temp }}/metrics.json
+          name: review-metrics
+          path: artifacts/
           retention-days: 30
           if-no-files-found: ignore

@@ -1,62 +1,172 @@
-name: LLM Code Review
+name: Review pull request
 
-# Use pull_request_target so the workflow always runs from the main branch.
-# This gives it access to repository secrets while still being triggered by
-# PRs from forks or feature branches.
+# Trusted code only (DESIGN.md "Privileged CI"): this workflow file and the
+# ci/ definitions come from the base branch — pull_request_target runs the
+# base branch's workflow, and the first step checks out that same SHA — and
+# the package comes from the published SDK Store channel (PLAN.md step 8),
+# never from the PR. PR content is data, never tooling: it enters only the
+# untrusted container's project directory as files. The runner host is a
+# file broker between the two containers' project directories and runs no
+# package code. The runner is a GitHub-hosted ephemeral VM: both containers
+# die with the job, so there are no teardown steps.
 on:
   pull_request_target:
     types: [opened]
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: write  # exercised only by the publish step
 
 env:
-  # Model can be any Gemini model name that your GEMINI_API_KEY has access to.
-  # For example:
+  # Model can be any Gemini model name that your GEMINI_API_KEY has access
+  # to. For example:
   #  - gemini-3.1-pro-preview
-  #  - gemini-3.1-pro-preview-customtools
   #  - gemini-3-flash-preview
-  #  - gemini-3-flash-lite-preview
-  #  - gemini-2.5-pro
   #  - gemini-2.5-flash
   MODEL: gemini-3.1-pro-preview
-  # Snap channel should normally be stable. We use edge here for dogfooding.
-  SNAP_CHANNEL: edge
 
 jobs:
   review:
-    runs-on: ubuntu-latest
-
+    runs-on: ubuntu-26.04  # GitHub-hosted ephemeral VM
+    timeout-minutes: 30
     steps:
-      # 1. Check out the PR HEAD so the LLM can read the actual files being
-      #    reviewed via --repo-dir.  We do NOT run any code from this checkout.
-      #    It's only needed so that the LLM can read the files to get more context.
-      - name: Check out PR head (for file context)
+      # The trusted workflow revision: provides the ci/ definitions. Never
+      # the PR's code.
+      - name: Check out the trusted workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      # Job project directories: a copy of each ci/ definition (so job
+      # state — fetch output, staged inputs, candidate, metrics — never
+      # mixes into the source checkout, and the manual workflow can rewrite
+      # the SDK channel in the copies). $RUNNER_TEMP is job-local scratch on
+      # the ephemeral VM. Workshop bind-mounts each project directory into
+      # its container at /project, so the host broker below is plain cp
+      # between these two directories.
+      - name: Prepare job project directories
+        run: |
+          mkdir -p "$RUNNER_TEMP/review"
+          cp -r ci/trusted "$RUNNER_TEMP/review/trusted"
+          cp -r ci/untrusted "$RUNNER_TEMP/review/untrusted"
+          mkdir -p "$RUNNER_TEMP/review/untrusted/inputs" \
+                   "$RUNNER_TEMP/review/untrusted/outputs" \
+                   "$RUNNER_TEMP/review/trusted/in"
+
+      # Each launch installs the same published maas-code-reviewer SDK
+      # revision (same channel, adjacent launches): no per-job checkout,
+      # install, or artifact staging.
+      - name: Launch the trusted Workshop
+        uses: canonical/launch-workshop@b9e184e38f49808ced78e25de19483fe02484c46 # v1.0.1
+        with:
+          project: ${{ runner.temp }}/review/trusted
+          workshop: trusted
+
+      - name: Launch the untrusted Workshop
+        uses: canonical/launch-workshop@b9e184e38f49808ced78e25de19483fe02484c46 # v1.0.1
+        with:
+          project: ${{ runner.temp }}/review/untrusted
+          workshop: untrusted
+
+      # Fetch (trusted): read-scope credentials, passed into the container
+      # per-process via workshop exec --env (name-only form: the value is
+      # inherited from this step's environment). Writes the authoritative
+      # diff.patch, description.md, and metadata.json under the trusted
+      # project directory (/project).
+      - name: Fetch the PR (trusted)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          workshop --project "$RUNNER_TEMP/review/trusted" exec \
+            --env GITHUB_TOKEN trusted -- \
+            maas-code-reviewer fetch-pr \
+            --output-dir /project/out \
+            "${{ github.event.pull_request.html_url }}"
+
+      # Broker (host): copy the review inputs into the untrusted project
+      # directory. metadata.json stays in trusted — publish-pr reads it via
+      # --input-dir on the trusted side.
+      - name: Stage review inputs (host broker)
+        run: |
+          cp "$RUNNER_TEMP/review/trusted/out/diff.patch" \
+             "$RUNNER_TEMP/review/trusted/out/description.md" \
+             "$RUNNER_TEMP/review/untrusted/inputs/"
+
+      # The PR head as disposable agent context: read by the reviewer via
+      # --repo-dir, never executed host-side. Credentials persistence is
+      # disabled so no token survives in the checkout.
+      - name: Check out the PR head as disposable agent context
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-head
           persist-credentials: false
           allow-unsafe-pr-checkout: true
 
-      - name: Install maas-code-reviewer
-        run: sudo snap install maas-code-reviewer --channel "$SNAP_CHANNEL"
+      - name: Move the checkout into the untrusted project
+        run: |
+          mv "$GITHUB_WORKSPACE/pr-head" "$RUNNER_TEMP/review/untrusted/repo"
 
-      - name: Run maas-code-reviewer
+      # Review (untrusted): zero GitHub/Launchpad credentials by design.
+      # Phase-B intermediate (PLAN.md step 9): the review runs the
+      # google-genai engine, so the Gemini API key is passed to this run's
+      # environment only — safe under the base threat model (no PR code
+      # executes anywhere; the review's tools are repo-contained reads) and
+      # replaced in step 15 by the per-run omp-auth-gateway token. The exec
+      # --timeout is the phase-B review deadline (--review-timeout arrives
+      # with step 15); the job's timeout-minutes is the hard backstop.
+      - name: Review (untrusted)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          maas-code-reviewer review-pr \
+          workshop --project "$RUNNER_TEMP/review/untrusted" exec \
+            --env GEMINI_API_KEY --timeout 600s untrusted -- \
+            maas-code-reviewer review \
+            --repo-dir /project/repo \
+            --diff-file /project/inputs/diff.patch \
+            --description-file /project/inputs/description.md \
             --model "$MODEL" \
-            --repo-dir "$GITHUB_WORKSPACE" \
-            --metrics "$RUNNER_TEMP/metrics.json" \
-            "https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+            --json-output /project/outputs/review.json \
+            --metrics /project/outputs/metrics.json
 
-      - name: Upload metrics
+      # Broker (host): the candidate crosses back into the trusted project
+      # directory — the only agent-written file that does, and publish-pr
+      # validates it against the authoritative diff in trusted before
+      # anything is posted.
+      - name: Collect the candidate review (host broker)
+        run: |
+          cp "$RUNNER_TEMP/review/untrusted/outputs/review.json" \
+             "$RUNNER_TEMP/review/trusted/in/review.json"
+
+      # Publish (trusted): write-scope credentials via --env. A nonzero exit
+      # anywhere above aborts the job here: no comment. Deliberate failure =
+      # nonzero exit, no artifact, no post.
+      - name: Publish the review (trusted)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          workshop --project "$RUNNER_TEMP/review/trusted" exec \
+            --env GITHUB_TOKEN trusted -- \
+            maas-code-reviewer publish-pr \
+            --review /project/in/review.json \
+            --input-dir /project/out \
+            "${{ github.event.pull_request.html_url }}"
+
+      # Metrics artifact, best-effort: the || true and if-no-files-found
+      # keep a missing metrics file from masking the real failure above.
+      - name: Collect metrics artifact
+        if: always()
+        run: |
+          mkdir -p artifacts
+          cp "$RUNNER_TEMP/review/untrusted/outputs/metrics.json" \
+             artifacts/ || true
+
+      - name: Upload metrics artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: review-metrics-pr${{ github.event.pull_request.number }}
-          path: ${{ runner.temp }}/metrics.json
+          name: review-metrics
+          path: artifacts/
           retention-days: 30
+          if-no-files-found: ignore
