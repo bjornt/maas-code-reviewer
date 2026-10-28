@@ -8,6 +8,7 @@
 
 - `src/maas_code_reviewer/` — main package
   - `cli.py` — argparse CLI entry point; wires dependencies and dispatches subcommands
+  - `review_commands.py` — merge-proposal/pull-request acquisition, review, and publication logic
   - `launchpad_client.py` — `LaunchpadClient` protocol + real implementation
   - `git.py` — `GitClient` protocol + real implementation (subprocess-based)
   - `github_client.py` — `GitHubClient` class and `parse_pr_url()` free function
