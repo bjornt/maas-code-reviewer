@@ -36,6 +36,7 @@ class ReviewRequest:
     system_instruction: str
     timeout_seconds: float
     model: str | None = None
+    mcp_servers: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,9 @@
 # Copyright 2026 Canonical Ltd.  This software is licensed under the
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
+import io
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -1981,3 +1983,85 @@ class TestMainReview:
             in captured.err
         )
         assert not output_file.exists()
+
+
+class TestBuildParserReviewMcp:
+    def test_review_mcp_parser_defaults(self) -> None:
+        parser = _build_parser()
+        args = parser.parse_args(["review-mcp", "--diff-file", "d.patch"])
+        assert args.command == "review-mcp"
+        assert args.diff_file == "d.patch"
+        assert args.diff_prefix is None
+        assert args.repo_dir is None
+
+    def test_review_mcp_requires_diff_file(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(SystemExit) as exc_info:
+            _build_parser().parse_args(["review-mcp"])
+
+        assert exc_info.value.code == 2
+        assert "--diff-file" in capsys.readouterr().err
+
+
+class TestHandleReviewMcp:
+    def test_review_mcp_dispatch_serves_over_stdio(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        diff_file = tmp_path / "review.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+        repo = tmp_path / "repo"
+        (repo / "src").mkdir(parents=True)
+        (repo / "src" / "foo.py").write_text("code\n")
+        frame = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "validate_review",
+                    "arguments": {"review": "{not json"},
+                },
+            }
+        )
+        monkeypatch.setattr(sys, "stdin", io.StringIO(frame + "\n"))
+
+        main(["review-mcp", "--repo-dir", str(repo), "--diff-file", str(diff_file)])
+
+        response = json.loads(capsys.readouterr().out.splitlines()[0])
+        assert "Invalid review JSON" in response["result"]["content"][0]["text"]
+
+    def test_review_mcp_listing_excludes_the_staged_diff(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        diff_file = tmp_path / "review.diff"
+        diff_file.write_text(_STRUCTURED_DIFF)
+        repo = tmp_path / "repo"
+        (repo / "src").mkdir(parents=True)
+        (repo / "src" / "code.py").write_text("old\nnew\n")
+        staged = repo / ".maas-code-reviewer" / "review-input.diff"
+        staged.parent.mkdir()
+        staged.write_text(_STRUCTURED_DIFF)
+        captured: dict = {}
+
+        def fake_serve(
+            diff_text: str,
+            *,
+            path_prefix: str | None,
+            repository_files: frozenset[str],
+            reader: io.TextIOBase,
+            writer: io.TextIOBase,
+        ) -> None:
+            captured["diff_text"] = diff_text
+            captured["path_prefix"] = path_prefix
+            captured["repository_files"] = repository_files
+
+        monkeypatch.setattr("maas_code_reviewer.review_mcp.serve", fake_serve)
+        main(["review-mcp", "--repo-dir", str(repo), "--diff-file", str(diff_file)])
+
+        assert captured["repository_files"] == {"src/code.py"}
+        assert captured["diff_text"] == _STRUCTURED_DIFF
+        assert captured["path_prefix"] is None

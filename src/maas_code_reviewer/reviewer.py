@@ -3,6 +3,7 @@
 
 import json
 from collections.abc import Callable, Set
+from contextlib import suppress
 from pathlib import Path
 
 from maas_code_reviewer.agent_runner import (
@@ -16,8 +17,8 @@ from maas_code_reviewer.agent_runner import (
 from maas_code_reviewer.metrics import ReviewMetrics
 from maas_code_reviewer.review_schema import (
     parse_diff_files_and_lines,
+    parse_review_document,
     repository_files,
-    validate_review_json,
 )
 
 REVIEW_MARKER = "[maas-code-reviewer review]"
@@ -44,6 +45,11 @@ STRUCTURED_SYSTEM_INSTRUCTION = _load_prompt(
 )
 
 STRUCTURED_INSTRUCTIONS = _load_prompt("structured_instructions.md")
+
+REVIEW_MCP_COMMAND = "maas-code-reviewer"
+REVIEW_STAGING_DIR = ".maas-code-reviewer"
+REVIEW_STAGING_FILE_NAME = "review-input.diff"
+REVIEW_STAGING_RELATIVE_PATH = f"{REVIEW_STAGING_DIR}/{REVIEW_STAGING_FILE_NAME}"
 
 TRUNCATION_NOTE = (
     "\n\n[Note: The diff was truncated because it exceeded the maximum size. "
@@ -163,63 +169,73 @@ def review_agent(
         agents_md,
         diff_paths,
     )
-    request = ReviewRequest(
-        repository_path=repo_dir,
-        full_diff=diff,
-        task_prompt=task_prompt,
-        system_instruction=STRUCTURED_SYSTEM_INSTRUCTION,
-        timeout_seconds=timeout_seconds,
-        model=model,
-    )
+    staged_diff = _stage_review_diff(repo_dir, diff)
+    try:
+        request = ReviewRequest(
+            repository_path=repo_dir,
+            full_diff=diff,
+            task_prompt=task_prompt,
+            system_instruction=STRUCTURED_SYSTEM_INSTRUCTION,
+            timeout_seconds=timeout_seconds,
+            model=model,
+            mcp_servers=(
+                _review_validation_server(staged_diff, repo_dir, diff_prefix),
+            ),
+        )
 
-    outcomes: list[AgentRunResult] = []
-    repair_request: ReviewRequest | None = None
-    document: dict | None = None
-    failure: str | None = None
-    rounds = max(0, repair_attempts) + 1
-    for attempt in range(rounds):
-        outcome = runner.run(repair_request or request)
-        outcomes.append(outcome)
-        usage = _combined_usage([entry.usage for entry in outcomes])
-        _populate_agent_metrics(
-            metrics,
-            diff,
-            model=outcome.model,
-            agents_md_read=agents_md is not None,
-            usage=usage,
-            outcome=outcome,
-        )
-        if outcome.status != CompletionStatus.COMPLETED:
-            raise RunnerResultError(
-                f"Agent did not complete the review: {outcome.status}.",
+        outcomes: list[AgentRunResult] = []
+        repair_request: ReviewRequest | None = None
+        document: dict | None = None
+        failure: str | None = None
+        rounds = max(0, repair_attempts) + 1
+        for attempt in range(rounds):
+            outcome = runner.run(repair_request or request)
+            outcomes.append(outcome)
+            usage = _combined_usage([entry.usage for entry in outcomes])
+            _populate_agent_metrics(
+                metrics,
+                diff,
+                model=outcome.model,
+                agents_md_read=agents_md is not None,
                 usage=usage,
+                outcome=outcome,
             )
-        document, failure = _parse_review_document(
-            outcome.terminal_text,
-            diff_text=diff,
-            path_prefix=diff_prefix,
-            repository_files=files,
-        )
-        if failure is None:
-            break
-        if attempt + 1 < rounds:
-            repair_request = ReviewRequest(
-                repository_path=repo_dir,
-                full_diff=diff,
-                task_prompt=_repair_prompt(
-                    request.task_prompt, outcome.terminal_text, failure
-                ),
-                system_instruction=request.system_instruction,
-                timeout_seconds=timeout_seconds,
-                model=model,
+            if outcome.status != CompletionStatus.COMPLETED:
+                raise RunnerResultError(
+                    f"Agent did not complete the review: {outcome.status}.",
+                    usage=usage,
+                )
+            document, failure = _parse_review_document(
+                outcome.terminal_text,
+                diff_text=diff,
+                path_prefix=diff_prefix,
+                repository_files=files,
             )
-    if failure is not None:
-        raise RunnerResultError(
-            failure,
-            usage=_combined_usage([entry.usage for entry in outcomes]),
-        )
-    assert document is not None
-    return document
+            if failure is None:
+                break
+            if attempt + 1 < rounds:
+                repair_request = ReviewRequest(
+                    repository_path=repo_dir,
+                    full_diff=diff,
+                    task_prompt=_repair_prompt(
+                        request.task_prompt, outcome.terminal_text, failure
+                    ),
+                    system_instruction=request.system_instruction,
+                    timeout_seconds=timeout_seconds,
+                    model=model,
+                    mcp_servers=request.mcp_servers,
+                )
+        if failure is not None:
+            raise RunnerResultError(
+                failure,
+                usage=_combined_usage([entry.usage for entry in outcomes]),
+            )
+        assert document is not None
+        return document
+    finally:
+        with suppress(OSError):
+            staged_diff.unlink(missing_ok=True)
+            staged_diff.parent.rmdir()
 
 
 def _parse_review_document(
@@ -229,25 +245,20 @@ def _parse_review_document(
     path_prefix: str | None,
     repository_files: Set[str],
 ) -> tuple[dict | None, str | None]:
-    """Parse and validate one terminal review document.
+    """Parse and validate one terminal review document (strict, shared).
 
     Returns the review document and ``None``, or ``None`` and a failure
     message describing every reason the terminal output is not
     publishable.
     """
-    cleaned = _extract_json(text)
-    if not cleaned:
+    if not text.strip():
         return None, "Agent returned no review text."
-    try:
-        document = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        return None, f"Agent terminal message is not valid JSON: {exc}"
-    errors = validate_review_json(
-        document, diff_text, path_prefix=path_prefix, repository_files=repository_files
+    return parse_review_document(
+        text,
+        diff_text=diff_text,
+        path_prefix=path_prefix,
+        repository_files=repository_files,
     )
-    if errors:
-        return None, "Invalid review document:\n" + "\n".join(errors)
-    return document, None
 
 
 def _repair_prompt(task_prompt: str, previous_output: str, failure: str) -> str:
@@ -352,53 +363,38 @@ def _build_agent_prompt(
     )
 
 
-def _extract_json(text: str) -> str:
-    """Extract a JSON object from *text*, stripping markdown fences if present.
-
-    The LLM may wrap its output in a ```json ... ``` code fence.  This
-    function strips such fences and returns the raw JSON string.
-    """
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        # Remove the opening fence line (e.g. ```json or just ```)
-        first_newline = stripped.find("\n")
-        if first_newline != -1:
-            stripped = stripped[first_newline + 1 :]
-        # Remove the closing fence
-        if stripped.endswith("```"):
-            stripped = stripped[: stripped.rfind("```")]
-    stripped = stripped.strip()
-
-    candidate = _extract_first_json_object(stripped)
-    if candidate is not None:
-        return candidate
-
-    return stripped
-
-
-def _extract_first_json_object(text: str) -> str | None:
-    """Return the first parsable JSON object substring from *text*.
-
-    Returns ``None`` if no JSON object can be decoded.
-    """
-    decoder = json.JSONDecoder()
-    offset = 0
-
-    while True:
-        start = text.find("{", offset)
-        if start == -1:
-            return None
-        try:
-            _, end = decoder.raw_decode(text, start)
-        except json.JSONDecodeError:
-            offset = start + 1
-            continue
-        return text[start:end]
-
-
 def _is_empty_diff(diff: str) -> bool:
     """Return ``True`` when *diff* has no non-whitespace content."""
     return diff.strip() == ""
+
+
+def _stage_review_diff(repo_dir: Path, diff: str) -> Path:
+    """Stage the reviewed diff inside the checkout for the validation tool."""
+    staging_dir = repo_dir / REVIEW_STAGING_DIR
+    staging_dir.mkdir(exist_ok=True)
+    staged_diff = staging_dir / REVIEW_STAGING_FILE_NAME
+    staged_diff.write_text(diff, encoding="utf-8")
+    return staged_diff
+
+
+def _review_validation_server(
+    staged_diff: Path, repo_dir: Path, diff_prefix: str | None
+) -> dict:
+    """Describe the in-session validation MCP server for the ACP session."""
+    args = [
+        "review-mcp",
+        "--diff-file",
+        str(staged_diff),
+        "--repo-dir",
+        str(repo_dir),
+    ]
+    if diff_prefix is not None:
+        args += ["--diff-prefix", diff_prefix]
+    return {
+        "name": "review-validation",
+        "command": REVIEW_MCP_COMMAND,
+        "args": args,
+    }
 
 
 def _populate_agent_metrics(

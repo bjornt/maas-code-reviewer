@@ -1,16 +1,19 @@
 # Copyright 2026 Canonical Ltd.  This software is licensed under the
 # GNU Affero General Public License version 3 (see the file LICENSE).
 
+import io
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from maas_code_reviewer import review_mcp
 from maas_code_reviewer.agent_runner import (
     AgentRunResult,
     AgentUsage,
     CompletionStatus,
+    ReviewRequest,
     RunnerResultError,
     RunnerStartupError,
     RunnerTimeoutError,
@@ -20,6 +23,7 @@ from maas_code_reviewer.metrics import ReviewMetrics
 from maas_code_reviewer.review_schema import (
     parse_diff_files_and_lines,
     repository_files,
+    validate_review_json,
 )
 from maas_code_reviewer.reviewer import (
     EMPTY_DIFF_GENERAL_COMMENT,
@@ -27,7 +31,6 @@ from maas_code_reviewer.reviewer import (
     TRUNCATION_MANIFEST_HEADER,
     TRUNCATION_NOTE,
     TRUNCATION_NOTE_MID_FILE,
-    _extract_json,
     _truncate_diff,
     render_review_document,
     review_agent,
@@ -272,37 +275,6 @@ class TestTruncateDiff:
         assert TRUNCATION_NOTE_MID_FILE in result
         assert TRUNCATION_MANIFEST_HEADER in result
         assert "- small.py" in result
-
-
-class TestExtractJson:
-    def test_plain_json_unchanged(self) -> None:
-        text = '{"a": 1}'
-        assert _extract_json(text) == '{"a": 1}'
-
-    def test_strips_json_fence(self) -> None:
-        text = '```json\n{"a": 1}\n```'
-        assert _extract_json(text) == '{"a": 1}'
-
-    def test_strips_plain_fence(self) -> None:
-        text = '```\n{"a": 1}\n```'
-        assert _extract_json(text) == '{"a": 1}'
-
-    def test_strips_surrounding_whitespace(self) -> None:
-        text = '  \n  {"a": 1}  \n  '
-        assert _extract_json(text) == '{"a": 1}'
-
-    def test_strips_fence_and_whitespace(self) -> None:
-        text = '  ```json\n  {"a": 1}\n  ```  '
-        result = _extract_json(text)
-        assert result == '{"a": 1}'
-
-    def test_extracts_json_object_from_mixed_text(self) -> None:
-        text = 'Some preamble\n{"a": 1}\nSome trailing text'
-        assert _extract_json(text) == '{"a": 1}'
-
-    def test_skips_invalid_brace_prefix_and_extracts_valid_json(self) -> None:
-        text = "Not JSON {broken then valid {\"a\": 1}"
-        assert _extract_json(text) == '{"a": 1}'
 
 
 class TestRenderReviewDocument:
@@ -587,11 +559,34 @@ class TestReviewAgent:
 
     def test_non_json_terminal_text_rejected(self, tmp_path: Path) -> None:
         runner = agent_runner_for("prose without braces")
-        with pytest.raises(RunnerResultError, match="not valid JSON") as caught:
+        with pytest.raises(RunnerResultError, match="Invalid review JSON") as caught:
             review_agent(runner, AGENT_DIFF, None, tmp_path)
         assert caught.value.usage == AgentUsage()
         assert len(runner.requests) == 2
         assert "prose without braces" in runner.requests[1].task_prompt
+
+    def test_schema_failure_uses_the_shared_parser_prefix(
+        self, tmp_path: Path
+    ) -> None:
+        document = {
+            "general_comment": "ok",
+            "inline_comments": {"src/first.py": {"99": "x"}},
+        }
+        runner = agent_runner_for(json.dumps(document))
+        with pytest.raises(RunnerResultError) as caught:
+            review_agent(runner, AGENT_DIFF, None, tmp_path)
+        errors = validate_review_json(
+            document,
+            AGENT_DIFF,
+            path_prefix=None,
+            repository_files=repository_files(tmp_path),
+        )
+        assert str(caught.value) == "Invalid review document: " + "\n".join(errors)
+
+    def test_prose_wrapped_json_is_now_rejected(self, tmp_path: Path) -> None:
+        runner = agent_runner_for("Here is my review: " + json.dumps(AGENT_DOCUMENT))
+        with pytest.raises(RunnerResultError, match="Invalid review JSON"):
+            review_agent(runner, AGENT_DIFF, None, tmp_path)
 
     @pytest.mark.parametrize(
         "terminal",
@@ -1020,3 +1015,188 @@ class TestReviewAgent:
         )
         assert "second rejection" in runner.requests[2].task_prompt
         assert "first rejection" not in runner.requests[2].task_prompt
+
+
+class _StagedDiffRecordingRunner:
+    """An ``AgentRunner``-shaped fake recording the staged diff each run."""
+
+    def __init__(self, outcomes: list[AgentRunResult]) -> None:
+        self.outcomes = list(outcomes)
+        self.staged_contents: list[str] = []
+        self.requests: list[ReviewRequest] = []
+
+    def run(self, request: ReviewRequest) -> AgentRunResult:
+        self.requests.append(request)
+        staged = (
+            request.repository_path
+            / ".maas-code-reviewer"
+            / "review-input.diff"
+        )
+        self.staged_contents.append(staged.read_text(encoding="utf-8"))
+        return self.outcomes.pop(0)
+
+
+class TestReviewAgentValidationServer:
+    def test_request_carries_validation_server_descriptor(
+        self, tmp_path: Path
+    ) -> None:
+        runner = agent_runner_for(json.dumps(AGENT_DOCUMENT))
+        review_agent(runner, AGENT_DIFF, None, tmp_path)
+        request = runner.requests[0]
+        (server,) = request.mcp_servers
+        assert server == {
+            "name": "review-validation",
+            "command": "maas-code-reviewer",
+            "args": [
+                "review-mcp",
+                "--diff-file",
+                str(tmp_path / ".maas-code-reviewer" / "review-input.diff"),
+                "--repo-dir",
+                str(tmp_path),
+            ],
+        }
+
+    def test_staged_diff_exists_and_matches_during_the_run(
+        self, tmp_path: Path
+    ) -> None:
+        runner = _StagedDiffRecordingRunner(
+            [
+                AgentRunResult(
+                    terminal_text=json.dumps(AGENT_DOCUMENT),
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                )
+            ]
+        )
+        review_agent(runner, AGENT_DIFF, None, tmp_path)
+        assert runner.staged_contents == [AGENT_DIFF]
+
+    def test_staging_is_removed_after_a_successful_review(
+        self, tmp_path: Path
+    ) -> None:
+        runner = agent_runner_for(json.dumps(AGENT_DOCUMENT))
+        review_agent(runner, AGENT_DIFF, None, tmp_path)
+        assert not (tmp_path / ".maas-code-reviewer").exists()
+
+    def test_staging_is_removed_when_the_runner_fails(
+        self, tmp_path: Path
+    ) -> None:
+        runner = FakeAgentRunner(RunnerStartupError("could not start"))
+        with pytest.raises(RunnerStartupError):
+            review_agent(runner, AGENT_DIFF, None, tmp_path)
+        assert not (tmp_path / ".maas-code-reviewer").exists()
+
+    def test_staging_is_removed_after_validation_failure(
+        self, tmp_path: Path
+    ) -> None:
+        runner = agent_runner_for("prose without braces")
+        with pytest.raises(RunnerResultError):
+            review_agent(runner, AGENT_DIFF, None, tmp_path, repair_attempts=0)
+        assert not (tmp_path / ".maas-code-reviewer").exists()
+
+    def test_diff_prefix_passes_through_to_the_descriptor(
+        self, tmp_path: Path
+    ) -> None:
+        runner = agent_runner_for(json.dumps(AGENT_DOCUMENT))
+        review_agent(runner, AGENT_DIFF, None, tmp_path, diff_prefix="b/")
+        (server,) = runner.requests[0].mcp_servers
+        assert server["args"][-2:] == ["--diff-prefix", "b/"]
+
+        bare = agent_runner_for(json.dumps(AGENT_DOCUMENT))
+        review_agent(bare, AGENT_DIFF, None, tmp_path)
+        (server,) = bare.requests[0].mcp_servers
+        assert "--diff-prefix" not in server["args"]
+
+    @pytest.mark.parametrize("diff", ["", " \n\t\n"])
+    def test_empty_diff_stages_nothing(self, tmp_path: Path, diff: str) -> None:
+        runner = FakeAgentRunner(RunnerStartupError("must not start"))
+        review_agent(runner, diff, None, tmp_path)
+        assert runner.requests == []
+        assert not (tmp_path / ".maas-code-reviewer").exists()
+
+    def test_repair_rounds_keep_the_validation_server(
+        self, tmp_path: Path
+    ) -> None:
+        rejected = json.dumps(
+            {
+                "general_comment": "G.",
+                "inline_comments": {"src/nope.py": {"1": "x"}},
+            }
+        )
+        runner = _StagedDiffRecordingRunner(
+            [
+                AgentRunResult(
+                    terminal_text=rejected,
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                ),
+                AgentRunResult(
+                    terminal_text=json.dumps(AGENT_DOCUMENT),
+                    status=CompletionStatus.COMPLETED,
+                    agent_name="review-agent",
+                ),
+            ]
+        )
+        review_agent(runner, AGENT_DIFF, None, tmp_path)
+        assert len(runner.requests) == 2
+        assert runner.requests[0].mcp_servers == runner.requests[1].mcp_servers
+        assert runner.requests[0].mcp_servers != ()
+        assert runner.staged_contents == [AGENT_DIFF, AGENT_DIFF]
+
+    def test_blank_terminal_text_failure_is_preserved(
+        self, tmp_path: Path
+    ) -> None:
+        for text in ["", " \n\t"]:
+            runner = agent_runner_for(text)
+            with pytest.raises(
+                RunnerResultError, match="Agent returned no review text."
+            ) as caught:
+                review_agent(runner, AGENT_DIFF, None, tmp_path)
+            assert len(runner.requests) == 2
+            assert caught.value.usage == AgentUsage()
+
+    def test_invalid_review_document_message_matches_the_tool_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        terminal = json.dumps(
+            {
+                "general_comment": "ok",
+                "inline_comments": {
+                    "unknown.py": {"1": "x"},
+                    "src/first.py": {"99": "y"},
+                },
+            }
+        )
+        runner = agent_runner_for(terminal)
+        with pytest.raises(RunnerResultError) as caught:
+            review_agent(runner, AGENT_DIFF, None, tmp_path)
+        responses = serve_tool_verdict(
+            terminal, repository_files=repository_files(tmp_path)
+        )
+        assert str(caught.value) == responses[0]["result"]["content"][0]["text"]
+
+
+def serve_tool_verdict(
+    review: str, *, repository_files: frozenset[str]
+) -> list[dict]:
+    """Run one tools/call through the review MCP server and return replies."""
+    writer = io.StringIO()
+    frame = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": review_mcp.TOOL_NAME,
+                "arguments": {"review": review},
+            },
+        }
+    )
+    review_mcp.serve(
+        AGENT_DIFF,
+        path_prefix=None,
+        repository_files=repository_files,
+        reader=io.StringIO(frame + "\n"),
+        writer=writer,
+    )
+    return [json.loads(line) for line in writer.getvalue().splitlines()]

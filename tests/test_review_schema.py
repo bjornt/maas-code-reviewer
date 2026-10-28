@@ -8,6 +8,7 @@ import pytest
 
 from maas_code_reviewer.review_schema import (
     parse_diff_files_and_lines,
+    parse_review_document,
     repository_files,
     validate_review_json,
 )
@@ -745,6 +746,120 @@ class TestValidateReviewJson:
             validate_review_json(
                 data, diff, repository_files=frozenset({"src/file.py", "file.py"})
             )
+
+
+PARSE_DOCUMENT = {
+    "general_comment": "ok",
+    "inline_comments": {"src/foo.py": {"2": "some comment"}},
+}
+
+
+class TestParseReviewDocument:
+    @pytest.mark.parametrize(
+        "wrapper",
+        [
+            lambda text: text,
+            lambda text: "```\n" + text + "\n```",
+            lambda text: "```json\n" + text + "\n```",
+        ],
+    )
+    def test_accepts_bare_and_fenced_objects(
+        self, wrapper, tmp_path: Path
+    ) -> None:
+        text = wrapper(json.dumps(PARSE_DOCUMENT))
+        document, failure = parse_review_document(
+            text, diff_text=SIMPLE_DIFF, repository_files=repository_files(tmp_path)
+        )
+        assert document == PARSE_DOCUMENT
+        assert failure is None
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "```python\n" + json.dumps(PARSE_DOCUMENT) + "\n```",
+            "```\n" + json.dumps(PARSE_DOCUMENT) + "\n",
+            "```\n" + json.dumps(PARSE_DOCUMENT) + "\n```\nTrailing prose.",
+        ],
+    )
+    def test_rejects_inexact_fences(self, text: str) -> None:
+        document, failure = parse_review_document(text, diff_text=SIMPLE_DIFF)
+        assert document is None
+        assert failure == "Review must contain one JSON object or exact JSON fence."
+
+    def test_rejects_prose_around_the_object(self) -> None:
+        document, failure = parse_review_document(
+            "prose " + json.dumps(PARSE_DOCUMENT) + " prose",
+            diff_text=SIMPLE_DIFF,
+        )
+        assert document is None
+        assert failure is not None
+        assert failure.startswith("Invalid review JSON: ")
+
+    @pytest.mark.parametrize("constant", ["NaN", "Infinity"])
+    def test_rejects_non_json_constants(self, constant: str) -> None:
+        text = '{"general_comment": ' + constant + ', "inline_comments": {}}'
+        document, failure = parse_review_document(text, diff_text=SIMPLE_DIFF)
+        assert document is None
+        assert failure is not None
+        assert "Invalid review JSON" in failure
+        assert f"Non-JSON numeric constant: {constant}" in failure
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("true", "Review must be a JSON object (dict), got bool."),
+            ("[1, 2]", "Review must be a JSON object (dict), got list."),
+        ],
+    )
+    def test_rejects_non_object_documents(self, text: str, expected: str) -> None:
+        document, failure = parse_review_document(text, diff_text=SIMPLE_DIFF)
+        assert document is None
+        assert failure == f"Invalid review document: {expected}"
+
+    def test_reports_every_schema_error(self) -> None:
+        data = {
+            "general_comment": "ok",
+            "inline_comments": {"unknown.py": {"0": "x"}, "src/foo.py": {"2": 5}},
+        }
+        expected_errors = validate_review_json(data, SIMPLE_DIFF)
+        assert len(expected_errors) == 3
+        document, failure = parse_review_document(
+            json.dumps(data), diff_text=SIMPLE_DIFF
+        )
+        assert document is None
+        assert failure == "Invalid review document: " + "\n".join(expected_errors)
+
+    def test_threads_prefix_and_repository_listing(self, tmp_path: Path) -> None:
+        prefixed_diff = (
+            "--- a/updated/tree/src/foo.py\n"
+            "+++ b/updated/tree/src/foo.py\n"
+            "@@ -1 +1,2 @@\n"
+            " context\n+new\n"
+        )
+        files = frozenset({"src/foo.py"})
+        document, failure = parse_review_document(
+            json.dumps(PARSE_DOCUMENT),
+            diff_text=prefixed_diff,
+            path_prefix="b/updated/tree/",
+            repository_files=files,
+        )
+        assert document == PARSE_DOCUMENT
+        assert failure is None
+
+        # Without the prefix the prefixed diff paths resolve to prefixed
+        # repository coordinates the document never uses.
+        document, failure = parse_review_document(
+            json.dumps(PARSE_DOCUMENT), diff_text=prefixed_diff, repository_files=files
+        )
+        assert document is None
+        assert failure is not None
+        assert "'src/foo.py'" in failure
+
+    def test_valid_document_round_trips(self) -> None:
+        text = "```json\n" + json.dumps(PARSE_DOCUMENT) + "\n```"
+        document, failure = parse_review_document(text, diff_text=SIMPLE_DIFF)
+        assert document == PARSE_DOCUMENT
+        assert failure is None
 
 
 class TestRepositoryFiles:

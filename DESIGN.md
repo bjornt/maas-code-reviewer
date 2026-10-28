@@ -271,8 +271,13 @@ not edits, shell/Python execution, browser/computer automation, arbitrary
 tasks, or interactive questions. The runtime profile sets an explicit tool
 allowlist (`read,grep,glob,web_search`), turns xdev/autoqa/vault/security/
 autolearn off, fixes the web role to `web/duckduckgo`, and defines a
-deterministic unattended permission policy. Do not rely solely on the
-harness's approval defaults.
+deterministic unattended permission policy: the packaged policy overlay
+pre-approves exactly the in-session `validate_review` tool (an omp
+`tools.approval` override — honored in every approval mode — keyed by the
+`mcp__review_validation_validate_review` identity of the configured
+descriptor), and every other permission request that still arrives is
+denied by the host client. Do not rely solely on the harness's approval
+defaults.
 
 An in-session `validate_review` MCP tool (PLAN.md step 18) is part of
 the design: a newline-delimited JSON-RPC stdio server, spawned by omp
@@ -295,8 +300,9 @@ bidirectional request dispatch from scratch.
 
 - Negotiate the protocol version and record agent identity/version.
 - Do not advertise host filesystem, terminal, or interactive elicitation
-  capabilities. Reject unexpected host-service requests and fail unattended
-  permission requests according to the trusted policy.
+  capabilities. Reject unexpected host-service requests; the trusted policy
+  pre-approves only the `validate_review` tool, and the host client denies
+  every other unattended permission request.
 - Use an absolute, clean session cwd outside the reviewed checkout; make
   the repository available at a separate path named in the task.
 - Spawn the agent with an explicit argv array, cwd, and environment — no
@@ -543,6 +549,17 @@ no-retry stance ("do not add automatic repair/review retries"); the
 boundary holds — runner failures are never repaired, non-completed
 turns fail immediately, each attempt is a fresh session, and
 retry/resume semantics beyond this single round remain out of scope.
+
+Step 18 has landed the in-session `validate_review` MCP tool (2026-10-28):
+`review` now stages the reviewed diff inside the disposable checkout and
+attaches an in-session `validate_review` MCP server
+(`maas-code-reviewer review-mcp`) to every review request, including
+repair rounds; the tool is advisory, and both the reviewer and
+`publish-*` still validate the terminal document against the original
+full diff, which remains the authority. The reviewer's terminal-document
+parser is now the strict shared `parse_review_document` (one bare or
+exactly fenced JSON object, non-JSON constants rejected), matching the
+prompt contract.
 
 Evidence from the prior spike branch is historical and uncommitted; none
 of it is inherited as proof. Real-environment acceptance is re-collected
