@@ -203,6 +203,18 @@ class TestGitHubClientGetPrDescription:
         assert desc is None
 
 
+class TestGitHubClientGetPrShas:
+    def test_returns_base_and_head_shas(self) -> None:
+        fake_gh = FakePyGithub()
+        fake_gh.add_pull("owner/repo", 1, base_sha="b" * 40, head_sha="h" * 40)
+        client = _make_client(fake_gh)
+
+        base_sha, head_sha = client.get_pr_shas("owner", "repo", 1)
+
+        assert base_sha == "b" * 40
+        assert head_sha == "h" * 40
+
+
 class TestGitHubClientPostReview:
     def test_posts_review_with_correct_args(self) -> None:
         fake_gh = FakePyGithub()
@@ -275,6 +287,30 @@ class TestFakeGitHubClientGetPrDescription:
 
         with pytest.raises(KeyError):
             client.get_pr_description("owner", "repo", 99)
+
+
+class TestFakeGitHubClientGetPrShas:
+    def test_returns_registered_shas(self) -> None:
+        client = FakeGitHubClient()
+        client.add_pull_request(
+            "owner",
+            "repo",
+            1,
+            diff="",
+            base_sha="b" * 40,
+            head_sha="h" * 40,
+        )
+
+        base_sha, head_sha = client.get_pr_shas("owner", "repo", 1)
+
+        assert base_sha == "b" * 40
+        assert head_sha == "h" * 40
+
+    def test_unknown_pr_raises_key_error(self) -> None:
+        client = FakeGitHubClient()
+
+        with pytest.raises(KeyError):
+            client.get_pr_shas("owner", "repo", 99)
 
 
 class TestFakeGitHubClientPostReview:

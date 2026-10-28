@@ -16,12 +16,14 @@ from maas_code_reviewer.metrics import ReviewMetrics, write_metrics
 from maas_code_reviewer.review_commands import (
     InvalidReviewError,
     fetch_merge_proposal,
+    fetch_pull_request,
     format_merge_proposals,
     list_merge_proposals,
     load_validated_review,
     post_pull_request_review,
     read_agents_context,
     render_merge_proposal_comment,
+    render_pull_request_review,
     review_merge_proposal,
     review_pull_request,
 )
@@ -157,18 +159,37 @@ def handle_review_diff(args: argparse.Namespace) -> None:
         write_metrics(metrics, Path(args.metrics))
 
 
+def handle_fetch_pr(args: argparse.Namespace) -> None:
+    """Handle the fetch-pr subcommand."""
+    token = _get_github_token(args)
+    if token is None:
+        _exit_missing_github_token()
+    github_client = GitHubClient(token)
+    fetch_pull_request(github_client, args.pr_url, Path(args.output_dir))
+
+
+def handle_publish_pr(args: argparse.Namespace) -> None:
+    """Handle the publish-pr subcommand."""
+    review = load_validated_review(Path(args.review), Path(args.input_dir))
+    review = render_pull_request_review(review)
+    if args.dry_run:
+        print(json.dumps(review, indent=2))
+        return
+    owner, repo, pr_number = parse_pr_url(args.pr_url)
+    token = _get_github_token(args)
+    if token is None:
+        _exit_missing_github_token()
+    github_client = GitHubClient(token)
+    post_pull_request_review(github_client, owner, repo, pr_number, review)
+
+
 def handle_review_pr(args: argparse.Namespace) -> None:
     """Handle the review-pr subcommand."""
     owner, repo, pr_number = parse_pr_url(args.pr_url)
 
-    token = args.github_token or os.environ.get("GITHUB_TOKEN")
-    if not token:
-        print(
-            "Error: GitHub token not provided. Use --github-token or set the "
-            "GITHUB_TOKEN environment variable.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    token = _get_github_token(args)
+    if token is None:
+        _exit_missing_github_token()
 
     api_key = _get_gemini_api_key(args)
     if api_key is None:
@@ -217,6 +238,10 @@ def main(argv: list[str] | None = None) -> None:
             handle_review_mp(args)
         elif args.command == "review-diff":
             handle_review_diff(args)
+        elif args.command == "fetch-pr":
+            handle_fetch_pr(args)
+        elif args.command == "publish-pr":
+            handle_publish_pr(args)
         elif args.command == "review-pr":
             handle_review_pr(args)
     except (NoReviewText, InvalidReviewError) as exc:
@@ -242,6 +267,22 @@ def _exit_missing_gemini_api_key() -> NoReturn:
     print(
         "Error: No Gemini API key configured. Use --gemini-api-key-file or set "
         "the GEMINI_API_KEY environment variable.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def _get_github_token(args: argparse.Namespace) -> str | None:
+    """Return the GitHub token from --github-token or the environment."""
+    token = args.github_token or os.environ.get("GITHUB_TOKEN")
+    return token or None
+
+
+def _exit_missing_github_token() -> NoReturn:
+    """Print an error message about a missing GitHub token and exit."""
+    print(
+        "Error: GitHub token not provided. Use --github-token or set the "
+        "GITHUB_TOKEN environment variable.",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -463,6 +504,75 @@ def _build_parser() -> argparse.ArgumentParser:
     diff_parser.add_argument(
         "diff_file",
         help="Path to a unified diff file, or '-' to read from stdin.",
+    )
+
+    fetch_pr_parser = subparsers.add_parser(
+        "fetch-pr",
+        help="Fetch a pull request's review inputs into a directory.",
+    )
+    fetch_pr_parser.add_argument(
+        "--github-token",
+        type=str,
+        default=None,
+        help=(
+            "GitHub personal access token. If not provided, read from the "
+            "GITHUB_TOKEN environment variable."
+        ),
+    )
+    fetch_pr_parser.add_argument(
+        "--output-dir",
+        type=str,
+        required=True,
+        metavar="DIR",
+        help=(
+            "Directory to write diff.patch, description.md, and "
+            "metadata.json into."
+        ),
+    )
+    fetch_pr_parser.add_argument(
+        "pr_url",
+        help="Full GitHub PR URL, e.g. https://github.com/owner/repo/pull/42.",
+    )
+
+    publish_pr_parser = subparsers.add_parser(
+        "publish-pr",
+        help="Validate a candidate review and post it to a pull request.",
+    )
+    publish_pr_parser.add_argument(
+        "--github-token",
+        type=str,
+        default=None,
+        help=(
+            "GitHub personal access token. If not provided, read from the "
+            "GITHUB_TOKEN environment variable."
+        ),
+    )
+    publish_pr_parser.add_argument(
+        "--review",
+        type=str,
+        required=True,
+        metavar="FILE",
+        help="Path to the candidate review JSON document to publish.",
+    )
+    publish_pr_parser.add_argument(
+        "--input-dir",
+        type=str,
+        required=True,
+        metavar="DIR",
+        help=(
+            "Directory holding the fetch-pr output (diff.patch and "
+            "metadata.json) to validate against."
+        ),
+    )
+    publish_pr_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print the review JSON to stdout instead of posting it.",
+    )
+    publish_pr_parser.add_argument(
+        "pr_url",
+        help="Full GitHub PR URL to publish the review to.",
     )
 
     pr_parser = subparsers.add_parser(

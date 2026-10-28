@@ -37,11 +37,27 @@ class FakeGithubFile:
 
 
 @dataclass
+class FakePullRequestPart:
+    """In-memory representation of a pull request base/head ref."""
+
+    sha: str
+
+
+@dataclass
 class FakeGithubPull:
-    """In-memory representation of a GitHub pull request."""
+    """In-memory representation of a GitHub pull request.
+
+    ``base``/``head`` carry the PR's base/head SHAs.
+    """
 
     number: int
     body: str | None = None
+    base: FakePullRequestPart = field(
+        default_factory=lambda: FakePullRequestPart(sha="base-sha")
+    )
+    head: FakePullRequestPart = field(
+        default_factory=lambda: FakePullRequestPart(sha="head-sha")
+    )
     _files: list[FakeGithubFile] = field(default_factory=list)
     posted_reviews: list[dict] = field(default_factory=list)
 
@@ -83,6 +99,8 @@ class FakePyGithub:
         number: int,
         body: str | None = None,
         files: list[FakeGithubFile] | None = None,
+        base_sha: str = "base-sha",
+        head_sha: str = "head-sha",
     ) -> FakeGithubPull:
         """Register a fake pull request.
 
@@ -96,11 +114,21 @@ class FakePyGithub:
             The PR description body text.
         files:
             List of changed files with optional patches.
+        base_sha:
+            The SHA of the base commit the pull request is based on.
+        head_sha:
+            The SHA of the pull request's head commit.
         """
         if full_name not in self._repos:
             self._repos[full_name] = FakeGithubRepo(full_name=full_name)
         repo = self._repos[full_name]
-        pr = FakeGithubPull(number=number, body=body, _files=files or [])
+        pr = FakeGithubPull(
+            number=number,
+            body=body,
+            base=FakePullRequestPart(sha=base_sha),
+            head=FakePullRequestPart(sha=head_sha),
+            _files=files or [],
+        )
         repo._pulls[number] = pr
         return pr
 

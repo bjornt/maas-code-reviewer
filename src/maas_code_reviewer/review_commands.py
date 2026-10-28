@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from maas_code_reviewer.git import GitClient
-from maas_code_reviewer.github_client import GitHubClient
+from maas_code_reviewer.github_client import GitHubClient, parse_pr_url
 from maas_code_reviewer.launchpad_client import LaunchpadClient
 from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS, GeminiClient
 from maas_code_reviewer.metrics import ReviewMetrics
@@ -241,6 +241,58 @@ def render_merge_proposal_comment(review: dict) -> str:
         for line, comment in line_comments.items():
             sections.append(f"### {file_path}:{line}\n\n{comment}")
     return "\n\n".join(sections)
+
+
+def fetch_pull_request(
+    github: GitHubClient,
+    pr_url: str,
+    output_dir: Path,
+) -> None:
+    """Fetch a pull request's review inputs into *output_dir*.
+
+    The diff, description, and base/head SHAs are fetched through the
+    GitHub API — no checkout is performed; the workflow or operator
+    provides the agent's repository context separately. Writes
+    ``diff.patch``, ``description.md``, and ``metadata.json`` (PR URL,
+    owner/repo/number, base/head SHAs, and the diff path prefix when it
+    is not the standard ``a/`` + ``b/``).
+    """
+    owner, repo, pr_number = parse_pr_url(pr_url)
+    diff = github.get_pr_diff(owner, repo, pr_number)
+    description = github.get_pr_description(owner, repo, pr_number)
+    base_sha, head_sha = github.get_pr_shas(owner, repo, pr_number)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "diff.patch").write_text(diff)
+    (output_dir / "description.md").write_text(description or "")
+    (output_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "pr_url": pr_url,
+                "owner": owner,
+                "repo": repo,
+                "number": pr_number,
+                "base_sha": base_sha,
+                "head_sha": head_sha,
+                "diff_prefix": _detect_diff_prefix(diff),
+            },
+            indent=2,
+        )
+    )
+
+
+def render_pull_request_review(review: dict) -> dict:
+    """Render a validated review document for publication to GitHub.
+
+    Returns a shallow copy of the document with the review marker and
+    preamble prepended to the general comment exactly once; inline
+    findings are unchanged — GitHub's review API takes the general
+    comment as the review body and each finding as a structured comment,
+    so no comment text is composed. Any marker text the candidate itself
+    carried is removed first: the host owns this wrapper.
+    """
+    rendered = dict(review)
+    rendered["general_comment"] = _decorate_review_text(review["general_comment"])
+    return rendered
 
 
 def review_pull_request(

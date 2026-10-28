@@ -13,6 +13,8 @@ class FakePullRequest:
     number: int
     diff: str
     description: str | None = None
+    base_sha: str = "base-sha"
+    head_sha: str = "head-sha"
     posted_reviews: list[dict] = field(default_factory=list)
 
 
@@ -34,6 +36,8 @@ class FakeGitHubClient:
         number: int,
         diff: str,
         description: str | None = None,
+        base_sha: str = "base-sha",
+        head_sha: str = "head-sha",
     ) -> FakePullRequest:
         """Register a fake PR so the client can serve it during tests."""
         pr = FakePullRequest(
@@ -42,6 +46,8 @@ class FakeGitHubClient:
             number=number,
             diff=diff,
             description=description,
+            base_sha=base_sha,
+            head_sha=head_sha,
         )
         self._pull_requests[(owner, repo, number)] = pr
         return pr
@@ -55,6 +61,11 @@ class FakeGitHubClient:
         """Return the description registered for the given PR."""
         pr = self._pull_requests[(owner, repo, pr_number)]
         return pr.description
+
+    def get_pr_shas(self, owner: str, repo: str, pr_number: int) -> tuple[str, str]:
+        """Return the registered base and head SHAs for the given PR."""
+        pr = self._pull_requests[(owner, repo, pr_number)]
+        return pr.base_sha, pr.head_sha
 
     def post_review(
         self,

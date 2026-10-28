@@ -18,11 +18,13 @@ from maas_code_reviewer.review_commands import (
     _lp_repo_url,
     _ref_to_branch,
     fetch_merge_proposal,
+    fetch_pull_request,
     format_merge_proposals,
     has_existing_review,
     list_merge_proposals,
     load_validated_review,
     render_merge_proposal_comment,
+    render_pull_request_review,
     review_merge_proposal,
     review_pull_request,
 )
@@ -71,6 +73,17 @@ def _write_publish_inputs(
 
 
 _SIMPLE_STD_DIFF = "--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-one\n+two\n"
+
+_GITHUB_PR_DIFF = (
+    "diff --git a/src/foo.py b/src/foo.py\n"
+    "--- a/src/foo.py\n"
+    "+++ b/src/foo.py\n"
+    "@@ -1,3 +1,4 @@\n"
+    " import os\n"
+    "+import sys\n"
+    "\n"
+    " def main():\n"
+)
 
 
 class TestListMergeProposals:
@@ -1287,3 +1300,138 @@ class TestReviewPullRequestDecoration:
         )
 
         assert result["general_comment"] == EMPTY_DIFF_GENERAL_COMMENT
+
+
+class TestFetchPullRequest:
+    def test_writes_diff_description_and_metadata(self, tmp_path: Path) -> None:
+        github = FakeGitHubClient()
+        github.add_pull_request(
+            "owner",
+            "repo",
+            42,
+            diff=_GITHUB_PR_DIFF,
+            description="Fix the widget",
+            base_sha="b" * 40,
+            head_sha="h" * 40,
+        )
+
+        fetch_pull_request(
+            github, "https://github.com/owner/repo/pull/42", tmp_path / "out"
+        )
+
+        out = tmp_path / "out"
+        assert (out / "diff.patch").read_text() == _GITHUB_PR_DIFF
+        assert (out / "description.md").read_text() == "Fix the widget"
+        metadata = json.loads((out / "metadata.json").read_text())
+        assert metadata == {
+            "pr_url": "https://github.com/owner/repo/pull/42",
+            "owner": "owner",
+            "repo": "repo",
+            "number": 42,
+            "base_sha": "b" * 40,
+            "head_sha": "h" * 40,
+            "diff_prefix": None,
+        }
+        assert (tmp_path / "out" / "repo").exists() is False
+
+    def test_creates_missing_output_dir_with_parents(self, tmp_path: Path) -> None:
+        github = FakeGitHubClient()
+        github.add_pull_request("owner", "repo", 42, diff=_GITHUB_PR_DIFF)
+
+        fetch_pull_request(
+            github, "https://github.com/owner/repo/pull/42", tmp_path / "deep" / "out"
+        )
+
+        out = tmp_path / "deep" / "out"
+        assert (out / "diff.patch").exists()
+        assert (out / "description.md").exists()
+        assert (out / "metadata.json").exists()
+
+    def test_none_description_writes_empty_file(self, tmp_path: Path) -> None:
+        github = FakeGitHubClient()
+        github.add_pull_request("owner", "repo", 42, diff=_GITHUB_PR_DIFF)
+
+        fetch_pull_request(
+            github, "https://github.com/owner/repo/pull/42", tmp_path / "out"
+        )
+
+        assert (tmp_path / "out" / "description.md").read_text() == ""
+
+    def test_records_none_prefix_for_github_diff_shapes(self, tmp_path: Path) -> None:
+        diff = (
+            "diff --git a/new.py b/new.py\n"
+            "--- /dev/null\n"
+            "+++ b/new.py\n"
+            "@@ -0,0 +1,1 @@\n"
+            "+new\n"
+            "diff --git a/changed.py b/changed.py\n"
+            "--- a/changed.py\n"
+            "+++ b/changed.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+changed\n"
+            "diff --git a/gone.py b/gone.py\n"
+            "--- a/gone.py\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            "-gone\n"
+        )
+        github = FakeGitHubClient()
+        github.add_pull_request("owner", "repo", 42, diff=diff)
+
+        fetch_pull_request(
+            github, "https://github.com/owner/repo/pull/42", tmp_path / "out"
+        )
+
+        metadata = json.loads((tmp_path / "out" / "metadata.json").read_text())
+        assert metadata["diff_prefix"] is None
+
+    def test_invalid_pr_url_raises_value_error(self, tmp_path: Path) -> None:
+        github = FakeGitHubClient()
+
+        with pytest.raises(ValueError, match="Invalid GitHub PR URL"):
+            fetch_pull_request(
+                github, "https://github.com/owner/repo", tmp_path / "out"
+            )
+
+        assert not (tmp_path / "out").exists()
+
+
+class TestRenderPullRequestReview:
+    def test_decorates_general_comment_and_preserves_findings(self) -> None:
+        doc = {
+            "general_comment": "Looks good overall.",
+            "inline_comments": {"src/foo.py": {"2": "Nice import."}},
+        }
+
+        rendered = render_pull_request_review(doc)
+
+        assert rendered["general_comment"] == (
+            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good overall."
+        )
+        assert rendered["inline_comments"] == {"src/foo.py": {"2": "Nice import."}}
+        assert doc["general_comment"] == "Looks good overall."
+
+    def test_marker_in_candidate_is_not_duplicated(self) -> None:
+        doc = {
+            "general_comment": (
+                f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nSaid it twice"
+            ),
+            "inline_comments": {},
+        }
+
+        rendered = render_pull_request_review(doc)
+
+        assert rendered["general_comment"].startswith(REVIEW_MARKER)
+        assert rendered["general_comment"].count(REVIEW_MARKER) == 1
+        assert rendered["general_comment"].count(REVIEW_PREAMBLE.strip()) == 1
+        assert "Said it twice" in rendered["general_comment"]
+
+    def test_empty_diff_comment_is_decorated(self) -> None:
+        doc = {"general_comment": EMPTY_DIFF_GENERAL_COMMENT, "inline_comments": {}}
+
+        rendered = render_pull_request_review(doc)
+
+        assert rendered["general_comment"] == (
+            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{EMPTY_DIFF_GENERAL_COMMENT}"
+        )

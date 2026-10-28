@@ -13,8 +13,10 @@ from maas_code_reviewer.cli import (
     _build_parser,
     _get_gemini_api_key,
     handle_fetch_mp,
+    handle_fetch_pr,
     handle_list_lp_mps,
     handle_publish_mp,
+    handle_publish_pr,
     handle_review_diff,
     handle_review_mp,
     handle_review_pr,
@@ -327,6 +329,66 @@ class TestBuildParserPublishMp:
         assert args.max_tool_calls == 50
 
 
+class TestBuildParserFetchPr:
+    def test_parses_output_dir_and_url(self) -> None:
+        parser = _build_parser()
+        url = "https://github.com/owner/repo/pull/42"
+        args = parser.parse_args(["fetch-pr", "--output-dir", "out", url])
+        assert args.command == "fetch-pr"
+        assert args.output_dir == "out"
+        assert args.pr_url == url
+        assert args.github_token is None
+
+    def test_missing_output_dir_exits(self) -> None:
+        parser = _build_parser()
+        url = "https://github.com/owner/repo/pull/42"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["fetch-pr", url])
+
+
+class TestBuildParserPublishPr:
+    def test_parses_review_input_dir_and_url(self) -> None:
+        parser = _build_parser()
+        url = "https://github.com/owner/repo/pull/42"
+        args = parser.parse_args(
+            ["publish-pr", "--review", "r.json", "--input-dir", "in", url]
+        )
+        assert args.command == "publish-pr"
+        assert args.review == "r.json"
+        assert args.input_dir == "in"
+        assert args.pr_url == url
+        assert args.dry_run is False
+        assert args.github_token is None
+
+    def test_parses_dry_run(self) -> None:
+        parser = _build_parser()
+        url = "https://github.com/owner/repo/pull/42"
+        args = parser.parse_args(
+            [
+                "publish-pr",
+                "--review",
+                "r.json",
+                "--input-dir",
+                "in",
+                "--dry-run",
+                url,
+            ]
+        )
+        assert args.dry_run is True
+
+    def test_missing_review_exits(self) -> None:
+        parser = _build_parser()
+        url = "https://github.com/owner/repo/pull/42"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["publish-pr", "--input-dir", "in", url])
+
+    def test_missing_input_dir_exits(self) -> None:
+        parser = _build_parser()
+        url = "https://github.com/owner/repo/pull/42"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["publish-pr", "--review", "r.json", url])
+
+
 class TestMain:
     def test_no_command_exits_with_code_1(self) -> None:
         with pytest.raises(SystemExit) as exc_info:
@@ -495,6 +557,101 @@ class TestMain:
                     "publish-mp",
                     "--review",
                     str(review_file),
+                    "--input-dir",
+                    str(input_dir),
+                    url,
+                ]
+            )
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "Invalid review document" in captured.err
+
+    def test_fetch_pr_command_delegates_to_handle_fetch_pr(
+        self, tmp_path: Path
+    ) -> None:
+        github_client = FakeGitHubClient()
+        github_client.add_pull_request(
+            "owner",
+            "repo",
+            42,
+            diff=_PR_DIFF,
+            description="Add sys import",
+            base_sha="b" * 40,
+            head_sha="h" * 40,
+        )
+        out = tmp_path / "out"
+        url = "https://github.com/owner/repo/pull/42"
+
+        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
+            main(
+                [
+                    "fetch-pr",
+                    "--github-token",
+                    "ghp_test",
+                    "--output-dir",
+                    str(out),
+                    url,
+                ]
+            )
+
+        assert (out / "diff.patch").read_text() == _PR_DIFF
+        assert (out / "description.md").read_text() == "Add sys import"
+        metadata = json.loads((out / "metadata.json").read_text())
+        assert metadata == {
+            "pr_url": url,
+            "owner": "owner",
+            "repo": "repo",
+            "number": 42,
+            "base_sha": "b" * 40,
+            "head_sha": "h" * 40,
+            "diff_prefix": None,
+        }
+
+    def test_publish_pr_command_delegates_to_handle_publish_pr(
+        self, tmp_path: Path
+    ) -> None:
+        input_dir, review_path = _write_pr_publish_inputs(
+            tmp_path, json.loads(_PR_REVIEW_RESPONSE)
+        )
+        github_client = FakeGitHubClient()
+        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+        url = "https://github.com/owner/repo/pull/42"
+
+        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
+            main(
+                [
+                    "publish-pr",
+                    "--github-token",
+                    "ghp_test",
+                    "--review",
+                    str(review_path),
+                    "--input-dir",
+                    str(input_dir),
+                    url,
+                ]
+            )
+
+        reviews = github_client.get_posted_reviews("owner", "repo", 42)
+        assert len(reviews) == 1
+        assert reviews[0]["body"].startswith(REVIEW_MARKER)
+
+    def test_publish_pr_invalid_review_exits_with_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        review = {
+            "general_comment": "LGTM",
+            "inline_comments": {"src/foo.py": {"9": "off"}},
+        }
+        input_dir, review_path = _write_pr_publish_inputs(tmp_path, review)
+        url = "https://github.com/owner/repo/pull/42"
+
+        with pytest.raises(SystemExit) as exc_info:
+            main(
+                [
+                    "publish-pr",
+                    "--review",
+                    str(review_path),
                     "--input-dir",
                     str(input_dir),
                     url,
@@ -979,6 +1136,245 @@ class TestHandlePublishMp:
                 handle_publish_mp(args)
 
         assert lp.get_comments_for(mp.api_url) == []
+
+
+class TestHandleFetchPr:
+    def test_writes_fetch_outputs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        github_client = FakeGitHubClient()
+        github_client.add_pull_request(
+            "owner",
+            "repo",
+            42,
+            diff=_PR_DIFF,
+            description="Add sys import",
+            base_sha="b" * 40,
+            head_sha="h" * 40,
+        )
+        out = tmp_path / "out"
+        url = "https://github.com/owner/repo/pull/42"
+
+        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
+            args = _build_parser().parse_args(
+                [
+                    "fetch-pr",
+                    "--github-token",
+                    "ghp_test",
+                    "--output-dir",
+                    str(out),
+                    url,
+                ]
+            )
+            handle_fetch_pr(args)
+
+        assert (out / "diff.patch").read_text() == _PR_DIFF
+        assert (out / "description.md").read_text() == "Add sys import"
+        metadata = json.loads((out / "metadata.json").read_text())
+        assert metadata == {
+            "pr_url": url,
+            "owner": "owner",
+            "repo": "repo",
+            "number": 42,
+            "base_sha": "b" * 40,
+            "head_sha": "h" * 40,
+            "diff_prefix": None,
+        }
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_token_read_from_env_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        github_client = FakeGitHubClient()
+        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+        out = tmp_path / "out"
+        monkeypatch.setenv("GITHUB_TOKEN", "env-token")
+        url = "https://github.com/owner/repo/pull/42"
+
+        captured_tokens: list[str] = []
+
+        def fake_github_client(token: str) -> FakeGitHubClient:
+            captured_tokens.append(token)
+            return github_client
+
+        with patch(
+            "maas_code_reviewer.cli.GitHubClient", side_effect=fake_github_client
+        ):
+            args = _build_parser().parse_args(
+                [
+                    "fetch-pr",
+                    "--output-dir",
+                    str(out),
+                    url,
+                ]
+            )
+            handle_fetch_pr(args)
+
+        assert captured_tokens == ["env-token"]
+
+    def test_missing_token_exits_with_error(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        out = tmp_path / "out"
+        url = "https://github.com/owner/repo/pull/42"
+        args = _build_parser().parse_args(
+            [
+                "fetch-pr",
+                "--output-dir",
+                str(out),
+                url,
+            ]
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            handle_fetch_pr(args)
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "GITHUB_TOKEN" in captured.err
+
+
+class TestHandlePublishPr:
+    def test_posts_validated_and_decorated_review(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        input_dir, review_path = _write_pr_publish_inputs(
+            tmp_path, json.loads(_PR_REVIEW_RESPONSE)
+        )
+        github_client = FakeGitHubClient()
+        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+        url = "https://github.com/owner/repo/pull/42"
+
+        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
+            args = _build_parser().parse_args(
+                [
+                    "publish-pr",
+                    "--github-token",
+                    "ghp_test",
+                    "--review",
+                    str(review_path),
+                    "--input-dir",
+                    str(input_dir),
+                    url,
+                ]
+            )
+            handle_publish_pr(args)
+
+        reviews = github_client.get_posted_reviews("owner", "repo", 42)
+        assert len(reviews) == 1
+        assert reviews[0]["body"] == (
+            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good overall."
+        )
+        assert reviews[0]["comments"] == [
+            {"path": "src/foo.py", "line": 2, "body": "Nice import."}
+        ]
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_dry_run_prints_json_without_posting(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        input_dir, review_path = _write_pr_publish_inputs(
+            tmp_path, json.loads(_PR_REVIEW_RESPONSE)
+        )
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        url = "https://github.com/owner/repo/pull/42"
+        github_client = FakeGitHubClient()
+        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+
+        with patch(
+            "maas_code_reviewer.cli.GitHubClient",
+            side_effect=AssertionError("must not construct"),
+        ):
+            args = _build_parser().parse_args(
+                [
+                    "publish-pr",
+                    "--review",
+                    str(review_path),
+                    "--input-dir",
+                    str(input_dir),
+                    "--dry-run",
+                    url,
+                ]
+            )
+            handle_publish_pr(args)
+
+        expected = json.loads(_PR_REVIEW_RESPONSE)
+        expected["general_comment"] = (
+            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good overall."
+        )
+        captured = capsys.readouterr()
+        assert json.loads(captured.out) == expected
+        assert github_client.get_posted_reviews("owner", "repo", 42) == []
+
+    def test_invalid_candidate_raises_without_posting(self, tmp_path: Path) -> None:
+        review = {
+            "general_comment": "LGTM",
+            "inline_comments": {"src/foo.py": {"9": "off"}},
+        }
+        input_dir, review_path = _write_pr_publish_inputs(tmp_path, review)
+        github_client = FakeGitHubClient()
+        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+        url = "https://github.com/owner/repo/pull/42"
+
+        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
+            args = _build_parser().parse_args(
+                [
+                    "publish-pr",
+                    "--github-token",
+                    "ghp_test",
+                    "--review",
+                    str(review_path),
+                    "--input-dir",
+                    str(input_dir),
+                    url,
+                ]
+            )
+            with pytest.raises(InvalidReviewError):
+                handle_publish_pr(args)
+
+        assert github_client.get_posted_reviews("owner", "repo", 42) == []
+
+    def test_missing_token_exits_without_posting(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        input_dir, review_path = _write_pr_publish_inputs(
+            tmp_path, json.loads(_PR_REVIEW_RESPONSE)
+        )
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        github_client = FakeGitHubClient()
+        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+        url = "https://github.com/owner/repo/pull/42"
+
+        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
+            args = _build_parser().parse_args(
+                [
+                    "publish-pr",
+                    "--review",
+                    str(review_path),
+                    "--input-dir",
+                    str(input_dir),
+                    url,
+                ]
+            )
+            with pytest.raises(SystemExit) as exc_info:
+                handle_publish_pr(args)
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "GITHUB_TOKEN" in captured.err
+        assert github_client.get_posted_reviews("owner", "repo", 42) == []
 
 
 class TestGetGeminiApiKey:
@@ -1812,6 +2208,19 @@ _PR_EMPTY_RESPONSE = json.dumps(
         "inline_comments": {},
     }
 )
+
+
+def _write_pr_publish_inputs(
+    tmp_path: Path, review: dict, diff: str = _PR_DIFF
+) -> tuple[Path, Path]:
+    """Write a fetch-pr-style input dir and candidate review; return paths."""
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "diff.patch").write_text(diff)
+    (input_dir / "metadata.json").write_text(json.dumps({"diff_prefix": None}))
+    review_path = tmp_path / "review.json"
+    review_path.write_text(json.dumps(review))
+    return input_dir, review_path
 
 
 class TestBuildParserReviewPr:
