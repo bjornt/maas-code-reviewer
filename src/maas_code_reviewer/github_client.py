@@ -69,6 +69,28 @@ class GitHubClient:
         pr = gh_repo.get_pull(pr_number)
         return pr.body or None
 
+    def get_pr_shas(self, owner: str, repo: str, pr_number: int) -> tuple[str, str]:
+        """Return the pull request's base and head commit SHAs.
+
+        Parameters
+        ----------
+        owner:
+            The repository owner.
+        repo:
+            The repository name.
+        pr_number:
+            The pull request number.
+
+        Returns
+        -------
+        tuple[str, str]
+            The ``(base_sha, head_sha)`` pair: the base-branch commit the
+            pull request is based on, and the pull request's head commit.
+        """
+        gh_repo = self._gh.get_repo(f"{owner}/{repo}")
+        pr = gh_repo.get_pull(pr_number)
+        return pr.base.sha, pr.head.sha
+
     def post_review(
         self,
         owner: str,

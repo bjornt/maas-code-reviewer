@@ -33,6 +33,10 @@ which Gemini model is being used to do the code review.
 You also need to create a secret in the repo called `GEMINI_API_KEY` which
 contains the API key that you can get from https://aistudio.google.com.
 
+For split pipelines (reviewing in a separate container), `fetch-pr` writes the
+review inputs and `publish-pr` validates and posts a candidate review — see the
+command reference.
+
 ### Launchpad
 
 There's currently no automation to run code reviews automatically on new merge proposals.
@@ -80,8 +84,8 @@ maas-code-reviewer review-mp -g /path/to/gemini-api-key MP_URL
 
 ### GitHub Token
 
-The `review-pr` command requires a GitHub personal access token. Provide it
-in one of two ways:
+The `review-pr`, `fetch-pr`, and `publish-pr` commands require a GitHub
+personal access token. Provide it in one of two ways:
 
 | Method | Details |
 |---|---|
@@ -257,6 +261,59 @@ git diff HEAD~1 | maas-code-reviewer review-diff -g gemini-api-key -
 maas-code-reviewer review-diff -g gemini-api-key --json-output review.json changes.diff
 ```
 
+### `fetch-pr`
+
+Fetch a pull request's review inputs into a directory.
+
+```sh
+maas-code-reviewer fetch-pr [--github-token TOKEN] --output-dir DIR PR_URL
+```
+
+| Argument | Description |
+|---|---|
+| `PR_URL` | Full GitHub PR URL, e.g. `https://github.com/owner/repo/pull/42`. |
+| `--output-dir DIR` | Directory to write the fetched review inputs into. |
+| `--github-token TOKEN` | GitHub personal access token. If not provided, read from the `GITHUB_TOKEN` environment variable. |
+
+Fetches the PR diff and description through the GitHub API — no checkout is
+performed; the workflow or operator provides the agent's repository context
+separately (for example `actions/checkout` in CI). Writes into the output
+directory:
+
+- `diff.patch` — the pull request's unified diff (standard `a/` + `b/`
+  prefixes);
+- `description.md` — the PR body, or an empty file when the PR has none;
+- `metadata.json` — the PR URL, owner, repository, and number, the base and
+  head SHAs, and the diff path prefix when it is not the standard `a/` + `b/`
+  (forward it to `review --diff-prefix`).
+
+Unlike `fetch-mp` there is no already-reviewed check: whether a PR gets
+reviewed is decided by whatever triggers the pipeline.
+
+### `publish-pr`
+
+Validate a candidate review and post it to a pull request.
+
+```sh
+maas-code-reviewer publish-pr [--github-token TOKEN] --review FILE --input-dir DIR [--dry-run] PR_URL
+```
+
+| Argument | Description |
+|---|---|
+| `PR_URL` | Full GitHub PR URL to publish the review to. |
+| `--review FILE` | Path to the candidate review JSON document to publish. |
+| `--input-dir DIR` | Directory holding the fetch-pr output (diff.patch and metadata.json) to validate against. |
+| `--dry-run` | Print the review JSON to stdout instead of posting it. |
+| `--github-token TOKEN` | GitHub personal access token. If not provided, read from the `GITHUB_TOKEN` environment variable. |
+
+Validates the candidate review against the authoritative `diff.patch` and
+`metadata.json` from `fetch-pr`'s output directory, prepends the review marker
+and preamble to the general comment exactly once, and posts it as a GitHub
+pull request review: the general comment as the review body and every inline
+finding as a structured review comment. `--dry-run` prints the decorated
+review JSON instead and needs no token. An invalid candidate exits nonzero
+with nothing posted.
+
 ### `review-pr`
 
 Review a GitHub pull request using Gemini and post the review via the GitHub
@@ -368,7 +425,7 @@ cat metrics.json
 
 | Variable | Required | Description |
 |---|---|---|
-| `GITHUB_TOKEN` | No | GitHub personal access token. Overridden by `--github-token`. Used by `review-pr`. |
+| `GITHUB_TOKEN` | No | GitHub personal access token. Overridden by `--github-token`. Used by `review-pr`, `fetch-pr`, and `publish-pr`. |
 
 ## Development
 
