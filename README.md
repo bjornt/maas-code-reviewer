@@ -37,6 +37,8 @@ contains the API key that you can get from https://aistudio.google.com.
 
 There's currently no automation to run code reviews automatically on new merge proposals.
 At the moment you have to set up your own automation and then use the `review-mp` command.
+For split pipelines, `fetch-mp` writes the review inputs and `publish-mp` validates and
+posts a candidate review — see the command reference.
 
 ### Locally
 
@@ -101,6 +103,13 @@ with Launchpad. You can provide credentials in two ways:
 If neither is provided, `launchpadlib` will use its default OAuth flow
 (opening a browser for authorization on first use).
 
+Cloning private Launchpad repositories additionally requires a
+[Launchpad git access token](https://ubuntu.com/docs/launchpad/user/explanation/working-with-code/git-hosting/)
+with pull scope, provided in the `LP_GIT_TOKEN` environment variable.
+`fetch-mp` uses it as HTTP header authentication for the clone and never
+writes it to disk (no credential helper, no credential-bearing remote URLs).
+Without it, only public repositories can be fetched.
+
 
 ## Command reference
 
@@ -126,6 +135,59 @@ review posted by this tool (or `never`).
 ```sh
 maas-code-reviewer list-lp-mps --status "Needs review" maas
 ```
+
+### `fetch-mp`
+
+Fetch a merge proposal's review inputs into a directory.
+
+```sh
+maas-code-reviewer fetch-mp [--launchpad-credentials FILE] --output-dir DIR MP_URL
+```
+
+| Argument | Description |
+|---|---|
+| `MP_URL` | URL of the merge proposal to fetch. |
+| `--output-dir DIR` | Directory to write the review inputs into (required). |
+| `--launchpad-credentials FILE` | Path to Launchpad credentials file. |
+
+Checks first whether this tool has already reviewed the proposal. If so, it
+writes `status.json`
+(`{"status": "skipped", "reason": "already-reviewed"}`) into the output
+directory and exits without cloning, so automation can short-circuit.
+Otherwise it writes:
+
+- `diff.patch` — the `ORIG_HEAD..HEAD` diff of the source merged into the
+  target branch;
+- `description.md` — the proposal description or commit message;
+- `metadata.json` — proposal and repository URLs, branch names, base/head
+  SHAs, and the diff path prefix when it is not the standard `a/` + `b/`
+  (forward it to `review --diff-prefix`);
+- `repo/` — the merged working tree. Its `.git` stays on the host; exclude
+  `.git` when copying the tree into a review container.
+
+### `publish-mp`
+
+Validate a candidate review and post it to a merge proposal.
+
+```sh
+maas-code-reviewer publish-mp [--launchpad-credentials FILE] --review FILE --input-dir DIR [--dry-run] MP_URL
+```
+
+| Argument | Description |
+|---|---|
+| `MP_URL` | URL of the merge proposal to publish the review to. |
+| `--review FILE` | Path to the candidate review JSON document to publish (required). |
+| `--input-dir DIR` | Directory holding the `fetch-mp` output to validate against (required). |
+| `--dry-run` | Print the Launchpad comment to stdout instead of posting it. |
+| `--launchpad-credentials FILE` | Path to Launchpad credentials file. |
+
+Validates the candidate review JSON against the authoritative `diff.patch`
+and `metadata.json` from `fetch-mp`'s output directory, renders the document
+as the Launchpad comment text (the general comment, then every inline finding
+as a `### path:line` section), prepends the review marker and preamble
+exactly once, and posts it as an "Automated review" comment. `--dry-run`
+prints the comment instead. An invalid candidate exits nonzero with nothing
+posted.
 
 ### `review-mp`
 

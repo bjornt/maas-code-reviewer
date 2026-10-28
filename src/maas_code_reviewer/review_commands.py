@@ -3,6 +3,8 @@
 
 """Merge-proposal and pull-request acquisition, review, and publication."""
 
+import base64
+import json
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,9 +17,10 @@ from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS, GeminiClient
 from maas_code_reviewer.metrics import ReviewMetrics
 from maas_code_reviewer.models import Comment, MergeProposal
 from maas_code_reviewer.repo_tools import RepoTools
-from maas_code_reviewer.review_schema import repository_files
+from maas_code_reviewer.review_schema import repository_files, validate_review_json
 from maas_code_reviewer.reviewer import (
     REVIEW_MARKER,
+    REVIEW_PREAMBLE,
     review_diff,
     review_diff_structured,
 )
@@ -78,6 +81,71 @@ def read_agents_context(repo_dir: Path) -> tuple[RepoTools, str | None]:
     return tools, agents_md
 
 
+def fetch_merge_proposal(
+    lp: LaunchpadClient,
+    git: GitClient,
+    mp_url: str,
+    output_dir: Path,
+    *,
+    git_token: str | None = None,
+) -> bool:
+    """Fetch a merge proposal's review inputs into *output_dir*.
+
+    Clones the target repository into ``output_dir/repo``, merges the source
+    branch, and writes ``diff.patch``, ``description.md``, and ``metadata.json``
+    (URLs, branch names, base/head SHAs, and the diff path prefix when it is
+    not the standard ``a/`` + ``b/``). Returns True.
+
+    When this tool has already reviewed the proposal, no clone happens:
+    ``status.json`` (``{"status": "skipped", "reason": "already-reviewed"}``)
+    is written instead and False is returned, so workflows can short-circuit
+    before running a review.
+
+    When *git_token* is given, the clone and the source fetch authenticate
+    with an ``Authorization: Basic`` header built from the bot's Launchpad
+    username and the token — never an on-disk credential helper.
+    """
+    mp = lp.get_merge_proposal(mp_url)
+
+    if has_existing_review(lp, mp):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "status.json").write_text(
+            json.dumps({"status": "skipped", "reason": "already-reviewed"}, indent=2)
+        )
+        return False
+
+    http_extra_header = None
+    if git_token is not None:
+        credentials = base64.b64encode(
+            f"{lp.get_bot_username()}:{git_token}".encode()
+        ).decode("ascii")
+        http_extra_header = f"Authorization: Basic {credentials}"
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    repo_dir = output_dir / "repo"
+    diff = _clone_merge_diff(git, mp, repo_dir, http_extra_header=http_extra_header)
+
+    description = mp.description or mp.commit_message or ""
+    (output_dir / "diff.patch").write_text(diff)
+    (output_dir / "description.md").write_text(description)
+    (output_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "mp_url": mp_url,
+                "target_url": _lp_repo_url(mp.target_git_repository),
+                "target_branch": _ref_to_branch(mp.target_git_path),
+                "source_url": _lp_repo_url(mp.source_git_repository),
+                "source_branch": _ref_to_branch(mp.source_git_path),
+                "base_sha": git.rev_parse(repo_dir, "ORIG_HEAD"),
+                "head_sha": git.rev_parse(repo_dir, "HEAD"),
+                "diff_prefix": _detect_diff_prefix(diff),
+            },
+            indent=2,
+        )
+    )
+    return True
+
+
 def review_merge_proposal(
     lp: LaunchpadClient,
     git: GitClient,
@@ -97,17 +165,9 @@ def review_merge_proposal(
     if has_existing_review(lp, mp):
         return None
 
-    target_branch = _ref_to_branch(mp.target_git_path)
-    source_branch = _ref_to_branch(mp.source_git_path)
-    target_url = _lp_repo_url(mp.target_git_repository)
-    source_url = _lp_repo_url(mp.source_git_repository)
-
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_dir = Path(tmpdir) / "repo"
-        git.clone(target_url, repo_dir, target_branch)
-        git.merge_into(repo_dir, source_url, source_branch)
-
-        diff = git.diff(repo_dir, "ORIG_HEAD", "HEAD")
+        diff = _clone_merge_diff(git, mp, repo_dir)
 
         tools, agents_md = read_agents_context(repo_dir)
         description = mp.description or mp.commit_message
@@ -130,6 +190,59 @@ def review_merge_proposal(
     return review_comment
 
 
+class InvalidReviewError(Exception):
+    """Raised when a candidate review document fails publish-side validation."""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("\n".join(["Invalid review document:", *errors]))
+
+
+def load_validated_review(review_path: Path, input_dir: Path) -> dict:
+    """Parse a candidate review and validate it against the fetch output.
+
+    The candidate JSON at *review_path* is validated against the authoritative
+    ``diff.patch`` in *input_dir*, resolving inline coordinates with the diff
+    path prefix ``fetch-mp`` recorded in ``metadata.json``. Deliberately no
+    repository listing is passed: the recorded prefix replaces it on the
+    trusted side.
+
+    Returns the parsed review document, or raises InvalidReviewError when the
+    candidate is invalid — including unparseable JSON and input-diff errors
+    such as prefix mismatches. Nothing is posted.
+    """
+    try:
+        review = json.loads(review_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise InvalidReviewError([f"Review file is not valid JSON: {exc}"]) from exc
+    diff = (input_dir / "diff.patch").read_text()
+    metadata = json.loads((input_dir / "metadata.json").read_text())
+    try:
+        errors = validate_review_json(
+            review, diff, path_prefix=metadata.get("diff_prefix")
+        )
+    except ValueError as exc:
+        raise InvalidReviewError([str(exc)]) from exc
+    if errors:
+        raise InvalidReviewError(errors)
+    return review
+
+
+def render_merge_proposal_comment(review: dict) -> str:
+    """Render a validated review document as Launchpad comment text.
+
+    The general comment leads; every inline finding follows as its own
+    ``### <path>:<line>`` section with the finding's relative path and line,
+    in the document's key order. The review marker and preamble are
+    prepended exactly once: the document itself never carries them, and any
+    marker text the candidate did carry is removed first.
+    """
+    sections = [_decorate_review_text(review["general_comment"])]
+    for file_path, line_comments in review["inline_comments"].items():
+        for line, comment in line_comments.items():
+            sections.append(f"### {file_path}:{line}\n\n{comment}")
+    return "\n\n".join(sections)
+
+
 def review_pull_request(
     github: GitHubClient,
     llm: GeminiClient,
@@ -143,7 +256,9 @@ def review_pull_request(
 ) -> dict:
     """Acquire a pull request's diff and description and review them.
 
-    Returns the structured review document; the caller decides whether
+    Returns the structured review document — with the review marker and
+    preamble prepended to its general comment for nonempty diffs, as the
+    composite review-pr command posts today; the caller decides whether
     to print or post it.
     """
     diff = github.get_pr_diff(owner, repo, pr_number)
@@ -161,6 +276,10 @@ def review_pull_request(
         max_tool_calls=max_tool_calls,
         repository_files=repository_files(repo_dir),
     )
+    if diff.strip():
+        result_dict["general_comment"] = _decorate_review_text(
+            result_dict["general_comment"]
+        )
     if metrics is not None:
         metrics.files_read = tools.files_read_count
         metrics.agents_md_read = tools.agents_md_read
@@ -226,3 +345,80 @@ def _ref_to_branch(git_path: str) -> str:
     if git_path.startswith(prefix):
         return git_path[len(prefix) :]
     return git_path
+
+
+def _clone_merge_diff(
+    git: GitClient,
+    mp: MergeProposal,
+    repo_dir: Path,
+    *,
+    http_extra_header: str | None = None,
+) -> str:
+    """Clone the MP target into *repo_dir*, merge the source, diff the result."""
+    git.clone(
+        _lp_repo_url(mp.target_git_repository),
+        repo_dir,
+        _ref_to_branch(mp.target_git_path),
+        http_extra_header=http_extra_header,
+    )
+    git.merge_into(
+        repo_dir,
+        _lp_repo_url(mp.source_git_repository),
+        _ref_to_branch(mp.source_git_path),
+        http_extra_header=http_extra_header,
+    )
+    return git.diff(repo_dir, "ORIG_HEAD", "HEAD")
+
+
+def _diff_header_path(value: str) -> str:
+    """Strip timestamps and C-style quoting from a file header path."""
+    path = value.partition("\t")[0]
+    if path.startswith('"'):
+        path = path[1:].partition('"')[0]
+    return path
+
+
+def _detect_diff_prefix(diff_text: str) -> str | None:
+    """Return the new-side diff path prefix of *diff_text*.
+
+    Standard ``a/`` + ``b/`` diffs (including new-file headers whose old side
+    is ``/dev/null``) return None — validation's ladder needs no override.
+    Any other leading path component is returned with its slash (``w/``,
+    ``YY/`` from custom src/dst prefixes), and prefix-free paths (``diff
+    noprefix``, or identical old/new paths) return the empty string.
+    """
+    old_path: str | None = None
+    for raw_line in diff_text.splitlines():
+        if raw_line.startswith("diff --git "):
+            old_path = None
+        elif old_path is None and raw_line.startswith("--- "):
+            old_path = _diff_header_path(raw_line[4:])
+        elif old_path is not None and raw_line.startswith("+++ "):
+            new_path = _diff_header_path(raw_line[4:])
+            if new_path == "/dev/null":
+                old_path = None
+            elif new_path.startswith("b/") and (
+                old_path.startswith("a/") or old_path == "/dev/null"
+            ):
+                return None
+            elif old_path == new_path:
+                return ""
+            else:
+                head, separator, _ = new_path.partition("/")
+                return head + separator if separator else ""
+    return None
+
+
+def _decorate_review_text(comment: str) -> str:
+    """Prepend the review marker and preamble exactly once.
+
+    Marker or preamble text already present in *comment* — for instance
+    repeated by the agent that produced the candidate — is removed first:
+    the host owns this wrapper.
+    """
+    comment = (
+        comment.replace(REVIEW_MARKER, "")
+        .replace(REVIEW_PREAMBLE.strip(), "")
+        .strip()
+    )
+    return f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{comment}"

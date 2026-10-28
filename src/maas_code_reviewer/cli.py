@@ -14,10 +14,14 @@ from maas_code_reviewer.launchpad_client import LaunchpadClient
 from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS, GeminiClient
 from maas_code_reviewer.metrics import ReviewMetrics, write_metrics
 from maas_code_reviewer.review_commands import (
+    InvalidReviewError,
+    fetch_merge_proposal,
     format_merge_proposals,
     list_merge_proposals,
+    load_validated_review,
     post_pull_request_review,
     read_agents_context,
+    render_merge_proposal_comment,
     review_merge_proposal,
     review_pull_request,
 )
@@ -43,6 +47,33 @@ def handle_list_lp_mps(args: argparse.Namespace) -> None:
     output = format_merge_proposals(summaries)
     if output:
         print(output)
+
+
+def handle_fetch_mp(args: argparse.Namespace) -> None:
+    """Handle the fetch-mp subcommand."""
+    lp_client = LaunchpadClient(credentials_file=args.launchpad_credentials)
+    git_client = GitClient()
+    fetched = fetch_merge_proposal(
+        lp_client,
+        git_client,
+        args.mp_url,
+        Path(args.output_dir),
+        git_token=os.environ.get("LP_GIT_TOKEN", "").strip() or None,
+    )
+    if not fetched:
+        print("Already reviewed, skipping.")
+
+
+def handle_publish_mp(args: argparse.Namespace) -> None:
+    """Handle the publish-mp subcommand."""
+    review = load_validated_review(Path(args.review), Path(args.input_dir))
+    comment = render_merge_proposal_comment(review)
+    if args.dry_run:
+        print(comment)
+        return
+    lp_client = LaunchpadClient(credentials_file=args.launchpad_credentials)
+    mp = lp_client.get_merge_proposal(args.mp_url)
+    lp_client.post_comment(mp, comment, subject="Automated review")
 
 
 def handle_review_mp(args: argparse.Namespace) -> None:
@@ -178,13 +209,17 @@ def main(argv: list[str] | None = None) -> None:
     try:
         if args.command == "list-lp-mps":
             handle_list_lp_mps(args)
+        elif args.command == "fetch-mp":
+            handle_fetch_mp(args)
+        elif args.command == "publish-mp":
+            handle_publish_mp(args)
         elif args.command == "review-mp":
             handle_review_mp(args)
         elif args.command == "review-diff":
             handle_review_diff(args)
         elif args.command == "review-pr":
             handle_review_pr(args)
-    except NoReviewText as exc:
+    except (NoReviewText, InvalidReviewError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
@@ -234,6 +269,69 @@ def _build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument(
         "project",
         help="Launchpad project name.",
+    )
+
+    fetch_mp_parser = subparsers.add_parser(
+        "fetch-mp",
+        help="Fetch a merge proposal's review inputs into a directory.",
+    )
+    fetch_mp_parser.add_argument(
+        "--launchpad-credentials",
+        type=str,
+        default=None,
+        help="Path to Launchpad credentials file.",
+    )
+    fetch_mp_parser.add_argument(
+        "--output-dir",
+        type=str,
+        required=True,
+        metavar="DIR",
+        help=(
+            "Directory to write diff.patch, description.md, metadata.json, "
+            "and the merged repository tree (repo/) into."
+        ),
+    )
+    fetch_mp_parser.add_argument(
+        "mp_url",
+        help="URL of the merge proposal to fetch.",
+    )
+
+    publish_mp_parser = subparsers.add_parser(
+        "publish-mp",
+        help="Validate a candidate review and post it to a merge proposal.",
+    )
+    publish_mp_parser.add_argument(
+        "--launchpad-credentials",
+        type=str,
+        default=None,
+        help="Path to Launchpad credentials file.",
+    )
+    publish_mp_parser.add_argument(
+        "--review",
+        type=str,
+        required=True,
+        metavar="FILE",
+        help="Path to the candidate review JSON document to publish.",
+    )
+    publish_mp_parser.add_argument(
+        "--input-dir",
+        type=str,
+        required=True,
+        metavar="DIR",
+        help=(
+            "Directory holding the fetch-mp output (diff.patch and "
+            "metadata.json) to validate against."
+        ),
+    )
+    publish_mp_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print the Launchpad comment to stdout instead of posting it.",
+    )
+    publish_mp_parser.add_argument(
+        "mp_url",
+        help="URL of the merge proposal to publish the review to.",
     )
 
     review_parser = subparsers.add_parser(

@@ -12,7 +12,9 @@ import pytest
 from maas_code_reviewer.cli import (
     _build_parser,
     _get_gemini_api_key,
+    handle_fetch_mp,
     handle_list_lp_mps,
+    handle_publish_mp,
     handle_review_diff,
     handle_review_mp,
     handle_review_pr,
@@ -20,6 +22,7 @@ from maas_code_reviewer.cli import (
 )
 from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS
 from maas_code_reviewer.models import Comment
+from maas_code_reviewer.review_commands import InvalidReviewError
 from maas_code_reviewer.reviewer import (
     EMPTY_DIFF_GENERAL_COMMENT,
     REVIEW_MARKER,
@@ -72,6 +75,66 @@ class TestBuildParser:
         parser = _build_parser()
         args = parser.parse_args([])
         assert args.command is None
+
+
+class TestBuildParserFetchMp:
+    def test_parses_output_dir_and_url(self) -> None:
+        parser = _build_parser()
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+        args = parser.parse_args(["fetch-mp", "--output-dir", "out", url])
+        assert args.command == "fetch-mp"
+        assert args.output_dir == "out"
+        assert args.mp_url == url
+        assert args.launchpad_credentials is None
+
+    def test_missing_output_dir_exits(self) -> None:
+        parser = _build_parser()
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["fetch-mp", url])
+
+
+class TestBuildParserPublishMp:
+    def test_parses_review_input_dir_and_url(self) -> None:
+        parser = _build_parser()
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+        args = parser.parse_args(
+            ["publish-mp", "--review", "r.json", "--input-dir", "in", url]
+        )
+        assert args.command == "publish-mp"
+        assert args.review == "r.json"
+        assert args.input_dir == "in"
+        assert args.mp_url == url
+        assert args.dry_run is False
+        assert args.launchpad_credentials is None
+
+    def test_parses_dry_run(self) -> None:
+        parser = _build_parser()
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+        args = parser.parse_args(
+            [
+                "publish-mp",
+                "--review",
+                "r.json",
+                "--input-dir",
+                "in",
+                "--dry-run",
+                url,
+            ]
+        )
+        assert args.dry_run is True
+
+    def test_missing_review_exits(self) -> None:
+        parser = _build_parser()
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["publish-mp", "--input-dir", "in", url])
+
+    def test_missing_input_dir_exits(self) -> None:
+        parser = _build_parser()
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["publish-mp", "--review", "r.json", url])
 
     def test_review_mp_parses_mp_url(self, tmp_path: Path) -> None:
         key_file = tmp_path / "key"
@@ -349,6 +412,99 @@ class TestMain:
         assert len(comments) == 1
         assert "Looks great." in comments[0].body
 
+    def test_fetch_mp_command_delegates_to_handle_fetch_mp(
+        self, tmp_path: Path
+    ) -> None:
+        git = FakeGitClient()
+        target_repo, source_repo = _setup_repos(tmp_path, git)
+
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(
+            source_git_repository=str(source_repo),
+            source_git_path="refs/heads/feature",
+            target_git_repository=str(target_repo),
+            target_git_path="refs/heads/main",
+        )
+        lp.add_merge_proposal(mp)
+
+        out_dir = tmp_path / "out"
+
+        with (
+            patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+            patch("maas_code_reviewer.cli.GitClient", return_value=git),
+        ):
+            main(["fetch-mp", "--output-dir", str(out_dir), mp.url])
+
+        assert (out_dir / "diff.patch").exists()
+        assert (out_dir / "description.md").exists()
+        assert (out_dir / "metadata.json").exists()
+        assert (out_dir / "repo").exists()
+
+    def test_publish_mp_command_delegates_to_handle_publish_mp(
+        self, tmp_path: Path
+    ) -> None:
+        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
+        review_file = tmp_path / "review.json"
+        review_file.write_text(
+            json.dumps(
+                {
+                    "general_comment": "LGTM",
+                    "inline_comments": {"f.txt": {"1": "Good"}},
+                }
+            )
+        )
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(url=url)
+        lp.add_merge_proposal(mp)
+
+        with patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp):
+            main(
+                [
+                    "publish-mp",
+                    "--review",
+                    str(review_file),
+                    "--input-dir",
+                    str(input_dir),
+                    url,
+                ]
+            )
+
+        comments = lp.get_comments_for(mp.api_url)
+        assert len(comments) == 1
+        assert comments[0].body.startswith(REVIEW_MARKER)
+
+    def test_invalid_review_exits_with_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
+        review_file = tmp_path / "review.json"
+        review_file.write_text(
+            json.dumps(
+                {
+                    "general_comment": "LGTM",
+                    "inline_comments": {"f.txt": {"9": "off"}},
+                }
+            )
+        )
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+
+        with pytest.raises(SystemExit) as exc_info:
+            main(
+                [
+                    "publish-mp",
+                    "--review",
+                    str(review_file),
+                    "--input-dir",
+                    str(input_dir),
+                    url,
+                ]
+            )
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "Invalid review document" in captured.err
+
 
 class TestHandleListLpMps:
     def test_prints_output(self, capsys: pytest.CaptureFixture[str]) -> None:
@@ -549,6 +705,280 @@ class TestHandleReviewMp:
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "GEMINI_API_KEY" in captured.err
+
+
+def _write_publish_inputs(
+    tmp_path: Path, diff: str, diff_prefix: str | None = None
+) -> Path:
+    """Write a fetch-style input directory and return its path."""
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "diff.patch").write_text(diff)
+    (input_dir / "metadata.json").write_text(
+        json.dumps({"diff_prefix": diff_prefix})
+    )
+    return input_dir
+
+
+_SIMPLE_STD_DIFF = "--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-one\n+two\n"
+
+
+def _recording_run() -> tuple[list[list[str]], object]:
+    """Return a call list and a delegating subprocess.run recorder.
+
+    The recorder calls the real ``subprocess.run`` and records each
+    command's argv, so assertions can inspect the git invocations.
+    """
+    import subprocess
+
+    calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def recording_run(args, **kwargs):
+        calls.append(list(args))
+        return real_run(args, **kwargs)
+
+    return calls, recording_run
+
+
+class TestHandleFetchMp:
+    def test_writes_fetch_outputs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The handler writes diff.patch, description.md, metadata.json, repo/."""
+        git = FakeGitClient()
+        target_repo, source_repo = _setup_repos(tmp_path, git)
+
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(
+            source_git_repository=str(source_repo),
+            source_git_path="refs/heads/feature",
+            target_git_repository=str(target_repo),
+            target_git_path="refs/heads/main",
+            description="Fix the widget",
+        )
+        lp.add_merge_proposal(mp)
+        out_dir = tmp_path / "out"
+
+        with (
+            patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+            patch("maas_code_reviewer.cli.GitClient", return_value=git),
+        ):
+            args = _build_parser().parse_args(
+                ["fetch-mp", "--output-dir", str(out_dir), mp.url]
+            )
+            handle_fetch_mp(args)
+
+        assert (out_dir / "diff.patch").exists()
+        assert (out_dir / "description.md").read_text() == "Fix the widget"
+        assert (out_dir / "metadata.json").exists()
+        assert (out_dir / "repo").exists()
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_prints_already_reviewed_and_writes_status(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An already-reviewed MP prints the skip message and writes status.json."""
+        git = FakeGitClient()
+        target_repo, source_repo = _setup_repos(tmp_path, git)
+
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(
+            source_git_repository=str(source_repo),
+            source_git_path="refs/heads/feature",
+            target_git_repository=str(target_repo),
+            target_git_path="refs/heads/main",
+        )
+        lp.add_merge_proposal(mp)
+        lp.add_comment(
+            mp.api_url,
+            Comment(
+                author="ci-bot",
+                body=f"{REVIEW_MARKER}\n\nAlready done.",
+                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+            ),
+        )
+        out_dir = tmp_path / "out"
+
+        with (
+            patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+            patch("maas_code_reviewer.cli.GitClient", return_value=git),
+        ):
+            args = _build_parser().parse_args(
+                ["fetch-mp", "--output-dir", str(out_dir), mp.url]
+            )
+            handle_fetch_mp(args)
+
+        captured = capsys.readouterr()
+        assert "Already reviewed, skipping." in captured.out
+        assert (out_dir / "status.json").exists()
+        assert not (out_dir / "repo").exists()
+
+    def test_reads_lp_git_token_from_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """LP_GIT_TOKEN becomes an Authorization header on the clone."""
+        import base64
+
+        git = FakeGitClient()
+        target_repo, source_repo = _setup_repos(tmp_path, git)
+
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(
+            source_git_repository=str(source_repo),
+            source_git_path="refs/heads/feature",
+            target_git_repository=str(target_repo),
+            target_git_path="refs/heads/main",
+        )
+        lp.add_merge_proposal(mp)
+        calls, recording_run = _recording_run()
+        monkeypatch.setattr(
+            "maas_code_reviewer.git.subprocess.run", recording_run
+        )
+        monkeypatch.setenv("LP_GIT_TOKEN", "tok")
+        expected_header = (
+            "Authorization: Basic "
+            + base64.b64encode(b"ci-bot:tok").decode("ascii")
+        )
+
+        with (
+            patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+            patch("maas_code_reviewer.cli.GitClient", return_value=git),
+        ):
+            args = _build_parser().parse_args(
+                [
+                    "fetch-mp",
+                    "--output-dir",
+                    str(tmp_path / "out"),
+                    mp.url,
+                ]
+            )
+            handle_fetch_mp(args)
+
+        assert calls[0][:4] == [
+            "git",
+            "-c",
+            f"http.extraHeader={expected_header}",
+            "clone",
+        ]
+
+
+class TestHandlePublishMp:
+    def test_posts_rendered_comment(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A valid candidate is rendered, decorated, and posted."""
+        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
+        review_file = tmp_path / "review.json"
+        review_file.write_text(
+            json.dumps(
+                {
+                    "general_comment": "LGTM",
+                    "inline_comments": {"f.txt": {"1": "Good"}},
+                }
+            )
+        )
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(url=url)
+        lp.add_merge_proposal(mp)
+
+        with patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp):
+            args = _build_parser().parse_args(
+                [
+                    "publish-mp",
+                    "--review",
+                    str(review_file),
+                    "--input-dir",
+                    str(input_dir),
+                    url,
+                ]
+            )
+            handle_publish_mp(args)
+
+        comments = lp.get_comments_for(mp.api_url)
+        assert len(comments) == 1
+        assert comments[0].body.startswith(REVIEW_MARKER)
+        assert "LGTM" in comments[0].body
+        assert "### f.txt:1" in comments[0].body
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_dry_run_prints_comment_without_posting(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--dry-run prints the rendered comment and never constructs a client."""
+        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
+        review_file = tmp_path / "review.json"
+        review_file.write_text(
+            json.dumps(
+                {
+                    "general_comment": "LGTM",
+                    "inline_comments": {"f.txt": {"1": "Good"}},
+                }
+            )
+        )
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(url=url)
+        lp.add_merge_proposal(mp)
+
+        with patch(
+            "maas_code_reviewer.cli.LaunchpadClient",
+            side_effect=AssertionError("must not construct"),
+        ):
+            args = _build_parser().parse_args(
+                [
+                    "publish-mp",
+                    "--review",
+                    str(review_file),
+                    "--input-dir",
+                    str(input_dir),
+                    "--dry-run",
+                    url,
+                ]
+            )
+            handle_publish_mp(args)
+
+        captured = capsys.readouterr()
+        assert captured.out.startswith(REVIEW_MARKER)
+        assert "LGTM" in captured.out
+        assert "### f.txt:1" in captured.out
+        assert lp.get_comments_for(mp.api_url) == []
+
+    def test_invalid_candidate_raises_without_posting(self, tmp_path: Path) -> None:
+        """An invalid candidate raises InvalidReviewError before any client use."""
+        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
+        review_file = tmp_path / "review.json"
+        review_file.write_text(
+            json.dumps(
+                {
+                    "general_comment": "LGTM",
+                    "inline_comments": {"f.txt": {"9": "off"}},
+                }
+            )
+        )
+        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+        lp = FakeLaunchpadClient(bot_username="ci-bot")
+        mp = make_mp(url=url)
+        lp.add_merge_proposal(mp)
+
+        with patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp):
+            args = _build_parser().parse_args(
+                [
+                    "publish-mp",
+                    "--review",
+                    str(review_file),
+                    "--input-dir",
+                    str(input_dir),
+                    url,
+                ]
+            )
+            with pytest.raises(InvalidReviewError):
+                handle_publish_mp(args)
+
+        assert lp.get_comments_for(mp.api_url) == []
 
 
 class TestGetGeminiApiKey:
@@ -1058,9 +1488,7 @@ class TestHandleReviewDiffJsonOutput:
             handle_review_diff(args)
 
         data = json.loads(output_file.read_text())
-        assert data["general_comment"] == (
-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
-        )
+        assert data["general_comment"] == "Looks good."
 
     def test_json_output_contains_inline_comments(self, tmp_path: Path) -> None:
         diff_file = tmp_path / "patch.diff"
@@ -1216,9 +1644,7 @@ class TestHandleReviewDiffJsonOutput:
 
         assert output_file.exists()
         data = json.loads(output_file.read_text())
-        assert data["general_comment"] == (
-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nNo issues."
-        )
+        assert data["general_comment"] == "No issues."
 
     def test_missing_gemini_api_key_exits_with_error(
         self,
