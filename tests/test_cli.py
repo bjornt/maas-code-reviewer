@@ -824,6 +824,17 @@ _EMPTY_STRUCTURED_RESPONSE = json.dumps(
     }
 )
 
+# A diff whose new-side path has two suffixes present in a checkout holding
+# both "src/foo.py" and "after/common/src/foo.py" — unresolvable without a
+# prefix, so validation raises.
+_AMBIGUOUS_DIFF = (
+    "--- before/common/src/foo.py\n"
+    "+++ after/common/src/foo.py\n"
+    "@@ -1 +1 @@\n"
+    "-old\n"
+    "+new\n"
+)
+
 
 class TestHandleReviewDiff:
     def test_reads_diff_from_file_and_prints_review(
@@ -1228,6 +1239,95 @@ class TestHandleReviewDiffJsonOutput:
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "GEMINI_API_KEY" in captured.err
+
+
+class TestHandleReviewDiffJsonOutputWiring:
+    def _checkout_with_ambiguous_suffixes(self, tmp_path: Path) -> None:
+        """Create a checkout where the diff's new-side path matches twice."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "foo.py").write_text("code\n")
+        (tmp_path / "after" / "common" / "src").mkdir(parents=True)
+        (tmp_path / "after" / "common" / "src" / "foo.py").write_text("code\n")
+
+    def test_json_output_validates_against_real_checkout_listing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The JSON branch resolves diff paths against the real checkout."""
+        self._checkout_with_ambiguous_suffixes(tmp_path)
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_AMBIGUOUS_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        output_file = tmp_path / "review.json"
+
+        tool_input = json.dumps({"general_comment": "ok", "inline_comments": {}})
+        llm = FakeLLMClient(
+            [
+                ScriptedResponse(
+                    text=_EMPTY_STRUCTURED_RESPONSE,
+                    tool_calls=[
+                        ToolCall(
+                            name="validate_review",
+                            args={"json_text": tool_input},
+                        )
+                    ],
+                )
+            ]
+        )
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review-diff",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    "--json-output",
+                    str(output_file),
+                    str(diff_file),
+                ]
+            )
+            # Two listing entries match the new-side path's suffixes, so
+            # validation raises instead of guessing a repository path.
+            with pytest.raises(ValueError):
+                handle_review_diff(args)
+
+        assert not output_file.exists()
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_text_output_is_unchanged_by_threading(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The text branch never validates, so the ambiguous diff still reviews."""
+        self._checkout_with_ambiguous_suffixes(tmp_path)
+        diff_file = tmp_path / "patch.diff"
+        diff_file.write_text(_AMBIGUOUS_DIFF)
+
+        api_key_file = tmp_path / "api_key.txt"
+        api_key_file.write_text("fake-key\n")
+
+        llm = FakeLLMClient([ScriptedResponse(text="Plain text review.")])
+
+        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+            args = _build_parser().parse_args(
+                [
+                    "review-diff",
+                    "-g",
+                    str(api_key_file),
+                    "--repo-dir",
+                    str(tmp_path),
+                    str(diff_file),
+                ]
+            )
+            handle_review_diff(args)
+
+        captured = capsys.readouterr()
+        assert "Plain text review." in captured.out
+        assert REVIEW_MARKER in captured.out
 
 
 class TestMainReviewDiff:
@@ -1827,6 +1927,45 @@ class TestHandleReviewPr:
 
         tool_names = {t.__name__ for t in llm._client.received_tools[0]}
         assert "validate_review" in tool_names
+
+    def test_review_pull_request_validates_against_real_checkout_listing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """review-pr resolves diff paths against the real checkout listing."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "foo.py").write_text("code\n")
+        (tmp_path / "after" / "common" / "src").mkdir(parents=True)
+        (tmp_path / "after" / "common" / "src" / "foo.py").write_text("code\n")
+        github_client = FakeGitHubClient()
+        github_client.add_pull_request("owner", "repo", 42, diff=_AMBIGUOUS_DIFF)
+
+        tool_input = json.dumps({"general_comment": "ok", "inline_comments": {}})
+        llm = FakeLLMClient(
+            [
+                ScriptedResponse(
+                    text=_PR_EMPTY_RESPONSE,
+                    tool_calls=[
+                        ToolCall(
+                            name="validate_review",
+                            args={"json_text": tool_input},
+                        )
+                    ],
+                )
+            ]
+        )
+
+        with (
+            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+        ):
+            # Two listing entries match the new-side path's suffixes, so
+            # validation raises instead of guessing a repository path.
+            with pytest.raises(ValueError):
+                handle_review_pr(self._make_args(tmp_path, repo_dir=str(tmp_path)))
+
+        assert github_client.get_posted_reviews("owner", "repo", 42) == []
+        captured = capsys.readouterr()
+        assert captured.out == ""
 
 
 class TestHandleReviewDiffMetrics:

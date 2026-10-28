@@ -3,7 +3,7 @@
 
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Set
 from pathlib import Path
 
 from google.genai import types
@@ -80,6 +80,9 @@ def review_diff_structured(
     max_diff_chars: int = 200_000,
     metrics: ReviewMetrics | None = None,
     max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
+    *,
+    diff_prefix: str | None = None,
+    repository_files: Set[str] = frozenset(),
 ) -> dict:
     """Orchestrate a structured code review of *diff* using the given LLM.
 
@@ -107,6 +110,14 @@ def review_diff_structured(
         tool call (may be ``None``).
     max_diff_chars:
         Maximum number of characters for the diff before truncation.
+    diff_prefix:
+        Explicit new-side diff path prefix (the ``--diff-prefix`` option of
+        the ``review`` command); ``None`` (the default) infers the prefix
+        from the diff and the checkout listing.
+    repository_files:
+        Repository-relative paths of the review checkout's files, from
+        :func:`review_schema.repository_files`; used to resolve diff paths
+        to repository coordinates during validation.
 
     Returns
     -------
@@ -124,7 +135,12 @@ def review_diff_structured(
     prompt = _build_structured_prompt(truncated_diff, description)
 
     def validate_review(json_text: str) -> str:
-        return _validate_review(json_text, truncated_diff)
+        return _validate_review(
+            json_text,
+            truncated_diff,
+            path_prefix=diff_prefix,
+            repository_files=repository_files,
+        )
 
     tools: list[Callable[..., str]] = [
         validate_review, read_file, list_directory
@@ -150,7 +166,13 @@ def review_diff_structured(
     return result
 
 
-def _validate_review(json_text: str, diff_text: str) -> str:
+def _validate_review(
+    json_text: str,
+    diff_text: str,
+    *,
+    path_prefix: str | None = None,
+    repository_files: Set[str] = frozenset(),
+) -> str:
     """Validate the review JSON against the schema and the diff.
 
     Returns an empty string if valid, or a newline-separated list of
@@ -164,7 +186,9 @@ def _validate_review(json_text: str, diff_text: str) -> str:
         data = json.loads(json_text)
     except json.JSONDecodeError as exc:
         return f"Invalid JSON: {exc}"
-    errors = validate_review_json(data, diff_text)
+    errors = validate_review_json(
+        data, diff_text, path_prefix=path_prefix, repository_files=repository_files
+    )
     if errors:
         return "\n".join(errors)
     return ""
