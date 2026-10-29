@@ -1,0 +1,856 @@
+diff --git a/src/maas_code_reviewer/cli.py b/src/maas_code_reviewer/cli.py
+index 53485b7..e543036 100644
+--- a/src/maas_code_reviewer/cli.py
++++ b/src/maas_code_reviewer/cli.py
+@@ -9,5 +9,3 @@
+-from dataclasses import dataclass
+-from datetime import datetime
+ from pathlib import Path
+ from typing import NoReturn
+ 
+@@ -18,5 +18,1 @@
+ from maas_code_reviewer.metrics import ReviewMetrics, write_metrics
+-from maas_code_reviewer.models import Comment, MergeProposal
+-from maas_code_reviewer.repo_tools import RepoTools
+-from maas_code_reviewer.reviewer import (
+-    REVIEW_MARKER,
+@@ -26,3 +30,1 @@
+ )
+-
+-_LP_GIT_BASE = "https://git.launchpad.net/"
+@@ -34,37 +36,3 @@
+ )
+ 
+ 
+-@dataclass(frozen=True)
+-class MergeProposalSummary:
+-    url: str
+-    status: str
+-    last_reviewed: datetime | None
+-
+-
+-def list_merge_proposals(
+-    client: LaunchpadClient, project: str, status: str
+-) -> list[MergeProposalSummary]:
+-    """Fetch merge proposals and annotate each with its last review timestamp."""
+-    proposals = client.get_merge_proposals(project, status)
+-    bot_username = client.get_bot_username()
+-    summaries = []
+-    for mp in proposals:
+-        comments = client.get_comments(mp)
+-        last_reviewed = _find_last_review_date(comments, bot_username)
+-        summaries.append(
+-            MergeProposalSummary(
+-                url=mp.url,
+-                status=mp.status,
+-                last_reviewed=last_reviewed,
+-            )
+-        )
+-    return summaries
+-
+-
+-def has_existing_review(client: LaunchpadClient, mp: MergeProposal) -> bool:
+-    """Return True if the bot has already posted a review on this MP."""
+-    comments = client.get_comments(mp)
+-    bot_username = client.get_bot_username()
+-    return _find_last_review_date(comments, bot_username) is not None
+-
+-
+@@ -124,12 +39,3 @@
+-def format_merge_proposals(summaries: list[MergeProposalSummary]) -> str:
+-    """Format summaries as human-readable text, one line per proposal."""
+-    lines = []
+-    for s in summaries:
+-        reviewed = s.last_reviewed.isoformat() if s.last_reviewed else "never"
+-        lines.append(f"{s.url} {s.status} {reviewed}")
+-    return "\n".join(lines)
+-
+-
+ def handle_list_lp_mps(args: argparse.Namespace) -> None:
+     """Handle the list-lp-mps subcommand."""
+     client = LaunchpadClient(credentials_file=args.launchpad_credentials)
+@@ -274,7 +148,1 @@
+ 
+-    comments = [
+-        {"path": file_path, "line": int(line_str), "body": comment_body}
+-        for file_path, line_map in inline_comments.items()
+-        for line_str, comment_body in line_map.items()
+-    ]
+-
+@@ -325,39 +202,3 @@
+         file=sys.stderr,
+     )
+     sys.exit(1)
+-def _lp_repo_url(unique_name: str) -> str:
+-    """Convert a Launchpad repo unique name to a git clone URL.
+-
+-    If the provided name already looks like an absolute path or URL
+-    (leading '/', 'file://', 'http://', or 'https://'), return it unchanged.
+-    """
+-    if (
+-        unique_name.startswith("/")
+-        or unique_name.startswith("file://")
+-        or unique_name.startswith("http://")
+-        or unique_name.startswith("https://")
+-    ):
+-        return unique_name
+-    return _LP_GIT_BASE + unique_name
+-
+-
+-def _find_last_review_date(
+-    comments: list[Comment], bot_username: str
+-) -> datetime | None:
+-    """Find the timestamp of the most recent review comment by the bot."""
+-    review_dates = [
+-        comment.date
+-        for comment in comments
+-        if comment.author == bot_username and comment.body.startswith(REVIEW_MARKER)
+-    ]
+-    if not review_dates:
+-        return None
+-    return max(review_dates)
+-
+-
+-def _ref_to_branch(git_path: str) -> str:
+-    """Convert a refs/heads/branch-name path to just the branch name."""
+-    prefix = "refs/heads/"
+-    if git_path.startswith(prefix):
+-        return git_path[len(prefix) :]
+-    return git_path
+diff --git a/src/maas_code_reviewer/review_commands.py b/src/maas_code_reviewer/review_commands.py
+new file mode 100644
+index 0000000..090c8d0
+--- /dev/null
++++ b/src/maas_code_reviewer/review_commands.py
+@@ -6,0 +7,10 @@
++import json
++from dataclasses import dataclass
++from datetime import datetime
++from pathlib import Path
++
++from maas_code_reviewer.git import GitClient
++from maas_code_reviewer.github_client import GitHubClient, parse_pr_url
++from maas_code_reviewer.launchpad_client import LaunchpadClient
++from maas_code_reviewer.models import Comment, MergeProposal
++from maas_code_reviewer.repo_tools import RepoTools
+@@ -17,0 +18,2 @@
++from maas_code_reviewer.reviewer import (
++    REVIEW_MARKER,
+@@ -23,0 +24,43 @@
++@dataclass(frozen=True)
++class MergeProposalSummary:
++    url: str
++    status: str
++    last_reviewed: datetime | None
++
++
++def list_merge_proposals(
++    client: LaunchpadClient, project: str, status: str
++) -> list[MergeProposalSummary]:
++    """Fetch merge proposals and annotate each with its last review timestamp."""
++    proposals = client.get_merge_proposals(project, status)
++    bot_username = client.get_bot_username()
++    summaries = []
++    for mp in proposals:
++        comments = client.get_comments(mp)
++        last_reviewed = _find_last_review_date(comments, bot_username)
++        summaries.append(
++            MergeProposalSummary(
++                url=mp.url,
++                status=mp.status,
++                last_reviewed=last_reviewed,
++            )
++        )
++    return summaries
++
++
++def format_merge_proposals(summaries: list[MergeProposalSummary]) -> str:
++    """Format summaries as human-readable text, one line per proposal."""
++    lines = []
++    for s in summaries:
++        reviewed = s.last_reviewed.isoformat() if s.last_reviewed else "never"
++        lines.append(f"{s.url} {s.status} {reviewed}")
++    return "\n".join(lines)
++
++
++def has_existing_review(client: LaunchpadClient, mp: MergeProposal) -> bool:
++    """Return True if the bot has already posted a review on this MP."""
++    comments = client.get_comments(mp)
++    bot_username = client.get_bot_username()
++    return _find_last_review_date(comments, bot_username) is not None
++
++
+@@ -256,0 +257,6 @@
++    comments = [
++        {"path": file_path, "line": int(line_str), "body": comment_body}
++        for file_path, line_map in inline_comments.items()
++        for line_str, comment_body in line_map.items()
++    ]
++    github.post_review(
+@@ -267,0 +268,41 @@
++
++
++def _lp_repo_url(unique_name: str) -> str:
++    """Convert a Launchpad repo unique name to a git clone URL.
++
++    If the provided name already looks like an absolute path or URL
++    (leading '/', 'file://', 'http://', or 'https://'), return it unchanged.
++    """
++    if (
++        unique_name.startswith("/")
++        or unique_name.startswith("file://")
++        or unique_name.startswith("http://")
++        or unique_name.startswith("https://")
++    ):
++        return unique_name
++    return _LP_GIT_BASE + unique_name
++
++
++def _find_last_review_date(
++    comments: list[Comment], bot_username: str
++) -> datetime | None:
++    """Find the timestamp of the most recent review comment by the bot."""
++    review_dates = [
++        comment.date
++        for comment in comments
++        if comment.author == bot_username and comment.body.startswith(REVIEW_MARKER)
++    ]
++    if not review_dates:
++        return None
++    return max(review_dates)
++
++
++def _ref_to_branch(git_path: str) -> str:
++    """Convert a refs/heads/branch-name path to just the branch name."""
++    prefix = "refs/heads/"
++    if git_path.startswith(prefix):
++        return git_path[len(prefix) :]
++    return git_path
++
++
++def _clone_merge_diff(
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index dda2e16..0bad82b 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -44,205 +42,3 @@
+-
+-
+-class TestListMergeProposals:
+-    def test_no_proposals(self) -> None:
+-        client = FakeLaunchpadClient()
+-
+-        result = list_merge_proposals(client, "myproject", "Needs review")
+-
+-        assert result == []
+-
+-    def test_proposal_without_review_comments(self) -> None:
+-        client = FakeLaunchpadClient()
+-        mp = make_mp()
+-        client.add_merge_proposal(mp)
+-
+-        result = list_merge_proposals(client, "myproject", "Needs review")
+-
+-        assert result == [
+-            MergeProposalSummary(url=mp.url, status="Needs review", last_reviewed=None)
+-        ]
+-
+-    def test_proposal_with_review_comment(self) -> None:
+-        client = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp()
+-        client.add_merge_proposal(mp)
+-        review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
+-        client.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="ci-bot",
+-                body="[maas-code-reviewer review]\n\nLooks good!",
+-                date=review_date,
+-            ),
+-        )
+-
+-        result = list_merge_proposals(client, "myproject", "Needs review")
+-
+-        assert result == [
+-            MergeProposalSummary(
+-                url=mp.url, status="Needs review", last_reviewed=review_date
+-            )
+-        ]
+-
+-    def test_ignores_non_bot_comments_with_marker(self) -> None:
+-        client = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp()
+-        client.add_merge_proposal(mp)
+-        client.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="human-user",
+-                body="[maas-code-reviewer review]\n\nFake review by human",
+-                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+-            ),
+-        )
+-
+-        result = list_merge_proposals(client, "myproject", "Needs review")
+-
+-        assert result[0].last_reviewed is None
+-
+-    def test_ignores_bot_comments_without_marker(self) -> None:
+-        client = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp()
+-        client.add_merge_proposal(mp)
+-        client.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="ci-bot",
+-                body="Just a regular comment, no marker",
+-                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+-            ),
+-        )
+-
+-        result = list_merge_proposals(client, "myproject", "Needs review")
+-
+-        assert result[0].last_reviewed is None
+-
+-    def test_uses_latest_review_date(self) -> None:
+-        client = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp()
+-        client.add_merge_proposal(mp)
+-        early = datetime(2025, 6, 10, 8, 0, 0, tzinfo=UTC)
+-        late = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
+-        client.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="ci-bot",
+-                body="[maas-code-reviewer review]\n\nFirst review",
+-                date=early,
+-            ),
+-        )
+-        client.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="ci-bot",
+-                body="[maas-code-reviewer review]\n\nSecond review",
+-                date=late,
+-            ),
+-        )
+-
+-        result = list_merge_proposals(client, "myproject", "Needs review")
+-
+-        assert result[0].last_reviewed == late
+-
+-    def test_multiple_proposals_mixed_review_state(self) -> None:
+-        client = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp1 = make_mp(url="https://code.launchpad.net/~user/project/+git/repo/+merge/1")
+-        mp2 = make_mp(url="https://code.launchpad.net/~user/project/+git/repo/+merge/2")
+-        client.add_merge_proposal(mp1)
+-        client.add_merge_proposal(mp2)
+-        review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
+-        client.add_comment(
+-            mp1.api_url,
+-            Comment(
+-                author="ci-bot",
+-                body="[maas-code-reviewer review]\n\nOK",
+-                date=review_date,
+-            ),
+-        )
+-
+-        result = list_merge_proposals(client, "myproject", "Needs review")
+-
+-        assert len(result) == 2
+-        assert result[0].last_reviewed == review_date
+-        assert result[1].last_reviewed is None
+-
+-    def test_marker_must_be_at_start_of_body(self) -> None:
+-        client = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp()
+-        client.add_merge_proposal(mp)
+-        client.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="ci-bot",
+-                body="Some preamble [maas-code-reviewer review]\n\nContent",
+-                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+-            ),
+-        )
+-
+-        result = list_merge_proposals(client, "myproject", "Needs review")
+-
+-        assert result[0].last_reviewed is None
+-
+-
+-class TestFormatMergeProposals:
+-    def test_empty_list(self) -> None:
+-        assert format_merge_proposals([]) == ""
+-
+-    def test_single_unreviewed(self) -> None:
+-        summaries = [
+-            MergeProposalSummary(
+-                url="https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-                status="Needs review",
+-                last_reviewed=None,
+-            )
+-        ]
+-
+-        output = format_merge_proposals(summaries)
+-
+-        assert output == (
+-            "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+-            " Needs review never"
+-        )
+-
+-    def test_single_reviewed(self) -> None:
+-        review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
+-        summaries = [
+-            MergeProposalSummary(
+-                url="https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-                status="Needs review",
+-                last_reviewed=review_date,
+-            )
+-        ]
+-
+-        output = format_merge_proposals(summaries)
+-
+-        assert output == (
+-            "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+-            f" Needs review {review_date.isoformat()}"
+-        )
+-
+-    def test_multiple_proposals(self) -> None:
+-        review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
+-        summaries = [
+-            MergeProposalSummary(
+-                url="https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-                status="Needs review",
+-                last_reviewed=review_date,
+-            ),
+-            MergeProposalSummary(
+-                url="https://code.launchpad.net/~user/project/+git/repo/+merge/2",
+-                status="Needs review",
+-                last_reviewed=None,
+-            ),
+-        ]
+-
+-        output = format_merge_proposals(summaries)
+-
+-        lines = output.split("\n")
+-        assert len(lines) == 2
+-        assert lines[0].endswith(review_date.isoformat())
+-        assert lines[1].endswith("never")
+ 
+ 
+ class TestBuildParser:
+@@ -827,5 +801,1 @@
+ 
+-class TestLpRepoUrl:
+-    def test_prepends_git_base(self) -> None:
+-        result = _lp_repo_url("~user/project/+git/repo")
+-        assert result == "https://git.launchpad.net/~user/project/+git/repo"
+@@ -832,4 +805,1 @@
+ 
+-    def test_plain_name(self) -> None:
+-        result = _lp_repo_url("myproject")
+-        assert result == "https://git.launchpad.net/myproject"
+@@ -837,4 +820,1 @@
+ 
+-class TestRefToBranch:
+-    def test_strips_refs_heads_prefix(self) -> None:
+-        assert _ref_to_branch("refs/heads/feature") == "feature"
+@@ -841,3 +838,1 @@
+ 
+-    def test_strips_refs_heads_with_slashes(self) -> None:
+-        assert _ref_to_branch("refs/heads/user/my-feature") == "user/my-feature"
+@@ -844,3 +841,1 @@
+ 
+-    def test_returns_unchanged_without_prefix(self) -> None:
+-        assert _ref_to_branch("main") == "main"
+@@ -847,4 +845,2 @@
+ 
+-    def test_returns_unchanged_for_partial_prefix(self) -> None:
+-        assert _ref_to_branch("refs/tags/v1.0") == "refs/tags/v1.0"
+ 
+@@ -851,6 +857,1 @@
+ 
+-class TestHasExistingReview:
+-    def test_returns_false_when_no_comments(self) -> None:
+-        client = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp()
+-        client.add_merge_proposal(mp)
+@@ -857,2 +872,1 @@
+ 
+-        assert has_existing_review(client, mp) is False
+@@ -859,12 +883,1 @@
+ 
+-    def test_returns_true_when_bot_review_exists(self) -> None:
+-        client = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp()
+-        client.add_merge_proposal(mp)
+-        client.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="ci-bot",
+-                body="[maas-code-reviewer review]\n\nLooks good!",
+-                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+-            ),
+@@ -872,2 +897,1 @@
+ 
+-        assert has_existing_review(client, mp) is True
+@@ -874,12 +914,1 @@
+ 
+-    def test_returns_false_for_non_bot_comment_with_marker(self) -> None:
+-        client = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp()
+-        client.add_merge_proposal(mp)
+-        client.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="human-user",
+-                body="[maas-code-reviewer review]\n\nFake review",
+-                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+-            ),
+@@ -887,14 +932,1 @@
+ 
+-        assert has_existing_review(client, mp) is False
+-
+-    def test_returns_false_for_bot_comment_without_marker(self) -> None:
+-        client = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp()
+-        client.add_merge_proposal(mp)
+-        client.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="ci-bot",
+-                body="Just a regular comment",
+-                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+-            ),
+@@ -902,2 +978,1 @@
+ 
+-        assert has_existing_review(client, mp) is False
+diff --git a/tests/test_review_commands.py b/tests/test_review_commands.py
+new file mode 100644
+index 0000000..feaf608
+--- /dev/null
++++ b/tests/test_review_commands.py
+@@ -32,0 +33,4 @@
++from tests.factory import make_mp
++from tests.fake_git import FakeGitClient
++from tests.fake_github import FakeGitHubClient
++from tests.fake_launchpad import FakeLaunchpadClient
+@@ -77,0 +78,313 @@
++
++
++class TestListMergeProposals:
++    def test_no_proposals(self) -> None:
++        client = FakeLaunchpadClient()
++
++        result = list_merge_proposals(client, "myproject", "Needs review")
++
++        assert result == []
++
++    def test_proposal_without_review_comments(self) -> None:
++        client = FakeLaunchpadClient()
++        mp = make_mp()
++        client.add_merge_proposal(mp)
++
++        result = list_merge_proposals(client, "myproject", "Needs review")
++
++        assert result == [
++            MergeProposalSummary(url=mp.url, status="Needs review", last_reviewed=None)
++        ]
++
++    def test_proposal_with_review_comment(self) -> None:
++        client = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp()
++        client.add_merge_proposal(mp)
++        review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
++        client.add_comment(
++            mp.api_url,
++            Comment(
++                author="ci-bot",
++                body="[maas-code-reviewer review]\n\nLooks good!",
++                date=review_date,
++            ),
++        )
++
++        result = list_merge_proposals(client, "myproject", "Needs review")
++
++        assert result == [
++            MergeProposalSummary(
++                url=mp.url, status="Needs review", last_reviewed=review_date
++            )
++        ]
++
++    def test_ignores_non_bot_comments_with_marker(self) -> None:
++        client = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp()
++        client.add_merge_proposal(mp)
++        client.add_comment(
++            mp.api_url,
++            Comment(
++                author="human-user",
++                body="[maas-code-reviewer review]\n\nFake review by human",
++                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
++            ),
++        )
++
++        result = list_merge_proposals(client, "myproject", "Needs review")
++
++        assert result[0].last_reviewed is None
++
++    def test_ignores_bot_comments_without_marker(self) -> None:
++        client = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp()
++        client.add_merge_proposal(mp)
++        client.add_comment(
++            mp.api_url,
++            Comment(
++                author="ci-bot",
++                body="Just a regular comment, no marker",
++                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
++            ),
++        )
++
++        result = list_merge_proposals(client, "myproject", "Needs review")
++
++        assert result[0].last_reviewed is None
++
++    def test_uses_latest_review_date(self) -> None:
++        client = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp()
++        client.add_merge_proposal(mp)
++        early = datetime(2025, 6, 10, 8, 0, 0, tzinfo=UTC)
++        late = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
++        client.add_comment(
++            mp.api_url,
++            Comment(
++                author="ci-bot",
++                body="[maas-code-reviewer review]\n\nFirst review",
++                date=early,
++            ),
++        )
++        client.add_comment(
++            mp.api_url,
++            Comment(
++                author="ci-bot",
++                body="[maas-code-reviewer review]\n\nSecond review",
++                date=late,
++            ),
++        )
++
++        result = list_merge_proposals(client, "myproject", "Needs review")
++
++        assert result[0].last_reviewed == late
++
++    def test_multiple_proposals_mixed_review_state(self) -> None:
++        client = FakeLaunchpadClient(bot_username="ci-bot")
++        mp1 = make_mp(url="https://code.launchpad.net/~user/project/+git/repo/+merge/1")
++        mp2 = make_mp(url="https://code.launchpad.net/~user/project/+git/repo/+merge/2")
++        client.add_merge_proposal(mp1)
++        client.add_merge_proposal(mp2)
++        review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
++        client.add_comment(
++            mp1.api_url,
++            Comment(
++                author="ci-bot",
++                body="[maas-code-reviewer review]\n\nOK",
++                date=review_date,
++            ),
++        )
++
++        result = list_merge_proposals(client, "myproject", "Needs review")
++
++        assert len(result) == 2
++        assert result[0].last_reviewed == review_date
++        assert result[1].last_reviewed is None
++
++    def test_marker_must_be_at_start_of_body(self) -> None:
++        client = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp()
++        client.add_merge_proposal(mp)
++        client.add_comment(
++            mp.api_url,
++            Comment(
++                author="ci-bot",
++                body="Some preamble [maas-code-reviewer review]\n\nContent",
++                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
++            ),
++        )
++
++        result = list_merge_proposals(client, "myproject", "Needs review")
++
++        assert result[0].last_reviewed is None
++
++
++class TestFormatMergeProposals:
++    def test_empty_list(self) -> None:
++        assert format_merge_proposals([]) == ""
++
++    def test_single_unreviewed(self) -> None:
++        summaries = [
++            MergeProposalSummary(
++                url="https://code.launchpad.net/~user/project/+git/repo/+merge/1",
++                status="Needs review",
++                last_reviewed=None,
++            )
++        ]
++
++        output = format_merge_proposals(summaries)
++
++        assert output == (
++            "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
++            " Needs review never"
++        )
++
++    def test_single_reviewed(self) -> None:
++        review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
++        summaries = [
++            MergeProposalSummary(
++                url="https://code.launchpad.net/~user/project/+git/repo/+merge/1",
++                status="Needs review",
++                last_reviewed=review_date,
++            )
++        ]
++
++        output = format_merge_proposals(summaries)
++
++        assert output == (
++            "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
++            f" Needs review {review_date.isoformat()}"
++        )
++
++    def test_multiple_proposals(self) -> None:
++        review_date = datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC)
++        summaries = [
++            MergeProposalSummary(
++                url="https://code.launchpad.net/~user/project/+git/repo/+merge/1",
++                status="Needs review",
++                last_reviewed=review_date,
++            ),
++            MergeProposalSummary(
++                url="https://code.launchpad.net/~user/project/+git/repo/+merge/2",
++                status="Needs review",
++                last_reviewed=None,
++            ),
++        ]
++
++        output = format_merge_proposals(summaries)
++
++        lines = output.split("\n")
++        assert len(lines) == 2
++        assert lines[0].endswith(review_date.isoformat())
++        assert lines[1].endswith("never")
++
++
++class TestLpRepoUrl:
++    def test_prepends_git_base(self) -> None:
++        result = _lp_repo_url("~user/project/+git/repo")
++        assert result == "https://git.launchpad.net/~user/project/+git/repo"
++
++    def test_plain_name(self) -> None:
++        result = _lp_repo_url("myproject")
++        assert result == "https://git.launchpad.net/myproject"
++
++
++class TestRefToBranch:
++    def test_strips_refs_heads_prefix(self) -> None:
++        assert _ref_to_branch("refs/heads/feature") == "feature"
++
++    def test_strips_refs_heads_with_slashes(self) -> None:
++        assert _ref_to_branch("refs/heads/user/my-feature") == "user/my-feature"
++
++    def test_returns_unchanged_without_prefix(self) -> None:
++        assert _ref_to_branch("main") == "main"
++
++    def test_returns_unchanged_for_partial_prefix(self) -> None:
++        assert _ref_to_branch("refs/tags/v1.0") == "refs/tags/v1.0"
++
++
++class TestHasExistingReview:
++    def test_returns_false_when_no_comments(self) -> None:
++        client = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp()
++        client.add_merge_proposal(mp)
++
++        assert has_existing_review(client, mp) is False
++
++    def test_returns_true_when_bot_review_exists(self) -> None:
++        client = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp()
++        client.add_merge_proposal(mp)
++        client.add_comment(
++            mp.api_url,
++            Comment(
++                author="ci-bot",
++                body="[maas-code-reviewer review]\n\nLooks good!",
++                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
++            ),
++        )
++
++        assert has_existing_review(client, mp) is True
++
++    def test_returns_false_for_non_bot_comment_with_marker(self) -> None:
++        client = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp()
++        client.add_merge_proposal(mp)
++        client.add_comment(
++            mp.api_url,
++            Comment(
++                author="human-user",
++                body="[maas-code-reviewer review]\n\nFake review",
++                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
++            ),
++        )
++
++        assert has_existing_review(client, mp) is False
++
++    def test_returns_false_for_bot_comment_without_marker(self) -> None:
++        client = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp()
++        client.add_merge_proposal(mp)
++        client.add_comment(
++            mp.api_url,
++            Comment(
++                author="ci-bot",
++                body="Just a regular comment",
++                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
++            ),
++        )
++
++        assert has_existing_review(client, mp) is False
++
++
++def _setup_repos(
++    tmp_path: Path,
++    git: FakeGitClient,
++    *,
++    target_files: dict[str, str] | None = None,
++    source_files: dict[str, str] | None = None,
++) -> tuple[Path, Path]:
++    """Create a target and source repo for review tests.
++
++    Returns (target_repo_path, source_repo_path).
++    The source repo is cloned from target, with a ``feature`` branch
++    containing the source changes.
++    """
++    if target_files is None:
++        target_files = {"file.txt": "original\n"}
++    if source_files is None:
++        source_files = {"file.txt": "modified\n"}
++
++    target_repo = tmp_path / "target"
++    git.create_repo(target_repo)
++    git.add_commit(target_repo, target_files, message="init")
++
++    source_repo = tmp_path / "source"
++    git.clone(str(target_repo), source_repo, "main")
++    git.create_branch(source_repo, "feature")
++    git.checkout(source_repo, "feature")
++    git.add_commit(source_repo, source_files, message="feature work")
++
++    return target_repo, source_repo
++
++
+@@ -514,0 +515,4 @@
++            target_git_repository=str(target_repo),
++            target_git_path="refs/heads/main",
++        )
++        lp.add_merge_proposal(mp)

@@ -1,0 +1,273 @@
+diff --git a/src/maas_code_reviewer/review_commands.py b/src/maas_code_reviewer/review_commands.py
+new file mode 100644
+index 0000000..090c8d0
+--- /dev/null
++++ b/src/maas_code_reviewer/review_commands.py
+@@ -246,0 +247,10 @@
++def post_pull_request_review(
++    github: GitHubClient,
++    owner: str,
++    repo: str,
++    pr_number: int,
++    review: dict,
++) -> None:
++    """Adapt a structured review to GitHub's API and post it."""
++    general_comment = review.get("general_comment", "")
++    inline_comments = review.get("inline_comments", {})
+@@ -262,0 +263,5 @@
++        owner, repo, pr_number, body=general_comment, comments=comments
++    )
++
++
++_LP_GIT_BASE = "https://git.launchpad.net/"
+diff --git a/src/maas_code_reviewer/reviewer.py b/src/maas_code_reviewer/reviewer.py
+index 903eacb..2c4d241 100644
+--- a/src/maas_code_reviewer/reviewer.py
++++ b/src/maas_code_reviewer/reviewer.py
+@@ -365,7 +435,8 @@
+     """Truncate *diff* to around *max_chars*, at a file boundary.
+ 
+     The cut is made at the last ``diff --git`` header that fits entirely
+-    that was cut off so the LLM can use ``read_file`` to inspect them.
++    that was cut off so the agent can use the native read, grep, and glob
++    tools to inspect them.
+     """
+     if len(diff) <= max_chars:
+         return diff
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index dda2e16..0bad82b 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -12,4 +19,2 @@
+ from maas_code_reviewer.cli import (
+-    REVIEW_MARKER,
+-    MergeProposalSummary,
+     _build_parser,
+@@ -17,3 +16,0 @@
+-    _lp_repo_url,
+-    _ref_to_branch,
+-    format_merge_proposals,
+@@ -30,2 +29,1 @@
+-from maas_code_reviewer.metrics import ReviewMetrics
+ from maas_code_reviewer.models import Comment
+@@ -33,1 +31,6 @@
++from maas_code_reviewer.reviewer import (
++    EMPTY_DIFF_GENERAL_COMMENT,
++    REVIEW_MARKER,
++    REVIEW_PREAMBLE,
++)
+ from tests.factory import make_mp
+@@ -560,14 +559,0 @@
+-class TestHandleListLpMps:
+-    def test_prints_output(self, capsys: pytest.CaptureFixture[str]) -> None:
+-        fake_lp = FakeLaunchpad(bot_username="review-bot")
+-        lp_mp = make_fake_mp(status="Needs review")
+-        fake_lp.add_merge_proposal("myproject", lp_mp)
+-        with fake_lp.patch_login_with():
+-            args = _build_parser().parse_args(
+-                ["list-lp-mps", "--status", "Needs review", "myproject"]
+-            )
+-            handle_list_lp_mps(args)
+-        captured = capsys.readouterr()
+-        assert lp_mp.web_link in captured.out
+-        assert "Needs review" in captured.out
+-        assert "never" in captured.out
+@@ -574,7 +278,1 @@
+ 
+-    def test_no_output_when_empty(self, capsys: pytest.CaptureFixture[str]) -> None:
+-        fake_lp = FakeLaunchpad()
+-        fake_lp.add_project("myproject")
+-        with fake_lp.patch_login_with():
+-            args = _build_parser().parse_args(
+-                ["list-lp-mps", "--status", "Needs review", "myproject"]
+@@ -581,4 +290,1 @@
+             )
+-            handle_list_lp_mps(args)
+-        captured = capsys.readouterr()
+-        assert captured.out == ""
+@@ -585,6 +293,1 @@
+ 
+-    def test_passes_credentials(self) -> None:
+-        fake_lp = FakeLaunchpad()
+-        fake_lp.add_project("myproject")
+-        with fake_lp.patch_login_with():
+-            args = _build_parser().parse_args(
+@@ -591,7 +296,1 @@
+                 [
+-                    "list-lp-mps",
+-                    "--launchpad-credentials",
+-                    "/path/to/creds",
+-                    "--status",
+-                    "Needs review",
+-                    "myproject",
+@@ -598,6 +303,3 @@
+                 ]
+             )
+-            handle_list_lp_mps(args)
+-        assert fake_lp.credentials_file == "/path/to/creds"
+ 
+-    def test_shows_last_review_date(self, capsys: pytest.CaptureFixture[str]) -> None:
+@@ -604,3 +406,47 @@
++class TestHandleListLpMps:
++    def test_prints_output(self, capsys: pytest.CaptureFixture[str]) -> None:
++        fake_lp = FakeLaunchpad(bot_username="review-bot")
++        lp_mp = make_fake_mp(status="Needs review")
++        fake_lp.add_merge_proposal("myproject", lp_mp)
++        with fake_lp.patch_login_with():
++            args = _build_parser().parse_args(
++                ["list-lp-mps", "--status", "Needs review", "myproject"]
++            )
++            handle_list_lp_mps(args)
++        captured = capsys.readouterr()
++        assert lp_mp.web_link in captured.out
++        assert "Needs review" in captured.out
++        assert "never" in captured.out
++
++    def test_no_output_when_empty(self, capsys: pytest.CaptureFixture[str]) -> None:
++        fake_lp = FakeLaunchpad()
++        fake_lp.add_project("myproject")
++        with fake_lp.patch_login_with():
++            args = _build_parser().parse_args(
++                ["list-lp-mps", "--status", "Needs review", "myproject"]
++            )
++            handle_list_lp_mps(args)
++        captured = capsys.readouterr()
++        assert captured.out == ""
++
++    def test_passes_credentials(self) -> None:
++        fake_lp = FakeLaunchpad()
++        fake_lp.add_project("myproject")
++        with fake_lp.patch_login_with():
++            args = _build_parser().parse_args(
++                [
++                    "list-lp-mps",
++                    "--launchpad-credentials",
++                    "/path/to/creds",
++                    "--status",
++                    "Needs review",
++                    "myproject",
++                ]
++            )
++            handle_list_lp_mps(args)
++        assert fake_lp.credentials_file == "/path/to/creds"
++
++    def test_shows_last_review_date(self, capsys: pytest.CaptureFixture[str]) -> None:
+         fake_lp = FakeLaunchpad(bot_username="ci-bot")
+         lp_mp = make_fake_mp(status="Needs review")
+         fake_lp.add_merge_proposal("myproject", lp_mp)
+@@ -942,1 +1016,10 @@
++_STRUCTURED_DIFF = (
++    "--- a/src/foo.py\n"
++    "+++ b/src/foo.py\n"
++    "@@ -1,3 +1,4 @@\n"
++    " import os\n"
++    "+import sys\n"
++    "\n"
++    " def main():\n"
++)
+ 
+@@ -951,1 +1026,11 @@
++_VALID_STRUCTURED_RESPONSE = json.dumps(
++    {
++        "general_comment": "Looks good.",
++        "inline_comments": {
++            "src/foo.py": {
++                "2": "Good addition.",
++            }
++        },
++    }
++)
+ 
+@@ -953,1 +1037,7 @@
++_EMPTY_STRUCTURED_RESPONSE = json.dumps(
++    {
++        "general_comment": "No issues.",
++        "inline_comments": {},
++    }
++)
+ 
+@@ -955,1 +1044,10 @@
++_PR_DIFF = (
++    "--- a/src/foo.py\n"
++    "+++ b/src/foo.py\n"
++    "@@ -1,3 +1,4 @@\n"
++    " import os\n"
++    "+import sys\n"
++    "\n"
++    " def main():\n"
++)
+ 
+@@ -961,1 +1054,11 @@
++_PR_REVIEW_RESPONSE = json.dumps(
++    {
++        "general_comment": "Looks good overall.",
++        "inline_comments": {
++            "src/foo.py": {
++                "2": "Nice import.",
++            }
++        },
++    }
++)
+ 
+@@ -1433,27 +1432,0 @@
+-_STRUCTURED_DIFF = (
+-    "--- a/src/foo.py\n"
+-    "+++ b/src/foo.py\n"
+-    "@@ -1,3 +1,4 @@\n"
+-    " import os\n"
+-    "+import sys\n"
+-    "\n"
+-    " def main():\n"
+-)
+-
+-_VALID_STRUCTURED_RESPONSE = json.dumps(
+-    {
+-        "general_comment": "Looks good.",
+-        "inline_comments": {
+-            "src/foo.py": {
+-                "2": "Good addition.",
+-            }
+-        },
+-    }
+-)
+-
+-_EMPTY_STRUCTURED_RESPONSE = json.dumps(
+-    {
+-        "general_comment": "No issues.",
+-        "inline_comments": {},
+-    }
+-)
+@@ -1896,20 +1895,0 @@
+-_PR_DIFF = (
+-    "--- a/src/foo.py\n"
+-    "+++ b/src/foo.py\n"
+-    "@@ -1,3 +1,4 @@\n"
+-    " import os\n"
+-    "+import sys\n"
+-    "\n"
+-    " def main():\n"
+-)
+-
+-_PR_REVIEW_RESPONSE = json.dumps(
+-    {
+-        "general_comment": "Looks good overall.",
+-        "inline_comments": {
+-            "src/foo.py": {
+-                "2": "Nice import.",
+-            }
+-        },
+-    }
+-)
+diff --git a/tests/test_reviewer.py b/tests/test_reviewer.py
+index 87e49fd..02262d2 100644
+--- a/tests/test_reviewer.py
++++ b/tests/test_reviewer.py
+@@ -167,7 +118,7 @@
+         file_c = (
+             "diff --git a/omit.py b/omit.py\n"
+             "--- a/omit.py\n"
+-            "+++ a/omit.py\n"
++            "+++ b/omit.py\n"
+             "@@ -1,1 +1,1 @@\n"
+             "-old\n"
+             "+new\n"

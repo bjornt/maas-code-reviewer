@@ -1,0 +1,5441 @@
+diff --git a/.github/workflows/snap.yml b/.github/workflows/snap.yml
+deleted file mode 100644
+index 535b50c..0000000
+--- a/.github/workflows/snap.yml
++++ /dev/null
+@@ -1,20 +0,0 @@
+-on:
+-  push:
+-    branches: [main]
+-
+-permissions:
+-  contents: read
+-
+-jobs:
+-  build:
+-    runs-on: ubuntu-latest
+-    steps:
+-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+-      - uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1
+-        id: build
+-      - uses: snapcore/action-publish@214b86e5ca036ead1668c79afb81e550e6c54d40 # v1
+-        env:
+-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.STORE_LOGIN }}
+-        with:
+-          snap: ${{ steps.build.outputs.snap }}
+-          release: edge
+diff --git a/snap/snapcraft.yaml b/snap/snapcraft.yaml
+deleted file mode 100644
+index 6514338..0000000
+--- a/snap/snapcraft.yaml
++++ /dev/null
+@@ -1,40 +0,0 @@
+-name: maas-code-reviewer
+-adopt-info: maas-code-reviewer
+-license: AGPL-3.0-only
+-website: https://github.com/canonical/maas-code-reviewer
+-contact: https://github.com/canonical/maas-code-reviewer/issues
+-issues: https://github.com/canonical/maas-code-reviewer/issues
+-source-code: https://github.com/canonical/maas-code-reviewer
+-title: MAAS Code Reviewer
+-summary: LLM-powered code reviewer for Launchpad MPs and GitHub PRs
+-description: |
+-  An LLM-powered code reviewer agent for GitHub pull requests and Launchpad
+-  merge proposals. It uses a Gemini LLM to review diffs and post findings as
+-  comments. Built and maintained by the MAAS team at Canonical.
+-
+-base: core24
+-confinement: strict
+-
+-apps:
+-  maas-code-reviewer:
+-    command: bin/maas-code-reviewer
+-    plugs:
+-      - network
+-      - home
+-
+-parts:
+-  maas-code-reviewer:
+-    plugin: uv
+-    source: .
+-    build-snaps:
+-      - astral-uv
+-    build-packages:
+-      - git
+-    stage-packages:
+-      - git
+-    override-build: |
+-      craftctl default
+-      project_version="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+-      commit_index="$(git rev-list --count HEAD)"
+-      short_hash="$(git rev-parse --short HEAD)"
+-      craftctl set version="${project_version}-${commit_index}-g${short_hash}"
+diff --git a/src/maas_code_reviewer/cli.py b/src/maas_code_reviewer/cli.py
+index 53485b7..e543036 100644
+--- a/src/maas_code_reviewer/cli.py
++++ b/src/maas_code_reviewer/cli.py
+@@ -6,3 +7,2 @@
+ import os
+ import sys
+-import tempfile
+@@ -14,5 +15,4 @@
+ from maas_code_reviewer.git import GitClient
+ from maas_code_reviewer.github_client import GitHubClient, parse_pr_url
+ from maas_code_reviewer.launchpad_client import LaunchpadClient
+-from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS, GeminiClient
+ from maas_code_reviewer.metrics import ReviewMetrics, write_metrics
+@@ -23,3 +22,0 @@
+-    NoReviewText,
+-    review_diff,
+-    review_diff_structured,
+@@ -29,5 +28,0 @@
+-_MAX_TOOL_CALLS_HELP = (
+-    "Maximum number of automatic tool calls the LLM may make during a "
+-    "review (file reads, directory listings, searches). When the limit is "
+-    "reached the reviewer resumes the chat to elicit a text answer. "
+-    f"(default: {DEFAULT_MAX_TOOL_CALLS})."
+@@ -71,53 +70,0 @@
+-def review_merge_proposal(
+-    lp: LaunchpadClient,
+-    git: GitClient,
+-    llm: GeminiClient,
+-    mp_url: str,
+-    max_diff_chars: int = 200_000,
+-    metrics: ReviewMetrics | None = None,
+-    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
+-) -> str | None:
+-    """Review a single merge proposal end to end.
+-
+-    Returns the review comment body, or ``None`` if the MP was already
+-    reviewed.  The caller is responsible for posting or printing the result.
+-    """
+-    mp = lp.get_merge_proposal(mp_url)
+-
+-    if has_existing_review(lp, mp):
+-        return None
+-
+-    target_branch = _ref_to_branch(mp.target_git_path)
+-    source_branch = _ref_to_branch(mp.source_git_path)
+-    target_url = _lp_repo_url(mp.target_git_repository)
+-    source_url = _lp_repo_url(mp.source_git_repository)
+-
+-    with tempfile.TemporaryDirectory() as tmpdir:
+-        repo_dir = Path(tmpdir) / "repo"
+-        git.clone(target_url, repo_dir, target_branch)
+-        git.merge_into(repo_dir, source_url, source_branch)
+-
+-        diff = git.diff(repo_dir, "ORIG_HEAD", "HEAD")
+-
+-        tools = RepoTools(repo_dir)
+-        agents_md = tools.read_agents_md()
+-        description = mp.description or mp.commit_message
+-        review_comment = review_diff(
+-            llm,
+-            diff=diff,
+-            description=description,
+-            read_file=tools.read_file,
+-            list_directory=tools.list_directory,
+-            agents_md=agents_md,
+-            max_diff_chars=max_diff_chars,
+-            metrics=metrics,
+-            max_tool_calls=max_tool_calls,
+-        )
+-
+-        if metrics is not None:
+-            metrics.files_read = tools.files_read_count
+-            metrics.agents_md_read = tools.agents_md_read
+-
+-    return review_comment
+-
+-
+@@ -139,8 +45,3 @@
+         print(output)
+ 
+ 
+-def handle_review_mp(args: argparse.Namespace) -> None:
+-    """Handle the review-mp subcommand."""
+-    api_key = _get_gemini_api_key(args)
+-    if api_key is None:
+-        _exit_missing_gemini_api_key()
+@@ -147,5 +50,2 @@
+     lp_client = LaunchpadClient(credentials_file=args.launchpad_credentials)
+     git_client = GitClient()
+-    llm_client = GeminiClient(api_key=api_key, model=args.model)
+-    metrics = ReviewMetrics()
+-    result = review_merge_proposal(
+@@ -152,7 +53,3 @@
+         lp_client,
+         git_client,
+-        llm_client,
+         args.mp_url,
+-        max_diff_chars=args.max_diff_chars,
+-        metrics=metrics,
+-        max_tool_calls=args.max_tool_calls,
+@@ -159,4 +58,1 @@
+     )
+-    if args.metrics is not None and result is not None:
+-        write_metrics(metrics, Path(args.metrics))
+-    if result is None:
+@@ -163,13 +60,3 @@
+         print("Already reviewed, skipping.")
+-    elif args.dry_run:
+-        print(result)
+-    else:
+-        mp = lp_client.get_merge_proposal(args.mp_url)
+-        lp_client.post_comment(mp, result, subject="Automated review")
+ 
+ 
+-def handle_review_diff(args: argparse.Namespace) -> None:
+-    """Handle the review-diff subcommand."""
+-    api_key = _get_gemini_api_key(args)
+-    if api_key is None:
+-        _exit_missing_gemini_api_key()
+@@ -181,2 +107,1 @@
+ 
+-    repo_dir = Path(args.repo_dir) if args.repo_dir else Path.cwd()
+@@ -183,2 +112,1 @@
+ 
+-    llm_client = GeminiClient(api_key=api_key, model=args.model)
+@@ -185,3 +114,1 @@
+ 
+-    tools = RepoTools(repo_dir)
+-    agents_md = tools.read_agents_md()
+@@ -189,21 +123,1 @@
+ 
+-    if args.json_output:
+-        result_dict = review_diff_structured(
+-            llm_client,
+-            diff=diff,
+-            description=None,
+-            read_file=tools.read_file,
+-            list_directory=tools.list_directory,
+-            agents_md=agents_md,
+-            max_diff_chars=args.max_diff_chars,
+-            metrics=metrics,
+-            max_tool_calls=args.max_tool_calls,
+-        )
+-        Path(args.json_output).write_text(json.dumps(result_dict, indent=2))
+-    else:
+-        result = review_diff(
+-            llm_client,
+-            diff=diff,
+-            description=None,
+-            read_file=tools.read_file,
+-            list_directory=tools.list_directory,
+@@ -210,23 +131,2 @@
+             agents_md=agents_md,
+-            max_diff_chars=args.max_diff_chars,
+             metrics=metrics,
+-            max_tool_calls=args.max_tool_calls,
+-        )
+-        print(result)
+-
+-    metrics.files_read = tools.files_read_count
+-    metrics.agents_md_read = tools.agents_md_read
+-    if args.metrics is not None:
+-        write_metrics(metrics, Path(args.metrics))
+-
+-
+-def handle_review_pr(args: argparse.Namespace) -> None:
+-    """Handle the review-pr subcommand."""
+-    owner, repo, pr_number = parse_pr_url(args.pr_url)
+-
+-    token = args.github_token or os.environ.get("GITHUB_TOKEN")
+-    if not token:
+-        print(
+-            "Error: GitHub token not provided. Use --github-token or set the "
+-            "GITHUB_TOKEN environment variable.",
+-            file=sys.stderr,
+@@ -233,6 +136,1 @@
+         )
+-        sys.exit(1)
+-
+-    api_key = _get_gemini_api_key(args)
+-    if api_key is None:
+-        _exit_missing_gemini_api_key()
+@@ -239,10 +139,1 @@
+ 
+-    github_client = GitHubClient(token)
+-    diff = github_client.get_pr_diff(owner, repo, pr_number)
+-    description = github_client.get_pr_description(owner, repo, pr_number)
+-
+-    repo_dir = Path(args.repo_dir) if args.repo_dir else Path.cwd()
+-    tools = RepoTools(repo_dir)
+-    agents_md = tools.read_agents_md()
+-
+-    llm_client = GeminiClient(api_key=api_key, model=args.model)
+@@ -249,26 +144,5 @@
+ 
+-    metrics = ReviewMetrics()
+-    result_dict = review_diff_structured(
+-        llm_client,
+-        diff=diff,
+-        description=description,
+-        read_file=tools.read_file,
+-        list_directory=tools.list_directory,
+-        agents_md=agents_md,
+-        max_diff_chars=args.max_diff_chars,
+-        metrics=metrics,
+-        max_tool_calls=args.max_tool_calls,
+-    )
+-
+-    metrics.files_read = tools.files_read_count
+-    metrics.agents_md_read = tools.agents_md_read
+     if args.metrics is not None:
+         write_metrics(metrics, Path(args.metrics))
+ 
+-    if args.dry_run:
+-        print(json.dumps(result_dict, indent=2))
+-        return
+-
+-    general_comment = result_dict.get("general_comment", "")
+-    inline_comments = result_dict.get("inline_comments", {})
+ 
+@@ -281,2 +280,0 @@
+-    github_client.post_review(
+-        owner, repo, pr_number, body=general_comment, comments=comments
+@@ -293,10 +169,3 @@
+     try:
+         if args.command == "list-lp-mps":
+             handle_list_lp_mps(args)
+-        elif args.command == "review-mp":
+-            handle_review_mp(args)
+-        elif args.command == "review-diff":
+-            handle_review_diff(args)
+-        elif args.command == "review-pr":
+-            handle_review_pr(args)
+-    except NoReviewText as exc:
+@@ -304,14 +188,3 @@
+         sys.exit(1)
+ 
+ 
+-def _get_gemini_api_key(args: argparse.Namespace) -> str | None:
+-    """Return the Gemini API key from --gemini-api-key-file or the environment.
+-
+-    Returns ``None`` if neither source provides a non-empty key.
+-    """
+-    if args.gemini_api_key_file:
+-        path = Path(args.gemini_api_key_file)
+-        if not path.is_file():
+-            return None
+-        return path.read_text().strip() or None
+-    return os.environ.get("GEMINI_API_KEY", "").strip() or None
+@@ -318,4 +195,2 @@
+ 
+ 
+-def _exit_missing_gemini_api_key() -> NoReturn:
+-    """Print an error message about a missing Gemini API key and exit."""
+@@ -322,3 +199,1 @@
+     print(
+-        "Error: No Gemini API key configured. Use --gemini-api-key-file or set "
+-        "the GEMINI_API_KEY environment variable.",
+@@ -389,6 +258,3 @@
+         help="Launchpad project name.",
+     )
+ 
+-    review_parser = subparsers.add_parser(
+-        "review-mp",
+-        help="Review a single merge proposal.",
+@@ -395,2 +264,1 @@
+     )
+-    review_parser.add_argument(
+@@ -397,6 +266,3 @@
+         "--launchpad-credentials",
+         type=str,
+         default=None,
+-    review_parser.add_argument(
+-        "-g",
+-        "--gemini-api-key-file",
+@@ -405,2 +273,1 @@
+         type=str,
+-        default=None,
+@@ -407,3 +276,1 @@
+         help=(
+-            "Path to file containing the Gemini API key. If not provided, "
+-            "read from the GEMINI_API_KEY environment variable."
+@@ -410,4 +279,2 @@
+         ),
+     )
+-    review_parser.add_argument(
+-        "--model",
+@@ -414,3 +292,1 @@
+         type=str,
+-        default="gemini-3-flash-preview",
+-        help="Gemini model to use (default: 'gemini-3-flash-preview').",
+@@ -417,6 +295,1 @@
+     )
+-    review_parser.add_argument(
+-        "--max-diff-chars",
+-        type=int,
+-        default=200_000,
+-        metavar="N",
+@@ -423,3 +308,1 @@
+         help=(
+-            "Maximum diff size in characters before truncation "
+-            "(default: 200000)."
+@@ -426,10 +311,2 @@
+         ),
+     )
+-    review_parser.add_argument(
+-        "--max-tool-calls",
+-        type=int,
+-        default=DEFAULT_MAX_TOOL_CALLS,
+-        metavar="N",
+-        help=_MAX_TOOL_CALLS_HELP,
+-    )
+-    review_parser.add_argument(
+@@ -436,4 +314,3 @@
+         "--dry-run",
+         action="store_true",
+         default=False,
+-        help="Print review to stdout instead of posting as a comment.",
+@@ -440,9 +318,1 @@
+     )
+-    review_parser.add_argument(
+-        "--metrics",
+-        type=str,
+-        default=None,
+-        metavar="FILE",
+-        help="Write review metrics (model, tokens, diff stats) as JSON to FILE.",
+-    )
+-    review_parser.add_argument(
+@@ -449,2 +320,1 @@
+         "mp_url",
+-        help="URL of the merge proposal to review.",
+@@ -451,5 +322,2 @@
+     )
+ 
+-    diff_parser = subparsers.add_parser(
+-        "review-diff",
+-        help="Review a unified diff file and print the result to stdout.",
+@@ -456,4 +327,1 @@
+     )
+-    diff_parser.add_argument(
+-        "-g",
+-        "--gemini-api-key-file",
+@@ -460,5 +330,3 @@
+         type=str,
+         default=None,
+         help=(
+-            "Path to file containing the Gemini API key. If not provided, "
+-            "read from the GEMINI_API_KEY environment variable."
+@@ -465,4 +335,2 @@
+         ),
+     )
+-    diff_parser.add_argument(
+-        "--model",
+@@ -469,9 +339,1 @@
+         type=str,
+-        default="gemini-3-flash-preview",
+-        help="Gemini model to use (default: 'gemini-3-flash-preview').",
+-    )
+-    diff_parser.add_argument(
+-        "--max-diff-chars",
+-        type=int,
+-        default=200_000,
+-        metavar="N",
+@@ -478,3 +342,1 @@
+         help=(
+-            "Maximum diff size in characters before truncation "
+-            "(default: 200000)."
+@@ -481,8 +345,2 @@
+         ),
+     )
+-    diff_parser.add_argument(
+-        "--max-tool-calls",
+-        type=int,
+-        default=DEFAULT_MAX_TOOL_CALLS,
+-        metavar="N",
+-        help=_MAX_TOOL_CALLS_HELP,
+@@ -489,3 +350,1 @@
+     )
+-    diff_parser.add_argument(
+-        "--repo-dir",
+@@ -492,6 +358,3 @@
+         type=str,
+         default=None,
+         help=(
+-            "Path to the local git repository (default: current working directory). "
+-            "Used for read_file and list_directory tool calls, and to proactively "
+-            "include the repository's AGENTS.md (if present) in the review context."
+@@ -498,4 +363,2 @@
+         ),
+     )
+-    diff_parser.add_argument(
+-        "--json-output",
+@@ -502,2 +367,1 @@
+         type=str,
+-        default=None,
+@@ -505,4 +377,1 @@
+         help=(
+-            "Write structured JSON review output to FILE instead of plain text to "
+-            "stdout. The JSON contains a 'general_comment' and 'inline_comments' "
+-            "keyed by file path and line number."
+@@ -509,8 +380,2 @@
+         ),
+     )
+-    diff_parser.add_argument(
+-        "--metrics",
+-        type=str,
+-        default=None,
+-        metavar="FILE",
+-        help="Write review metrics (model, tokens, diff stats) as JSON to FILE.",
+@@ -517,4 +387,1 @@
+     )
+-    diff_parser.add_argument(
+-        "diff_file",
+-        help="Path to a unified diff file, or '-' to read from stdin.",
+@@ -521,5 +391,2 @@
+     )
+ 
+-    pr_parser = subparsers.add_parser(
+-        "review-pr",
+-        help="Review a GitHub pull request and post the review.",
+@@ -526,4 +396,1 @@
+     )
+-    pr_parser.add_argument(
+-        "-g",
+-        "--gemini-api-key-file",
+@@ -532,3 +408,1 @@
+         help=(
+-            "Path to file containing the Gemini API key. If not provided, "
+-            "read from the GEMINI_API_KEY environment variable."
+@@ -535,5 +411,2 @@
+         ),
+     )
+-    pr_parser.add_argument(
+-        "--github-token",
+-        type=str,
+@@ -541,3 +418,1 @@
+         help=(
+-            "GitHub personal access token. If not provided, read from the "
+-            "GITHUB_TOKEN environment variable."
+@@ -544,4 +423,2 @@
+         ),
+     )
+-    pr_parser.add_argument(
+-        "--model",
+@@ -548,3 +439,1 @@
+         type=str,
+-        default="gemini-3-flash-preview",
+-        help="Gemini model to use (default: 'gemini-3-flash-preview').",
+@@ -551,6 +443,1 @@
+     )
+-    pr_parser.add_argument(
+-        "--max-diff-chars",
+-        type=int,
+-        default=200_000,
+-        metavar="N",
+@@ -557,3 +456,1 @@
+         help=(
+-            "Maximum diff size in characters before truncation "
+-            "(default: 200000)."
+@@ -560,8 +459,2 @@
+         ),
+     )
+-    pr_parser.add_argument(
+-        "--max-tool-calls",
+-        type=int,
+-        default=DEFAULT_MAX_TOOL_CALLS,
+-        metavar="N",
+-        help=_MAX_TOOL_CALLS_HELP,
+@@ -568,2 +471,1 @@
+     )
+-    pr_parser.add_argument(
+@@ -570,8 +473,3 @@
+         "--repo-dir",
+         type=str,
+         default=None,
+-            "Path to a local checkout of the repository (default: current working "
+-            "directory). Used for read_file and list_directory tool calls, and to "
+-            "proactively include the repository's AGENTS.md (if present) in the "
+-            "review context. The caller is responsible for having the repo checked "
+-            "out already."
+@@ -579,7 +482,2 @@
+         ),
+     )
+-    pr_parser.add_argument(
+-        "--dry-run",
+-        action="store_true",
+-        default=False,
+-        help="Print the review JSON to stdout instead of posting it.",
+@@ -586,2 +495,1 @@
+     )
+-    pr_parser.add_argument(
+@@ -588,6 +497,3 @@
+         "--metrics",
+         type=str,
+         default=None,
+-    pr_parser.add_argument(
+-        "pr_url",
+-        help="Full GitHub PR URL, e.g. https://github.com/owner/repo/pull/42.",
+diff --git a/src/maas_code_reviewer/llm_client.py b/src/maas_code_reviewer/llm_client.py
+deleted file mode 100644
+index b70b146..0000000
+--- a/src/maas_code_reviewer/llm_client.py
++++ /dev/null
+@@ -1,214 +0,0 @@
+-# Copyright 2026 Canonical Ltd.  This software is licensed under the
+-# GNU Affero General Public License version 3 (see the file LICENSE).
+-
+-import sys
+-from collections.abc import Callable
+-from typing import Any
+-
+-from google import genai
+-from google.genai import types
+-
+-# Automatic function calling (AFC) executes client-side tool calls and feeds
+-# the results back to the model for us. The SDK default caps this at 10
+-# remote calls, which a review that reads several files can exceed — and when
+-# the cap is hit the model's final turn is left as an unexecuted tool call
+-# with no text. This is the default cap used when no explicit value is given
+-# via the CLI's --max-tool-calls option.
+-DEFAULT_MAX_TOOL_CALLS = 30
+-
+-# When the model nonetheless ends a turn with no text (see above, or a turn
+-# that is only thoughts), resume the chat this many times to elicit a text
+-# answer before giving up.
+-_MAX_RESUME_ATTEMPTS = 3
+-
+-_RESUME_PROMPT = (
+-    "You have not produced a text answer yet. Stop calling tools and output "
+-    "your final review now."
+-)
+-
+-
+-class GeminiClient:
+-    """LLM client backed by the Google Gemini API.
+-
+-    Uses ``chats.create`` with automatic function calling — the SDK
+-    handles tool dispatch, result feeding, and multi-turn looping
+-    internally.
+-    """
+-
+-    def __init__(
+-        self,
+-        *,
+-        api_key: str = "",
+-        model: str = "gemini-3-flash-preview",
+-        client: genai.Client | None = None,
+-    ) -> None:
+-        if client is not None:
+-            self._client = client
+-        else:
+-            self._client = genai.Client(api_key=api_key)  # pragma: no cover
+-        self._model = model
+-        self._last_tokens_input: int = 0
+-        self._last_tokens_output: int = 0
+-        self._last_tokens_thinking: int = 0
+-        self._last_tool_call_limit: int = 0
+-        self._last_tool_call_limit_reached: bool = False
+-        self._last_resume_attempts: int = 0
+-
+-    @property
+-    def model(self) -> str:
+-        return self._model
+-
+-    @property
+-    def last_tokens_input(self) -> int:
+-        return self._last_tokens_input
+-
+-    @property
+-    def last_tokens_output(self) -> int:
+-        return self._last_tokens_output
+-
+-    @property
+-    def last_tokens_thinking(self) -> int:
+-        return self._last_tokens_thinking
+-
+-    @property
+-    def last_tool_call_limit(self) -> int:
+-        return self._last_tool_call_limit
+-
+-    @property
+-    def last_tool_call_limit_reached(self) -> bool:
+-        return self._last_tool_call_limit_reached
+-
+-    @property
+-    def last_resume_attempts(self) -> int:
+-        return self._last_resume_attempts
+-
+-    def review(
+-        self,
+-        prompt: list[Any],
+-        tools: list[Callable[..., Any]],
+-        system_instruction: str = "",
+-        agents_md: str | None = None,
+-        max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
+-    ) -> str:
+-        tool_entries: list[types.Tool | Callable[..., Any]] = [
+-            *tools,
+-            types.Tool(google_search=types.GoogleSearch()),
+-        ]
+-        config = types.GenerateContentConfig(
+-            system_instruction=system_instruction or None,
+-            thinking_config=types.ThinkingConfig(include_thoughts=True),
+-            tools=tool_entries,
+-            tool_config=types.ToolConfig(
+-                include_server_side_tool_invocations=True
+-            ),
+-            automatic_function_calling=types.AutomaticFunctionCallingConfig(
+-                maximum_remote_calls=max_tool_calls,
+-            ),
+-        )
+-
+-        chat = self._client.chats.create(model=self._model, config=config)
+-
+-        self._last_tokens_input = 0
+-        self._last_tokens_output = 0
+-        self._last_tokens_thinking = 0
+-        self._last_tool_call_limit = max_tool_calls
+-        self._last_tool_call_limit_reached = False
+-        self._last_resume_attempts = 0
+-
+-        message: list[Any] = []
+-        if agents_md is not None:
+-            message.append(
+-                types.Part.from_text(
+-                    text=f"## Project conventions (AGENTS.md)\n\n{agents_md}"
+-                )
+-            )
+-        message.extend(prompt)
+-
+-        response = chat.send_message(message)
+-        _print_thoughts(response)
+-        self._add_usage(response)
+-
+-        # The model can end its turn with no text — typically a final turn
+-        # that is only thoughts and/or a function_call. This happens when
+-        # automatic function calling stops on a further tool call (it has a
+-        # remote-call cap) instead of producing a text answer, leaving
+-        # ``response.text`` as None. Resume the chat so the model emits its
+-        # final answer as text rather than returning an empty string that
+-        # would crash the caller's JSON parser.
+-        for _ in range(_MAX_RESUME_ATTEMPTS):
+-            if response.text is not None:
+-                break
+-            if self._last_resume_attempts == 0:
+-                print(
+-                    f"Tool-call limit ({max_tool_calls}) reached; "
+-                    "resuming to elicit a text answer.",
+-                    file=sys.stderr,
+-                )
+-            self._last_resume_attempts += 1
+-            self._last_tool_call_limit_reached = True
+-            response = chat.send_message(_RESUME_PROMPT)
+-            _print_thoughts(response)
+-            self._add_usage(response)
+-
+-        total_token_count = (
+-            self._last_tokens_input
+-            + self._last_tokens_output
+-            + self._last_tokens_thinking
+-        )
+-        thoughts_count = self._last_tokens_thinking
+-        thoughts_info = f", thinking: {thoughts_count}" if thoughts_count else ""
+-        resume_info = (
+-            f", resume_attempts: {self._last_resume_attempts}"
+-            if self._last_resume_attempts
+-            else ""
+-        )
+-        print(
+-            f"Tokens used — input: {self._last_tokens_input}, "
+-            f"output: {self._last_tokens_output}"
+-            f"{thoughts_info}"
+-            f"{resume_info}, "
+-            f"total: {total_token_count}",
+-            file=sys.stderr,
+-        )
+-
+-        return response.text or ""
+-
+-    def _add_usage(self, response: types.GenerateContentResponse) -> None:
+-        """Accumulate token counts from *response* into the instance counters.
+-
+-        Counts are accumulated across the initial turn and any resume turns so
+-        the reported totals reflect the whole review.
+-        """
+-        usage = response.usage_metadata
+-        if usage is None:
+-            return
+-        self._last_tokens_input += usage.prompt_token_count or 0
+-        self._last_tokens_output += usage.candidates_token_count or 0
+-        self._last_tokens_thinking += usage.thoughts_token_count or 0
+-
+-
+-def _print_thoughts(response: types.GenerateContentResponse) -> None:
+-    """Print any thought parts from *response* to stderr.
+-
+-    Also prints thoughts embedded in intermediate AFC steps, which are stored
+-    in ``response.automatic_function_calling_history`` as model-role
+-    ``Content`` objects interleaved with function-response entries.
+-    """
+-    afc_history = response.automatic_function_calling_history or []
+-    for content in afc_history:
+-        if content.role != "model" or not content.parts:
+-            continue
+-        for part in content.parts:
+-            if part.thought and part.text:
+-                print(
+-                    f"[Thinking (tool step)]\n{part.text.rstrip()}\n", file=sys.stderr
+-                )
+-
+-    if not response.candidates:
+-        return
+-    content = response.candidates[0].content
+-    if content is None or not content.parts:
+-        return
+-    for part in content.parts:
+-        if part.thought and part.text:
+-            print(f"[Thinking]\n{part.text.rstrip()}\n", file=sys.stderr)
+diff --git a/src/maas_code_reviewer/prompts/instructions.md b/src/maas_code_reviewer/prompts/instructions.md
+deleted file mode 100644
+index c362e24..0000000
+--- a/src/maas_code_reviewer/prompts/instructions.md
++++ /dev/null
+@@ -1,4 +0,0 @@
+-## Instructions
+-
+-Review the diff above. Use the provided tools to read files or list
+-directories if you need additional context. Provide your review.
+diff --git a/src/maas_code_reviewer/prompts/system_instruction.md b/src/maas_code_reviewer/prompts/system_instruction.md
+deleted file mode 100644
+index a7644e8..0000000
+--- a/src/maas_code_reviewer/prompts/system_instruction.md
++++ /dev/null
+@@ -1,2 +0,0 @@
+-Keep your review concise and actionable. Do not repeat the diff back. Focus
+-on what matters.
+diff --git a/src/maas_code_reviewer/repo_tools.py b/src/maas_code_reviewer/repo_tools.py
+index 961485c..509762f 100644
+--- a/src/maas_code_reviewer/repo_tools.py
++++ b/src/maas_code_reviewer/repo_tools.py
+@@ -1,57 +1,31 @@
+ # Copyright 2026 Canonical Ltd.  This software is licensed under the
+ # GNU Affero General Public License version 3 (see the file LICENSE).
+ 
+-import sys
+ from pathlib import Path
+ 
+ 
+ class RepoTools:
+-    """File-system tools scoped to a single repository directory.
++    """Host-side access to a repository's AGENTS.md guidance.
+ 
+-    All paths are resolved and checked against ``repo_dir`` before any
+-    operation is performed, so neither ``read_file`` nor ``list_directory``
+-    can be used to escape outside the repository tree.
++    The repository directory is resolved at construction and the AGENTS.md
++    path is checked against it before reading, so a symlinked AGENTS.md
++    cannot pull content in from outside the repository tree. The review
++    agent never uses this class: it reads the repository with its own
++    native tools inside the untrusted container.
+     """
+ 
+     def __init__(self, repo_dir: Path) -> None:
+         self._repo_dir = repo_dir.resolve()
+-        self.files_read_count: int = 0
+-        self.agents_md_read: bool = False
+ 
+     def read_agents_md(self) -> str | None:
+         """Return the contents of the repo's top-level AGENTS.md, or None.
+ 
+-        Used to proactively include project conventions in the review
+-        prompt instead of relying on the model to request the file via the
+-        read_file tool. Sets ``agents_md_read`` on success, matching the
+-        flag set by ``read_file`` so metrics stay accurate either way.
++        Used by the host to proactively include the repository's
++        conventions in the review context.
+         """
+         target = (self._repo_dir / "AGENTS.md").resolve()
+         if not target.is_relative_to(self._repo_dir):
+             return None
+         if not target.is_file():
+             return None
+-        self.agents_md_read = True
+         return target.read_text(encoding="utf-8")
+-
+-    def read_file(self, path: str) -> str:
+-        print(f"Tool call: read_file(path={path!r})", file=sys.stderr)
+-        target = (self._repo_dir / path).resolve()
+-        if not target.is_relative_to(self._repo_dir):
+-            return f"Error: path outside repository: {path}"
+-        if not target.is_file():
+-            return f"Error: file not found: {path}"
+-        self.files_read_count += 1
+-        if target.name == "AGENTS.md":
+-            self.agents_md_read = True
+-        return target.read_text()
+-
+-    def list_directory(self, path: str) -> str:
+-        print(f"Tool call: list_directory(path={path!r})", file=sys.stderr)
+-        target = (self._repo_dir / path).resolve()
+-        if not target.is_relative_to(self._repo_dir):
+-            return f"Error: path outside repository: {path}"
+-        if not target.is_dir():
+-            return f"Error: directory not found: {path}"
+-        entries = sorted(entry.name for entry in target.iterdir())
+-        return "\n".join(entries)
+diff --git a/src/maas_code_reviewer/reviewer.py b/src/maas_code_reviewer/reviewer.py
+index 903eacb..2c4d241 100644
+--- a/src/maas_code_reviewer/reviewer.py
++++ b/src/maas_code_reviewer/reviewer.py
+@@ -2,5 +2,3 @@
+ # GNU Affero General Public License version 3 (see the file LICENSE).
+ 
+ import json
+-import sys
+-from collections.abc import Callable
+@@ -7,3 +7,2 @@
+ from pathlib import Path
+ 
+-from google.genai import types
+@@ -11,1 +10,0 @@
+-from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS, GeminiClient
+@@ -12,2 +17,1 @@
+ from maas_code_reviewer.metrics import ReviewMetrics
+-from maas_code_reviewer.review_schema import validate_review_json
+@@ -21,14 +30,6 @@
+ """
+ 
+ 
+-class NoReviewText(Exception):
+-    """Raised when the LLM ends its turn without producing any review text.
+-
+-    This typically happens when automatic function calling stops on a
+-    further tool call (the tool-call limit is reached) and, even after
+-    resume attempts, the model still has not emitted a text answer.
+-    """
+-
+ _PROMPTS_DIR = Path(__file__).parent / "prompts"
+ 
+ 
+@@ -43,4 +44,3 @@
+     "shared_instruction.md", "structured_system_instruction.md"
+ )
+ 
+-SYSTEM_INSTRUCTION = _load_prompt("shared_instruction.md", "system_instruction.md")
+@@ -48,3 +47,2 @@
+ STRUCTURED_INSTRUCTIONS = _load_prompt("structured_instructions.md")
+ 
+-INSTRUCTIONS = _load_prompt("instructions.md")
+@@ -68,5 +70,3 @@
+ )
+ 
+ EMPTY_DIFF_GENERAL_COMMENT = "No changes to review: the provided diff is empty."
+-def review_diff_structured(
+-    llm: GeminiClient,
+@@ -75,4 +99,2 @@
+     diff: str,
+     description: str | None,
+-    read_file: Callable[[str], str],
+-    list_directory: Callable[[str], str],
+@@ -79,4 +104,3 @@
+     agents_md: str | None = None,
+     max_diff_chars: int = 200_000,
+     metrics: ReviewMetrics | None = None,
+-    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
+@@ -83,32 +111,1 @@
+ ) -> dict:
+-    """Orchestrate a structured code review of *diff* using the given LLM.
+-
+-    The LLM is instructed to produce a JSON object with a general comment and
+-    inline comments keyed by file path and line number.  A ``validate_review``
+-    tool is provided so the LLM can self-check its output before finalising.
+-
+-    Parameters
+-    ----------
+-    llm:
+-        The LLM client to use for generating the review.
+-    diff:
+-        The unified diff text to review.
+-    description:
+-        The merge proposal description or commit message (may be ``None``).
+-    read_file:
+-        A callable that reads a file from the working tree.
+-        Signature: ``(path: str) -> str``.
+-    list_directory:
+-        A callable that lists directory contents in the working tree.
+-        Signature: ``(path: str) -> str``.
+-    agents_md:
+-        The contents of the repository's AGENTS.md file, if one exists, to
+-        be sent to the LLM up front instead of relying on a ``read_file``
+-        tool call (may be ``None``).
+-    max_diff_chars:
+-        Maximum number of characters for the diff before truncation.
+-
+-    Returns
+-    -------
+-    dict
+-        The parsed JSON review object.
+@@ -115,21 +134,2 @@
+     """
+     if _is_empty_diff(diff):
+-        _populate_metrics_without_llm(metrics, llm.model, diff)
+-        return {
+-            "general_comment": EMPTY_DIFF_GENERAL_COMMENT,
+-            "inline_comments": {},
+-        }
+-
+-    truncated_diff = _truncate_diff(diff, max_diff_chars)
+-    prompt = _build_structured_prompt(truncated_diff, description)
+-
+-    def validate_review(json_text: str) -> str:
+-        return _validate_review(json_text, truncated_diff)
+-
+-    tools: list[Callable[..., str]] = [
+-        validate_review, read_file, list_directory
+-    ]
+-    raw_text = llm.review(
+-        prompt, tools, system_instruction=STRUCTURED_SYSTEM_INSTRUCTION,
+-        agents_md=agents_md, max_tool_calls=max_tool_calls,
+-    )
+@@ -136,2 +152,1 @@
+ 
+-    _populate_metrics(metrics, llm, diff)
+@@ -138,7 +155,1 @@
+ 
+-    cleaned = _extract_json(raw_text)
+-    if not cleaned:
+-        raise NoReviewText(
+-            "LLM returned no review text: the model ended its turn without "
+-            "producing a text answer (it may have exhausted its tool-call "
+-            "budget)."
+@@ -145,17 +160,2 @@
+         )
+-    result = json.loads(cleaned)
+-    result["general_comment"] = (
+-        f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{result.get('general_comment', '')}"
+     )
+-    return result
+-
+-
+-def _validate_review(json_text: str, diff_text: str) -> str:
+-    """Validate the review JSON against the schema and the diff.
+-
+-    Returns an empty string if valid, or a newline-separated list of
+-    errors if invalid.
+-    """
+-    print(
+-        f"Tool call: validate_review(json_text=<{len(json_text)} chars>)",
+-        file=sys.stderr,
+@@ -163,9 +173,1 @@
+     try:
+-        data = json.loads(json_text)
+-    except json.JSONDecodeError as exc:
+-        return f"Invalid JSON: {exc}"
+-    errors = validate_review_json(data, diff_text)
+-    if errors:
+-        return "\n".join(errors)
+-    return ""
+-
+@@ -172,39 +185,1 @@
+ 
+-def review_diff(
+-    llm: GeminiClient,
+-    diff: str,
+-    description: str | None,
+-    read_file: Callable[[str], str],
+-    list_directory: Callable[[str], str],
+-    agents_md: str | None = None,
+-    max_diff_chars: int = 200_000,
+-    metrics: ReviewMetrics | None = None,
+-    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
+-) -> str:
+-    """Orchestrate a code review of *diff* using the given LLM.
+-
+-    Parameters
+-    ----------
+-    llm:
+-        The LLM client to use for generating the review.
+-    diff:
+-        The unified diff text to review.
+-    description:
+-        The merge proposal description or commit message (may be ``None``).
+-    read_file:
+-        A callable that reads a file from the merged working tree.
+-        Signature: ``(path: str) -> str``.
+-    list_directory:
+-        A callable that lists directory contents in the merged working tree.
+-        Signature: ``(path: str) -> str``.
+-    agents_md:
+-        The contents of the repository's AGENTS.md file, if one exists, to
+-        be sent to the LLM up front instead of relying on a ``read_file``
+-        tool call (may be ``None``).
+-    max_diff_chars:
+-        Maximum number of characters for the diff before truncation.
+-
+-    Returns
+-    -------
+-    str
+-        The formatted review comment, prefixed with the review marker.
+@@ -211,12 +253,1 @@
+     """
+-    if _is_empty_diff(diff):
+-        _populate_metrics_without_llm(metrics, llm.model, diff)
+-        return f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{EMPTY_DIFF_GENERAL_COMMENT}"
+-
+-    truncated_diff = _truncate_diff(diff, max_diff_chars)
+-    prompt = _build_prompt(truncated_diff, description)
+-
+-    tools: list[Callable[..., str]] = [read_file, list_directory]
+-    review_text = llm.review(
+-        prompt, tools, system_instruction=SYSTEM_INSTRUCTION,
+-        agents_md=agents_md, max_tool_calls=max_tool_calls,
+@@ -223,16 +261,3 @@
+     )
+ 
+-    _populate_metrics(metrics, llm, diff)
+-
+-    if not review_text:
+-        raise NoReviewText(
+-            "LLM returned no review text: the model ended its turn without "
+-            "producing a text answer (it may have exhausted its tool-call "
+-            "budget)."
+-        )
+-
+-    return f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{review_text}"
+-
+ 
+-def _build_structured_prompt(diff: str, description: str | None) -> list[types.Part]:
+-    """Construct the user-turn prompt parts for structured JSON review output.
+@@ -239,4 +266,1 @@
+ 
+-    The system instruction (persona, task, output-format rules) is sent
+-    separately via ``GenerateContentConfig.system_instruction``; this returns
+-    only the diff, description, and per-call instructions as ``Part``s.
+@@ -243,13 +270,1 @@
+     """
+-    parts: list[types.Part] = [
+-        types.Part.from_text(text=f"## Diff\n\n```\n{diff}\n```\n")
+-    ]
+-
+-    if description:
+-        parts.append(
+-            types.Part.from_text(text=f"## Description\n\n{description}\n")
+-        )
+-
+-    parts.append(types.Part.from_text(text=STRUCTURED_INSTRUCTIONS))
+-
+-    return parts
+@@ -256,4 +284,2 @@
+ 
+ 
+-def _extract_json(text: str) -> str:
+-    """Extract a JSON object from *text*, stripping markdown fences if present.
+@@ -260,28 +288,1 @@
+ 
+-    The LLM may wrap its output in a ```json ... ``` code fence.  This
+-    function strips such fences and returns the raw JSON string.
+-    """
+-    stripped = text.strip()
+-    if stripped.startswith("```"):
+-        # Remove the opening fence line (e.g. ```json or just ```)
+-        first_newline = stripped.find("\n")
+-        if first_newline != -1:
+-            stripped = stripped[first_newline + 1 :]
+-        # Remove the closing fence
+-        if stripped.endswith("```"):
+-            stripped = stripped[: stripped.rfind("```")]
+-    stripped = stripped.strip()
+-
+-    candidate = _extract_first_json_object(stripped)
+-    if candidate is not None:
+-        return candidate
+-
+-    return stripped
+-
+-
+-def _build_prompt(diff: str, description: str | None) -> list[types.Part]:
+-    """Construct the user-turn prompt parts containing the diff and description.
+-
+-    The system instruction (persona, task, tool guidance) is sent
+-    separately via ``GenerateContentConfig.system_instruction``; this returns
+-    only the diff, description, and per-call instructions as ``Part``s.
+@@ -288,13 +294,2 @@
+     """
+-    parts: list[types.Part] = [
+-        types.Part.from_text(text=f"## Diff\n\n```\n{diff}\n```\n")
+-    ]
+-
+-    if description:
+-        parts.append(
+-            types.Part.from_text(
+-                text=f"## Merge Proposal Description\n\n{description}\n"
+-            )
+-        )
+ 
+-    parts.append(types.Part.from_text(text=INSTRUCTIONS))
+@@ -301,2 +303,1 @@
+ 
+-    return parts
+@@ -303,4 +327,2 @@
+ 
+ 
+-def _extract_first_json_object(text: str) -> str | None:
+-    """Return the first parsable JSON object substring from *text*.
+@@ -307,2 +338,1 @@
+ 
+-    Returns ``None`` if no JSON object can be decoded.
+@@ -309,14 +344,1 @@
+     """
+-    decoder = json.JSONDecoder()
+-    offset = 0
+-
+-    while True:
+-        start = text.find("{", offset)
+-        if start == -1:
+-            return None
+-        try:
+-            _, end = decoder.raw_decode(text, start)
+-        except json.JSONDecodeError:
+-            offset = start + 1
+-            continue
+-        return text[start:end]
+@@ -327,18 +368,3 @@
+     return diff.strip() == ""
+ 
+ 
+-def _populate_metrics_without_llm(
+-    metrics: ReviewMetrics | None, model_name: str, diff: str
+-) -> None:
+-    """Fill *metrics* for paths that skip the LLM call entirely."""
+-    if metrics is None:
+-        return
+-    metrics.model_name = model_name
+-    metrics.tokens_thinking = 0
+-    metrics.tokens_input = 0
+-    metrics.tokens_output = 0
+-    metrics.diff_lines = len(diff.splitlines())
+-    metrics.diff_size_bytes = len(diff.encode("utf-8"))
+-    metrics.tool_call_limit = 0
+-    metrics.tool_call_limit_reached = False
+-    metrics.resume_attempts = 0
+@@ -345,4 +398,2 @@
+ 
+ 
+-def _populate_metrics(
+-    metrics: ReviewMetrics | None, llm: GeminiClient, diff: str
+@@ -349,2 +408,1 @@
+ ) -> None:
+-    """Fill *metrics* with LLM token counts and diff size info."""
+@@ -351,9 +410,2 @@
+     if metrics is None:
+         return
+-    metrics.model_name = llm.model
+-    metrics.tokens_thinking = llm.last_tokens_thinking
+-    metrics.tokens_input = llm.last_tokens_input
+-    metrics.tokens_output = llm.last_tokens_output
+-    metrics.tool_call_limit = llm.last_tool_call_limit
+-    metrics.tool_call_limit_reached = llm.last_tool_call_limit_reached
+-    metrics.resume_attempts = llm.last_resume_attempts
+diff --git a/tests/fake_llm.py b/tests/fake_llm.py
+deleted file mode 100644
+index ab2eb32..0000000
+--- a/tests/fake_llm.py
++++ /dev/null
+@@ -1,171 +0,0 @@
+-# Copyright 2026 Canonical Ltd.  This software is licensed under the
+-# GNU Affero General Public License version 3 (see the file LICENSE).
+-
+-from collections.abc import Callable
+-from dataclasses import dataclass, field
+-from typing import Any
+-
+-from google.genai import types
+-
+-from maas_code_reviewer.llm_client import GeminiClient
+-
+-
+-@dataclass
+-class ToolCall:
+-    """A tool invocation the fake should perform before returning."""
+-
+-    name: str
+-    args: dict[str, str]
+-
+-
+-@dataclass
+-class ScriptedResponse:
+-    """A single scripted response, optionally preceded by tool calls.
+-
+-    ``text`` is the model's text answer. When ``None``, the response carries
+-    no text — set ``pending_function_call`` to make it a function-call-only
+-    turn (as happens when automatic function calling stops on a further tool
+-    call rather than producing text), which leaves ``response.text`` as
+-    ``None`` so the caller's resume logic is exercised.
+-    """
+-
+-    text: str | None = None
+-    tool_calls: list[ToolCall] = field(default_factory=list)
+-    pending_function_call: ToolCall | None = None
+-    tokens_input: int = 0
+-    tokens_output: int = 0
+-    tokens_thinking: int = 0
+-    no_usage_metadata: bool = False
+-
+-
+-class FakeGenaiClient:
+-    """Drop-in fake for ``google.genai.Client``.
+-
+-    Provides a ``.chats`` attribute whose ``.create()`` method returns a
+-    ``_FakeChat`` that pops scripted responses.
+-
+-    After use, ``received_prompts``, ``received_tools``, and
+-    ``received_configs`` expose what was passed to each ``send_message()``
+-    / ``chats.create()`` call for assertion.
+-    """
+-
+-    def __init__(self, responses: list[ScriptedResponse] | None = None) -> None:
+-        self.received_prompts: list[Any] = []
+-        self.received_tools: list[list[Callable[..., str]]] = []
+-        self.received_raw_tools: list[list[Any]] = []
+-        self.received_configs: list[types.GenerateContentConfig | None] = []
+-        self.chats = _FakeChats(list(responses) if responses else [], self)
+-
+-
+-def FakeLLMClient(
+-    responses: list[ScriptedResponse] | None = None,
+-) -> GeminiClient:
+-    """Build a ``GeminiClient`` backed by a ``FakeGenaiClient``.
+-
+-    This exercises the real ``GeminiClient.review()`` code path while
+-    allowing tests to script the responses returned by the underlying
+-    genai client.
+-
+-    The ``FakeGenaiClient`` is accessible via the returned client's
+-    ``_client`` attribute for test assertions on ``received_prompts``
+-    and ``received_tools``.
+-    """
+-    fake_genai = FakeGenaiClient(responses)
+-    return GeminiClient(client=fake_genai)  # type: ignore[arg-type]
+-
+-
+-class _FakeChat:
+-    """Fake ``google.genai.chats.Chat`` that executes scripted responses.
+-
+-    Each call to ``send_message`` pops the next ``ScriptedResponse`` from
+-    the queue.  If the response includes ``tool_calls``, the fake invokes
+-    the corresponding tools (looked up by name in the config) with the
+-    given arguments before returning a response whose ``.text`` is the
+-    scripted text.
+-    """
+-
+-    def __init__(
+-        self,
+-        responses: list[ScriptedResponse],
+-        config: types.GenerateContentConfig | None,
+-        owner: FakeGenaiClient,
+-    ) -> None:
+-        self._responses = responses
+-        self._owner = owner
+-        self._all_tools: list[Any] = (
+-            list(config.tools) if config and config.tools else []
+-        )
+-        self._tools_by_name: dict[str, Callable[..., str]] = {}
+-        for tool in self._all_tools:
+-            if callable(tool):
+-                self._tools_by_name[tool.__name__] = tool
+-
+-    def send_message(
+-        self, message: str | list[Any]
+-    ) -> types.GenerateContentResponse:
+-        self._owner.received_prompts.append(message)
+-        self._owner.received_tools.append(list(self._tools_by_name.values()))
+-        self._owner.received_raw_tools.append(list(self._all_tools))
+-
+-        if not self._responses:
+-            raise RuntimeError("FakeGenaiClient: no more scripted responses")
+-
+-        response = self._responses.pop(0)
+-
+-        for tc in response.tool_calls:
+-            fn = self._tools_by_name.get(tc.name)
+-            if fn is None:
+-                raise RuntimeError(
+-                    f"FakeGenaiClient: tool '{tc.name}' not found in provided tools"
+-                )
+-            fn(**tc.args)
+-
+-        parts: list[types.Part] = []
+-        if response.text is not None:
+-            parts.append(types.Part(text=response.text))
+-        if response.pending_function_call is not None:
+-            fc = response.pending_function_call
+-            parts.append(
+-                types.Part(
+-                    function_call=types.FunctionCall(name=fc.name, args=fc.args)
+-                )
+-            )
+-        return types.GenerateContentResponse(
+-            candidates=[
+-                types.Candidate(
+-                    content=types.Content(
+-                        parts=parts,
+-                        role="model",
+-                    ),
+-                ),
+-            ],
+-            usage_metadata=None
+-            if response.no_usage_metadata
+-            else types.GenerateContentResponseUsageMetadata(
+-                prompt_token_count=response.tokens_input,
+-                candidates_token_count=response.tokens_output,
+-                thoughts_token_count=response.tokens_thinking,
+-                total_token_count=response.tokens_input
+-                + response.tokens_output
+-                + response.tokens_thinking,
+-            ),
+-        )
+-
+-
+-class _FakeChats:
+-    """Fake ``google.genai.Client.chats`` namespace."""
+-
+-    def __init__(
+-        self, responses: list[ScriptedResponse], owner: FakeGenaiClient
+-    ) -> None:
+-        self._responses = responses
+-        self._owner = owner
+-
+-    def create(
+-        self,
+-        *,
+-        model: str,
+-        config: types.GenerateContentConfig | None = None,
+-    ) -> _FakeChat:
+-        self._owner.received_configs.append(config)
+-        return _FakeChat(self._responses, config, self._owner)
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index dda2e16..0bad82b 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,4 +1,3 @@
+ # Copyright 2026 Canonical Ltd.  This software is licensed under the
+ # GNU Affero General Public License version 3 (see the file LICENSE).
+ 
+-import argparse
+@@ -15,2 +20,1 @@
+     _build_parser,
+-    _get_gemini_api_key,
+@@ -20,4 +23,1 @@
+     handle_list_lp_mps,
+-    handle_review_diff,
+-    handle_review_mp,
+-    handle_review_pr,
+@@ -25,1 +24,0 @@
+-    list_merge_proposals,
+@@ -26,3 +27,2 @@
+     main,
+-    review_merge_proposal,
+ )
+@@ -34,9 +38,3 @@
+ from tests.fake_git import FakeGitClient
+ from tests.fake_github import FakeGitHubClient
+ from tests.fake_launchpad import FakeLaunchpadClient
+-from tests.fake_llm import FakeLLMClient, ScriptedResponse, ToolCall
+-
+-
+-def _prompt_text(parts: list) -> str:
+-    """Join Part/str prompt elements into a single string for assertions."""
+-    return "".join(getattr(p, "text", p) for p in parts)
+@@ -280,6 +76,3 @@
+         args = parser.parse_args([])
+         assert args.command is None
+ 
+-    def test_review_mp_parses_mp_url(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+@@ -287,11 +101,1 @@
+         args = parser.parse_args(
+-            [
+-                "review-mp",
+-                "-g",
+-                str(key_file),
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+-        )
+-        assert args.command == "review-mp"
+-        assert (
+-            args.mp_url == "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+@@ -299,8 +108,3 @@
+         assert args.dry_run is False
+         assert args.launchpad_credentials is None
+-        assert args.gemini_api_key_file == str(key_file)
+-        assert args.model == "gemini-3-flash-preview"
+ 
+-    def test_review_mp_parses_dry_run(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+@@ -308,3 +114,2 @@
+         args = parser.parse_args(
+             [
+-                "review-mp",
+@@ -311,4 +121,1 @@
+                 "--dry-run",
+-                "-g",
+-                str(key_file),
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+@@ -315,6 +123,3 @@
+             ]
+         )
+         assert args.dry_run is True
+-    def test_review_mp_parses_launchpad_credentials(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+@@ -322,12 +128,1 @@
+         parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-mp",
+-                "--launchpad-credentials",
+-                "/path/to/creds",
+-                "-g",
+-                str(key_file),
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+-        )
+-        assert args.launchpad_credentials == "/path/to/creds"
+@@ -334,4 +132,1 @@
+ 
+-    def test_review_mp_parses_gemini_api_key_file(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "gemini.key"
+-        key_file.write_text("my-secret-key\n")
+@@ -338,10 +134,1 @@
+         parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-mp",
+-                "--gemini-api-key-file",
+-                str(key_file),
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+-        )
+-        assert args.gemini_api_key_file == str(key_file)
+@@ -348,20 +138,2 @@
+ 
+-    def test_review_mp_model_defaults_to_gemini_3_flash_preview(
+-        self, tmp_path: Path
+-    ) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-mp",
+-                "-g",
+-                str(key_file),
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+-        )
+-        assert args.model == "gemini-3-flash-preview"
+ 
+-    def test_review_mp_parses_model(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+@@ -368,12 +142,1 @@
+         parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-mp",
+-                "--model",
+-                "gemini-2.5-pro",
+-                "-g",
+-                str(key_file),
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+-        )
+-        assert args.model == "gemini-2.5-pro"
+@@ -380,4 +149,1 @@
+ 
+-    def test_review_mp_metrics_defaults_to_none(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+@@ -384,10 +151,1 @@
+         parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-mp",
+-                "-g",
+-                str(key_file),
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+-        )
+-        assert args.metrics is None
+@@ -394,22 +155,2 @@
+ 
+-    def test_review_mp_parses_metrics(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-mp",
+-                "-g",
+-                str(key_file),
+-                "--metrics",
+-                "/tmp/m.json",
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+-        )
+-        assert args.metrics == "/tmp/m.json"
+ 
+-    def test_review_mp_max_diff_chars_defaults_to_200000(
+-        self, tmp_path: Path
+-    ) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+@@ -417,7 +161,1 @@
+         args = parser.parse_args(
+-            [
+-                "review-mp",
+-                "-g",
+-                str(key_file),
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+@@ -424,2 +163,1 @@
+         )
+-        assert args.max_diff_chars == 200_000
+@@ -426,4 +170,1 @@
+ 
+-    def test_review_mp_parses_max_diff_chars(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+@@ -431,8 +174,2 @@
+         args = parser.parse_args(
+             [
+-                "review-mp",
+-                "-g",
+-                str(key_file),
+-                "--max-diff-chars",
+-                "50000",
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+@@ -439,3 +183,2 @@
+             ]
+         )
+-        assert args.max_diff_chars == 50_000
+@@ -442,4 +186,1 @@
+ 
+-    def test_review_mp_max_tool_calls_defaults(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+@@ -446,10 +188,1 @@
+         parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-mp",
+-                "-g",
+-                str(key_file),
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+-        )
+-        assert args.max_tool_calls == DEFAULT_MAX_TOOL_CALLS
+@@ -456,4 +192,1 @@
+ 
+-    def test_review_mp_parses_max_tool_calls(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+@@ -460,12 +194,1 @@
+         parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-mp",
+-                "-g",
+-                str(key_file),
+-                "--max-tool-calls",
+-                "50",
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+-        )
+-        assert args.max_tool_calls == 50
+@@ -477,36 +203,6 @@
+             main([])
+         assert exc_info.value.code == 1
+ 
+-    def test_no_review_text_exits_with_error(
+-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text("--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new\n")
+-        api_key_file = tmp_path / "key"
+-        api_key_file.write_text("fake-key")
+-
+-        no_text = ScriptedResponse(
+-            text=None,
+-            pending_function_call=ToolCall(
+-                name="list_directory", args={"path": "src"}
+-            ),
+-        )
+-        llm = FakeLLMClient([no_text, no_text, no_text, no_text])
+-
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+-            with pytest.raises(SystemExit) as exc_info:
+-                main(
+-                    [
+-                        "review-diff",
+-                        "-g",
+-                        str(api_key_file),
+-                        str(diff_file),
+-                    ]
+-                )
+-        assert exc_info.value.code == 1
+-        captured = capsys.readouterr()
+-        assert "no review text" in captured.err
+-
+     def test_list_lp_mps_delegates_to_handle_list_lp_mps(
+         self, capsys: pytest.CaptureFixture[str]
+     ) -> None:
+@@ -518,4 +214,3 @@
+         captured = capsys.readouterr()
+         assert lp_mp.web_link in captured.out
+ 
+-    def test_review_mp_command_delegates_to_handle_review_mp(
+@@ -533,7 +229,3 @@
+         )
+         lp.add_merge_proposal(mp)
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="Looks great.")])
+-
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -540,5 +233,4 @@
+ 
+         with (
+             patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+         ):
+@@ -546,6 +264,2 @@
+             main(
+                 [
+-                    "review-mp",
+-                    "--gemini-api-key-file",
+-                    str(api_key_file),
+-                    mp.url,
+@@ -552,6 +272,3 @@
+                 ]
+             )
+ 
+-        assert "Looks great." in comments[0].body
+-
+-
+@@ -623,5 +469,3 @@
+         assert review_date.isoformat() in captured.out
+ 
+ 
+-class TestHandleReviewMp:
+-    def test_posts_review_comment(self, tmp_path: Path) -> None:
+@@ -637,7 +521,2 @@
+         )
+         lp.add_merge_proposal(mp)
+-
+-        llm = FakeLLMClient([ScriptedResponse(text="Looks great.")])
+-
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -644,7 +524,5 @@
+ 
+         with (
+             patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+         ):
+             args = _build_parser().parse_args(
+-                ["review-mp", "--gemini-api-key-file", str(api_key_file), mp.url]
+@@ -652,2 +531,1 @@
+             )
+-            handle_review_mp(args)
+@@ -654,4 +533,1 @@
+ 
+-        comments = lp.get_comments_for(mp.api_url)
+-        assert len(comments) == 1
+-        assert "Looks great." in comments[0].body
+@@ -658,2 +540,1 @@
+ 
+-    def test_prints_already_reviewed(
+@@ -674,4 +557,3 @@
+             mp.api_url,
+             Comment(
+                 author="ci-bot",
+-                body="[maas-code-reviewer review]\n\nAlready done.",
+@@ -678,8 +561,3 @@
+                 date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+             ),
+         )
+-
+-        llm = FakeLLMClient()
+-
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -686,7 +565,5 @@
+ 
+         with (
+             patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+         ):
+             args = _build_parser().parse_args(
+-                ["review-mp", "--gemini-api-key-file", str(api_key_file), mp.url]
+@@ -694,2 +572,1 @@
+             )
+-            handle_review_mp(args)
+@@ -699,3 +579,1 @@
+ 
+-    def test_dry_run_prints_review_without_posting(
+-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@@ -711,8 +594,3 @@
+             target_git_path="refs/heads/main",
+         )
+         lp.add_merge_proposal(mp)
+-
+-        llm = FakeLLMClient([ScriptedResponse(text="Dry run review.")])
+-
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -719,11 +606,6 @@
+ 
+         with (
+             patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+         ):
+             args = _build_parser().parse_args(
+                 [
+-                    "review-mp",
+-                    "--dry-run",
+-                    "--gemini-api-key-file",
+-                    str(api_key_file),
+@@ -731,4 +616,3 @@
+                     mp.url,
+                 ]
+             )
+-            handle_review_mp(args)
+@@ -735,4 +620,1 @@
+ 
+-        captured = capsys.readouterr()
+-        assert "Dry run review." in captured.out
+-        assert len(lp.get_comments_for(mp.api_url)) == 0
+@@ -739,12 +627,2 @@
+ 
+-    def test_missing_gemini_api_key_exits_with_error(
+-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        """When no Gemini API key is available, the command exits with an error."""
+-        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+ 
+-        args = _build_parser().parse_args(
+-            [
+-                "review-mp",
+-                "https://code.launchpad.net/~user/project/+git/repo/+merge/1",
+-            ]
+@@ -752,3 +648,1 @@
+ 
+-        with pytest.raises(SystemExit) as exc_info:
+-            handle_review_mp(args)
+@@ -755,2 +661,1 @@
+ 
+-        assert exc_info.value.code == 1
+@@ -757,19 +667,1 @@
+         captured = capsys.readouterr()
+-        assert "GEMINI_API_KEY" in captured.err
+-
+-
+-class TestGetGeminiApiKey:
+-    def _make_args(
+-        self, gemini_api_key_file: str | None = None
+-    ) -> argparse.Namespace:
+-        return argparse.Namespace(gemini_api_key_file=gemini_api_key_file)
+-
+-    def test_reads_key_from_file(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("my-secret-key\n")
+-        assert _get_gemini_api_key(self._make_args(str(key_file))) == "my-secret-key"
+-
+-    def test_strips_whitespace_from_file(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("   my-key   \n\n")
+-        assert _get_gemini_api_key(self._make_args(str(key_file))) == "my-key"
+@@ -776,5 +669,1 @@
+ 
+-    def test_empty_file_returns_none(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("")
+-        assert _get_gemini_api_key(self._make_args(str(key_file))) is None
+@@ -781,5 +688,1 @@
+ 
+-    def test_whitespace_only_file_returns_none(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("   \n  \t\n")
+-        assert _get_gemini_api_key(self._make_args(str(key_file))) is None
+@@ -786,4 +705,1 @@
+ 
+-    def test_missing_file_returns_none(self, tmp_path: Path) -> None:
+-        missing = tmp_path / "does-not-exist"
+-        assert _get_gemini_api_key(self._make_args(str(missing))) is None
+@@ -790,4 +711,1 @@
+ 
+-    def test_reads_from_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+-        monkeypatch.setenv("GEMINI_API_KEY", "env-key")
+-        assert _get_gemini_api_key(self._make_args()) == "env-key"
+@@ -794,6 +728,1 @@
+ 
+-    def test_strips_whitespace_from_env_var(
+-        self, monkeypatch: pytest.MonkeyPatch
+-    ) -> None:
+-        monkeypatch.setenv("GEMINI_API_KEY", "  env-key\n")
+-        assert _get_gemini_api_key(self._make_args()) == "env-key"
+@@ -800,6 +742,1 @@
+ 
+-    def test_empty_env_var_returns_none(
+-        self, monkeypatch: pytest.MonkeyPatch
+-    ) -> None:
+-        monkeypatch.setenv("GEMINI_API_KEY", "")
+-        assert _get_gemini_api_key(self._make_args()) is None
+@@ -806,9 +744,2 @@
+ 
+-    def test_whitespace_only_env_var_returns_none(
+-        self, monkeypatch: pytest.MonkeyPatch
+-    ) -> None:
+-        monkeypatch.setenv("GEMINI_API_KEY", "   \n")
+-        assert _get_gemini_api_key(self._make_args()) is None
+ 
+-    def test_no_file_no_env_var_returns_none(
+-        self, monkeypatch: pytest.MonkeyPatch
+@@ -815,3 +749,1 @@
+     ) -> None:
+-        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+-        assert _get_gemini_api_key(self._make_args()) is None
+@@ -818,2 +790,1 @@
+ 
+-    def test_file_takes_precedence_over_env_var(
+@@ -820,6 +792,2 @@
+         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+     ) -> None:
+-        monkeypatch.setenv("GEMINI_API_KEY", "env-key")
+-        key_file = tmp_path / "key"
+-        key_file.write_text("file-key")
+-        assert _get_gemini_api_key(self._make_args(str(key_file))) == "file-key"
+@@ -934,8 +1013,3 @@
+     return target_repo, source_repo
+ 
+ 
+-class TestReviewMergeProposal:
+-    def test_returns_review_body(self, tmp_path: Path) -> None:
+-        """MP exists, not yet reviewed — review body is returned."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+@@ -942,9 +1025,1 @@
+ 
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+@@ -951,2 +1036,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="LGTM, no issues found.")])
+@@ -953,2 +1043,1 @@
+ 
+-        result = review_merge_proposal(lp, git, llm, mp.url)
+@@ -955,6 +1053,1 @@
+ 
+-        assert result is not None
+-        assert result.startswith(REVIEW_MARKER)
+-        assert "LGTM, no issues found." in result
+-        # Posting is the caller's responsibility — nothing posted here
+-        assert lp.get_comments_for(mp.api_url) == []
+@@ -961,5 +1064,1 @@
+ 
+-    def test_already_reviewed_mp_returns_none(self, tmp_path: Path) -> None:
+-        """An MP with an existing review is skipped."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+@@ -966,19 +1087,2 @@
+ 
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+-        lp.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="ci-bot",
+-                body="[maas-code-reviewer review]\n\nPrevious review.",
+-                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+-            ),
+-        )
+ 
+-        llm = FakeLLMClient()  # no responses needed — should not be called
+@@ -985,2 +1105,1 @@
+ 
+-        result = review_merge_proposal(lp, git, llm, mp.url)
+@@ -987,5 +1111,1 @@
+ 
+-        assert result is None
+-        # No new comment should have been posted
+-        comments = lp.get_comments_for(mp.api_url)
+-        assert len(comments) == 1  # only the pre-existing one
+@@ -992,5 +1114,1 @@
+ 
+-    def test_returns_review_body_without_posting(self, tmp_path: Path) -> None:
+-        """review_merge_proposal returns the body without posting a comment."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+@@ -997,7 +1119,1 @@
+ 
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+@@ -1004,2 +1132,1 @@
+         )
+-        lp.add_merge_proposal(mp)
+@@ -1006,2 +1142,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="Some review text.")])
+@@ -1008,2 +1149,1 @@
+ 
+-        result = review_merge_proposal(lp, git, llm, mp.url)
+@@ -1010,6 +1157,1 @@
+ 
+-        assert result is not None
+-        assert "Some review text." in result
+-        # Posting is the caller's responsibility — nothing posted here
+-        comments = lp.get_comments_for(mp.api_url)
+-        assert len(comments) == 0
+@@ -1016,9 +1164,1 @@
+ 
+-    def test_diff_is_passed_to_llm(self, tmp_path: Path) -> None:
+-        """The diff content is included in the prompt sent to the LLM."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(
+-            tmp_path,
+-            git,
+-            target_files={"code.py": "def hello():\n    pass\n"},
+-            source_files={"code.py": "def hello():\n    print('hi')\n"},
+@@ -1026,7 +1171,1 @@
+ 
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+@@ -1033,2 +1183,1 @@
+         )
+-        lp.add_merge_proposal(mp)
+@@ -1035,2 +1185,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="Nice change.")])
+@@ -1037,2 +1192,1 @@
+ 
+-        review_merge_proposal(lp, git, llm, mp.url)
+@@ -1039,4 +1203,1 @@
+ 
+-        prompt = _prompt_text(llm._client.received_prompts[0])
+-        assert "pass" in prompt
+-        assert "print" in prompt
+@@ -1043,5 +1212,1 @@
+ 
+-    def test_description_is_passed_to_llm(self, tmp_path: Path) -> None:
+-        """The MP description is included in the prompt."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+@@ -1048,8 +1215,1 @@
+ 
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-            description="Fix the widget rendering bug",
+@@ -1056,4 +1221,1 @@
+         )
+-        lp.add_merge_proposal(mp)
+-
+-        llm = FakeLLMClient([ScriptedResponse(text="Looks good.")])
+@@ -1060,2 +1223,1 @@
+ 
+-        review_merge_proposal(lp, git, llm, mp.url)
+@@ -1062,3 +1233,1 @@
+ 
+-        prompt = _prompt_text(llm._client.received_prompts[0])
+-        assert "Fix the widget rendering bug" in prompt
+@@ -1065,5 +1237,1 @@
+ 
+-    def test_commit_message_used_when_no_description(self, tmp_path: Path) -> None:
+-        """Falls back to commit_message when description is None."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+@@ -1070,11 +1246,1 @@
+ 
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-            description=None,
+-            commit_message="Refactor auth module",
+-        )
+-        lp.add_merge_proposal(mp)
+@@ -1081,4 +1249,2 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="OK.")])
+ 
+-        review_merge_proposal(lp, git, llm, mp.url)
+@@ -1085,12 +1259,2 @@
+ 
+-        prompt = _prompt_text(llm._client.received_prompts[0])
+-        assert "Refactor auth module" in prompt
+ 
+-    def test_tools_provided_to_llm_can_read_files(self, tmp_path: Path) -> None:
+-        """The read_file tool provided to the LLM can read from the repo."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(
+-            tmp_path,
+-            git,
+-            target_files={"AGENTS.md": "# Rules\nBe nice.\n", "file.txt": "a\n"},
+-            source_files={"file.txt": "b\n"},
+@@ -1098,11 +1272,2 @@
+ 
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+ 
+-        from tests.fake_llm import ToolCall
+@@ -1109,11 +1279,1 @@
+ 
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="Reviewed with context.",
+-                    tool_calls=[
+-                        ToolCall(name="read_file", args={"path": "AGENTS.md"}),
+-                    ],
+-                ),
+-            ]
+-        )
+@@ -1120,2 +1283,1 @@
+ 
+-        result = review_merge_proposal(lp, git, llm, mp.url)
+@@ -1122,3 +1299,1 @@
+ 
+-        assert result is not None
+-        assert "Reviewed with context." in result
+@@ -1125,3 +1305,1 @@
+ 
+-    def test_read_file_tool_returns_error_for_missing_file(
+-        self, tmp_path: Path
+@@ -1128,4 +1308,1 @@
+     ) -> None:
+-        """The read_file tool returns an error string for nonexistent files."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+@@ -1132,9 +1312,1 @@
+ 
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+@@ -1141,14 +1314,1 @@
+ 
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="File missing, moving on.",
+-                    tool_calls=[
+-                        ToolCall(
+-                            name="read_file",
+-                            args={"path": "nonexistent.py"},
+-                        ),
+-                    ],
+-                ),
+-            ]
+-        )
+@@ -1155,278 +1316,1 @@
+ 
+-        result = review_merge_proposal(lp, git, llm, mp.url)
+-
+-        assert result is not None
+-        assert "File missing, moving on." in result
+-
+-    def test_tools_provided_to_llm_can_list_directory(self, tmp_path: Path) -> None:
+-        """The list_directory tool provided to the LLM can list repo contents."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(
+-            tmp_path,
+-            git,
+-            target_files={"src/main.py": "print('hi')\n", "src/utils.py": "pass\n"},
+-            source_files={"src/main.py": "print('hello')\n"},
+-        )
+-
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="Checked src directory.",
+-                    tool_calls=[
+-                        ToolCall(name="list_directory", args={"path": "src"}),
+-                    ],
+-                ),
+-            ]
+-        )
+-
+-        result = review_merge_proposal(lp, git, llm, mp.url)
+-
+-        assert result is not None
+-        assert "Checked src directory." in result
+-
+-    def test_list_directory_tool_returns_error_for_missing_dir(
+-        self, tmp_path: Path
+-    ) -> None:
+-        """The list_directory tool returns an error for nonexistent directories."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+-
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="Dir not found, continuing.",
+-                    tool_calls=[
+-                        ToolCall(
+-                            name="list_directory",
+-                            args={"path": "nonexistent"},
+-                        ),
+-                    ],
+-                ),
+-            ]
+-        )
+-
+-        result = review_merge_proposal(lp, git, llm, mp.url)
+-
+-        assert result is not None
+-        assert "Dir not found, continuing." in result
+-
+-    def test_review_comment_has_correct_format(self, tmp_path: Path) -> None:
+-        """The posted comment starts with the marker, then blank line, then review."""
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+-
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+-
+-        llm = FakeLLMClient([ScriptedResponse(text="Review body here.")])
+-
+-        result = review_merge_proposal(lp, git, llm, mp.url)
+-
+-        expected = (
+-            f"[maas-code-reviewer review]\n\n{REVIEW_PREAMBLE}\n\nReview body here."
+-        )
+-        assert result == expected
+-
+-    def test_populates_metrics(self, tmp_path: Path) -> None:
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+-
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="OK.", tokens_input=10, tokens_output=20, tokens_thinking=30
+-                )
+-            ]
+-        )
+-
+-        metrics = ReviewMetrics()
+-        result = review_merge_proposal(lp, git, llm, mp.url, metrics=metrics)
+-
+-        assert result is not None
+-        assert metrics.model_name == "gemini-3-flash-preview"
+-        assert metrics.tokens_input == 10
+-        assert metrics.tokens_output == 20
+-        assert metrics.tokens_thinking == 30
+-        assert metrics.diff_lines > 0
+-        assert metrics.diff_size_bytes > 0
+-
+-
+-class TestBuildParserReviewDiff:
+-    def test_review_diff_parses_diff_file(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text("--- a/f\n+++ b/f\n")
+-        parser = _build_parser()
+-        args = parser.parse_args(["review-diff", "-g", str(key_file), str(diff_file)])
+-        assert args.command == "review-diff"
+-        assert args.diff_file == str(diff_file)
+-
+-    def test_review_diff_parses_stdin_dash(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(["review-diff", "-g", str(key_file), "-"])
+-        assert args.diff_file == "-"
+-
+-    def test_review_diff_repo_dir_defaults_to_none(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(["review-diff", "-g", str(key_file), "-"])
+-        assert args.repo_dir is None
+-
+-    def test_review_diff_parses_repo_dir(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(
+-            ["review-diff", "-g", str(key_file), "--repo-dir", str(tmp_path), "-"]
+-        )
+-        assert args.repo_dir == str(tmp_path)
+-
+-    def test_review_diff_model_defaults_to_gemini_3_flash_preview(
+-        self, tmp_path: Path
+-    ) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(["review-diff", "-g", str(key_file), "-"])
+-        assert args.model == "gemini-3-flash-preview"
+-
+-    def test_review_diff_parses_model(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(
+-            ["review-diff", "--model", "gemini-2.5-pro", "-g", str(key_file), "-"]
+-        )
+-        assert args.model == "gemini-2.5-pro"
+-
+-    def test_review_diff_gemini_api_key_file_defaults_to_none(self) -> None:
+-        parser = _build_parser()
+-        args = parser.parse_args(["review-diff", "patch.diff"])
+-        assert args.gemini_api_key_file is None
+-
+-    def test_review_diff_json_output_defaults_to_none(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(["review-diff", "-g", str(key_file), "-"])
+-        assert args.json_output is None
+-
+-    def test_review_diff_parses_json_output(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        output_file = tmp_path / "review.json"
+-        parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-diff",
+-                "-g",
+-                str(key_file),
+-                "--json-output",
+-                str(output_file),
+-                "-",
+-            ]
+-        )
+-        assert args.json_output == str(output_file)
+-
+-    def test_review_diff_metrics_defaults_to_none(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(["review-diff", "-g", str(key_file), "-"])
+-        assert args.metrics is None
+-
+-    def test_review_diff_parses_metrics(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(
+-            ["review-diff", "-g", str(key_file), "--metrics", "/tmp/m.json", "-"]
+-        )
+-        assert args.metrics == "/tmp/m.json"
+-
+-    def test_review_diff_max_diff_chars_defaults_to_200000(
+-        self, tmp_path: Path
+-    ) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(["review-diff", "-g", str(key_file), "-"])
+-        assert args.max_diff_chars == 200_000
+-
+-    def test_review_diff_parses_max_diff_chars(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-diff",
+-                "-g",
+-                str(key_file),
+-                "--max-diff-chars",
+-                "100000",
+-                "-",
+-            ]
+-        )
+-        assert args.max_diff_chars == 100_000
+-
+-    def test_review_diff_max_tool_calls_defaults(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(["review-diff", "-g", str(key_file), "-"])
+-        assert args.max_tool_calls == DEFAULT_MAX_TOOL_CALLS
+-
+-    def test_review_diff_parses_max_tool_calls(self, tmp_path: Path) -> None:
+-        key_file = tmp_path / "key"
+-        key_file.write_text("test-key")
+-        parser = _build_parser()
+-        args = parser.parse_args(
+-            [
+-                "review-diff",
+-                "-g",
+-                str(key_file),
+-                "--max-tool-calls",
+-                "15",
+-                "-",
+-            ]
+-        )
+-        assert args.max_tool_calls == 15
+-
+-
+@@ -1461,3 +1335,1 @@
+ 
+-class TestHandleReviewDiff:
+-    def test_reads_diff_from_file_and_prints_review(
+@@ -1464,4 +1337,2 @@
+         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+     ) -> None:
+-        """review-diff reads a diff from a file path and prints the LLM review."""
+-        diff_content = "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+@@ -1468,5 +1340,1 @@
+         diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text(diff_content)
+-
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1473,2 +1342,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="All good.")])
+@@ -1475,2 +1344,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+@@ -1477,5 +1348,2 @@
+             args = _build_parser().parse_args(
+                 [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+@@ -1484,4 +1354,3 @@
+                     str(diff_file),
+                 ]
+             )
+-            handle_review_diff(args)
+@@ -1488,4 +1358,2 @@
+ 
+         captured = capsys.readouterr()
+-        assert "All good." in captured.out
+-        assert REVIEW_MARKER in captured.out
+@@ -1492,7 +1363,5 @@
+ 
+     def test_reads_diff_from_stdin(
+         self,
+-        capsys: pytest.CaptureFixture[str],
+         monkeypatch: pytest.MonkeyPatch,
+     ) -> None:
+-        """review-diff reads a diff from stdin when diff_file is '-'."""
+@@ -1500,4 +1370,2 @@
+         import io
+ 
+-        diff_content = "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+-        monkeypatch.setattr("sys.stdin", io.StringIO(diff_content))
+@@ -1504,3 +1373,1 @@
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1507,2 +1375,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="Stdin review.")])
+@@ -1509,2 +1377,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+@@ -1511,5 +1381,2 @@
+             args = _build_parser().parse_args(
+                 [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+@@ -1519,3 +1390,2 @@
+                 ]
+             )
+-            handle_review_diff(args)
+@@ -1522,3 +1393,1 @@
+ 
+-        captured = capsys.readouterr()
+-        assert "Stdin review." in captured.out
+@@ -1525,3 +1400,1 @@
+ 
+-    def test_uses_custom_repo_dir_for_tools(
+-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@@ -1528,6 +1403,1 @@
+     ) -> None:
+-        """The --repo-dir is used as the base for read_file and list_directory tools."""
+-        repo_dir = tmp_path / "myrepo"
+-        repo_dir.mkdir()
+-        (repo_dir / "AGENTS.md").write_text("# Rules\nBe nice.\n")
+-
+@@ -1534,2 +1405,1 @@
+         diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text("--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n")
+@@ -1536,3 +1407,1 @@
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1539,9 +1410,1 @@
+ 
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="Used context.",
+-                    tool_calls=[ToolCall(name="read_file", args={"path": "AGENTS.md"})],
+-                )
+-            ]
+-        )
+@@ -1548,2 +1412,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+@@ -1550,5 +1418,2 @@
+             args = _build_parser().parse_args(
+                 [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+@@ -1555,2 +1421,1 @@
+                     "--repo-dir",
+-                    str(repo_dir),
+@@ -1558,6 +1429,2 @@
+                 ]
+             )
+-            handle_review_diff(args)
+-
+-        captured = capsys.readouterr()
+-        assert "Used context." in captured.out
+@@ -1564,9 +1432,1 @@
+ 
+-    def test_default_repo_dir_is_cwd(
+-        self,
+-        tmp_path: Path,
+-        capsys: pytest.CaptureFixture[str],
+-        monkeypatch: pytest.MonkeyPatch,
+-    ) -> None:
+-        """When --repo-dir is omitted, the current working directory is used."""
+-        monkeypatch.chdir(tmp_path)
+@@ -1574,2 +1438,1 @@
+         diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text("--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n")
+@@ -1576,3 +1440,1 @@
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1579,2 +1442,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="CWD review.")])
+@@ -1581,2 +1444,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+@@ -1583,2 +1448,1 @@
+             args = _build_parser().parse_args(
+-                ["review-diff", "-g", str(api_key_file), str(diff_file)]
+@@ -1585,2 +1458,1 @@
+             )
+-            handle_review_diff(args)
+@@ -1587,3 +1460,1 @@
+ 
+-        captured = capsys.readouterr()
+-        assert "CWD review." in captured.out
+@@ -1590,3 +1463,1 @@
+ 
+-    def test_diff_content_passed_to_llm(
+-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@@ -1593,5 +1466,1 @@
+     ) -> None:
+-        """The diff text from the file is included in the prompt sent to the LLM."""
+-        diff_content = (
+-            "--- a/widget.py\n+++ b/widget.py\n@@ -1 +1 @@\n-broken\n+fixed\n"
+-        )
+@@ -1598,2 +1468,1 @@
+         diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text(diff_content)
+@@ -1600,3 +1470,1 @@
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1603,2 +1474,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="Nice fix.")])
+@@ -1605,2 +1476,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+@@ -1607,5 +1480,2 @@
+             args = _build_parser().parse_args(
+                 [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+@@ -1615,7 +1497,2 @@
+                 ]
+             )
+-            handle_review_diff(args)
+-
+-        prompt = _prompt_text(llm._client.received_prompts[0])
+-        assert "broken" in prompt
+-        assert "fixed" in prompt
+@@ -1623,4 +1508,1 @@
+ 
+-class TestHandleReviewDiffJsonOutput:
+-    def test_writes_json_file_when_json_output_given(self, tmp_path: Path) -> None:
+-        """When --json-output is provided, a JSON file is written instead of stdout."""
+@@ -1627,5 +1513,1 @@
+         diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text(_STRUCTURED_DIFF)
+-
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1632,4 +1515,3 @@
+ 
+         output_file = tmp_path / "review.json"
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_STRUCTURED_RESPONSE)])
+@@ -1636,2 +1519,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+@@ -1638,5 +1523,2 @@
+             args = _build_parser().parse_args(
+                 [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+@@ -1645,6 +1530,4 @@
+                     "--json-output",
+                     str(output_file),
+-                    str(diff_file),
+                 ]
+             )
+-            handle_review_diff(args)
+@@ -1651,5 +1535,1 @@
+ 
+-        assert output_file.exists()
+-        data = json.loads(output_file.read_text())
+-        assert "general_comment" in data
+-        assert "inline_comments" in data
+@@ -1656,4 +1541,1 @@
+ 
+-    def test_json_output_contains_general_comment(self, tmp_path: Path) -> None:
+-        diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text(_STRUCTURED_DIFF)
+@@ -1660,3 +1548,1 @@
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1663,4 +1551,3 @@
+ 
+         output_file = tmp_path / "review.json"
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_STRUCTURED_RESPONSE)])
+@@ -1667,2 +1555,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+@@ -1669,5 +1559,2 @@
+             args = _build_parser().parse_args(
+                 [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+@@ -1676,6 +1568,4 @@
+                     "--json-output",
+                     str(output_file),
+-                    str(diff_file),
+                 ]
+             )
+-            handle_review_diff(args)
+@@ -1682,5 +1573,1 @@
+ 
+-        data = json.loads(output_file.read_text())
+-        assert data["general_comment"] == (
+-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
+-        )
+@@ -1687,4 +1580,1 @@
+ 
+-    def test_json_output_contains_inline_comments(self, tmp_path: Path) -> None:
+-        diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text(_STRUCTURED_DIFF)
+@@ -1691,3 +1591,1 @@
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1696,2 +1630,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_STRUCTURED_RESPONSE)])
+@@ -1698,2 +1650,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+@@ -1700,5 +1654,2 @@
+             args = _build_parser().parse_args(
+                 [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+@@ -1705,4 +1657,2 @@
+                     "--repo-dir",
+                     str(tmp_path),
+-                    "--json-output",
+-                    str(output_file),
+@@ -1710,3 +1663,2 @@
+                 ]
+             )
+-            handle_review_diff(args)
+@@ -1713,3 +1666,1 @@
+ 
+-        data = json.loads(output_file.read_text())
+-        assert data["inline_comments"]["src/foo.py"]["2"] == "Good addition."
+@@ -1716,2 +1682,1 @@
+ 
+-    def test_json_output_does_not_print_to_stdout(
+@@ -1718,12 +1684,5 @@
+         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+     ) -> None:
+-        """When --json-output is given, nothing is printed to stdout."""
+         diff_file = tmp_path / "patch.diff"
+         diff_file.write_text(_STRUCTURED_DIFF)
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+-
+-        output_file = tmp_path / "review.json"
+-
+-        llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_STRUCTURED_RESPONSE)])
+@@ -1730,2 +1690,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+@@ -1732,5 +1694,2 @@
+             args = _build_parser().parse_args(
+                 [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+@@ -1737,4 +1697,2 @@
+                     "--repo-dir",
+                     str(tmp_path),
+-                    "--json-output",
+-                    str(output_file),
+@@ -1741,4 +1700,3 @@
+                     str(diff_file),
+                 ]
+             )
+-            handle_review_diff(args)
+@@ -1745,3 +1704,1 @@
+ 
+-        captured = capsys.readouterr()
+-        assert captured.out == ""
+@@ -1748,3 +1707,1 @@
+ 
+-    def test_no_json_output_still_prints_plain_text(
+-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@@ -1751,2 +1712,1 @@
+     ) -> None:
+-        """When --json-output is absent, plain text review is printed to stdout."""
+@@ -1753,5 +1714,3 @@
+         diff_file = tmp_path / "patch.diff"
+         diff_file.write_text(_STRUCTURED_DIFF)
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1758,2 +1719,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="Plain text review.")])
+@@ -1760,13 +1723,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+-            args = _build_parser().parse_args(
+-                [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+-                    "--repo-dir",
+-                    str(tmp_path),
+-                    str(diff_file),
+-                ]
+-            )
+-            handle_review_diff(args)
+@@ -1774,3 +1743,1 @@
+         captured = capsys.readouterr()
+-        assert "Plain text review." in captured.out
+-        assert REVIEW_MARKER in captured.out
+@@ -1777,3 +1747,1 @@
+ 
+-    def test_json_output_uses_review_diff_structured(self, tmp_path: Path) -> None:
+-        """When --json-output is set, review_diff_structured is called."""
+@@ -1780,7 +1752,4 @@
+         diff_file = tmp_path / "patch.diff"
+         diff_file.write_text(_STRUCTURED_DIFF)
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+-
+         output_file = tmp_path / "review.json"
+@@ -1787,4 +1776,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_STRUCTURED_RESPONSE)])
+-
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+@@ -1791,5 +1780,2 @@
+             args = _build_parser().parse_args(
+                 [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+@@ -1798,6 +1787,4 @@
+                     "--json-output",
+                     str(output_file),
+-                    str(diff_file),
+                 ]
+             )
+-            handle_review_diff(args)
+@@ -1804,3 +1792,1 @@
+ 
+-        tool_names = {t.__name__ for t in llm._client.received_tools[0]}
+-        assert "validate_review" in tool_names
+@@ -1807,2 +1799,1 @@
+ 
+-    def test_json_output_from_stdin(
+@@ -1809,3 +1801,2 @@
+         self,
+         tmp_path: Path,
+-        monkeypatch: pytest.MonkeyPatch,
+@@ -1812,3 +1804,1 @@
+     ) -> None:
+-        """--json-output works when reading the diff from stdin."""
+-        import io
+@@ -1815,5 +1842,2 @@
+ 
+-        monkeypatch.setattr("sys.stdin", io.StringIO(_STRUCTURED_DIFF))
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1820,4 +1848,3 @@
+ 
+         output_file = tmp_path / "review.json"
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_STRUCTURED_RESPONSE)])
+@@ -1824,3 +1852,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+-            args = _build_parser().parse_args(
+@@ -1827,4 +1857,1 @@
+                 [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+@@ -1833,12 +1863,6 @@
+                     "--json-output",
+                     str(output_file),
+-                    "-",
+                 ]
+             )
+-            handle_review_diff(args)
+ 
+         assert output_file.exists()
+-        data = json.loads(output_file.read_text())
+-        assert data["general_comment"] == (
+-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nNo issues."
+-        )
+@@ -1845,6 +1873,1 @@
+ 
+-    def test_missing_gemini_api_key_exits_with_error(
+-        self,
+-        tmp_path: Path,
+-        monkeypatch: pytest.MonkeyPatch,
+-        capsys: pytest.CaptureFixture[str],
+@@ -1851,3 +1876,1 @@
+     ) -> None:
+-        """When no Gemini API key is available, the command exits with an error."""
+-        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+@@ -1854,2 +1883,1 @@
+         diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text("--- a/foo\n+++ b/foo\n")
+@@ -1856,2 +1885,1 @@
+ 
+-        args = _build_parser().parse_args(["review-diff", str(diff_file)])
+@@ -1858,3 +1887,1 @@
+ 
+-        with pytest.raises(SystemExit) as exc_info:
+-            handle_review_diff(args)
+@@ -1861,4 +1905,3 @@
+ 
+         assert exc_info.value.code == 1
+         captured = capsys.readouterr()
+-        assert "GEMINI_API_KEY" in captured.err
+@@ -1865,4 +1911,1 @@
+ 
+-
+-class TestMainReviewDiff:
+-    def test_review_diff_command_delegates_to_handle_review_diff(
+@@ -1869,3 +1913,2 @@
+         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+     ) -> None:
+-        diff_content = "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+@@ -1872,2 +1916,1 @@
+         diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text(diff_content)
+@@ -1874,3 +1918,1 @@
+ 
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+@@ -1877,2 +1920,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="Main dispatch works.")])
+@@ -1879,12 +1924,1 @@
+ 
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+-            main(
+-                [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+-                    "--repo-dir",
+-                    str(tmp_path),
+-                    str(diff_file),
+-                ]
+-            )
+@@ -1892,4 +1942,1 @@
+         captured = capsys.readouterr()
+-        assert "Main dispatch works." in captured.out
+-
+-
+@@ -1916,7 +1946,1 @@
+ 
+-_PR_EMPTY_RESPONSE = json.dumps(
+-    {
+-        "general_comment": "No issues.",
+-        "inline_comments": {},
+-    }
+-)
+@@ -1924,10 +1955,1 @@
+ 
+-class TestBuildParserReviewPr:
+-    def test_review_pr_parses_pr_url(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "https://github.com/owner/repo/pull/42",
+-            ]
+@@ -1934,2 +1959,1 @@
+         )
+-        assert args.pr_url == "https://github.com/owner/repo/pull/42"
+@@ -1936,10 +1961,1 @@
+ 
+-    def test_review_pr_requires_pr_url(self) -> None:
+-        with pytest.raises(SystemExit):
+-            _build_parser().parse_args(["review-pr", "-g", "key.txt"])
+-
+-    def test_review_pr_gemini_api_key_file_defaults_to_none(self) -> None:
+-        args = _build_parser().parse_args(
+-            ["review-pr", "https://github.com/owner/repo/pull/1"]
+-        )
+-        assert args.gemini_api_key_file is None
+@@ -1946,9 +1977,1 @@
+ 
+-    def test_review_pr_github_token_defaults_to_none(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+@@ -1955,2 +1984,1 @@
+         )
+-        assert args.github_token is None
+@@ -1957,24 +1986,2 @@
+ 
+-    def test_review_pr_parses_github_token(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "--github-token",
+-                "ghp_abc123",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+-        )
+-        assert args.github_token == "ghp_abc123"
+ 
+-    def test_review_pr_model_defaults_to_gemini_3_flash_preview(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+-        )
+-        assert args.model == "gemini-3-flash-preview"
+@@ -1981,13 +1996,1 @@
+ 
+-    def test_review_pr_parses_model(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "--model",
+-                "gemini-pro",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+-        )
+-        assert args.model == "gemini-pro"
+@@ -1994,11 +2002,1 @@
+ 
+-    def test_review_pr_repo_dir_defaults_to_none(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+-        )
+-        assert args.repo_dir is None
+@@ -2005,22 +2005,2 @@
+ 
+-    def test_review_pr_parses_repo_dir(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "--repo-dir",
+-                "/some/path",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+-        )
+-        assert args.repo_dir == "/some/path"
+ 
+-    def test_review_pr_dry_run_defaults_to_false(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+@@ -2027,2 +2029,1 @@
+         )
+-        assert args.dry_run is False
+@@ -2029,12 +2031,1 @@
+ 
+-    def test_review_pr_parses_dry_run(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "--dry-run",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+-        )
+-        assert args.dry_run is True
+@@ -2041,6 +2033,1 @@
+ 
+-    def test_review_pr_metrics_defaults_to_none(self) -> None:
+-        args = _build_parser().parse_args(
+-            ["review-pr", "-g", "key.txt", "https://github.com/owner/repo/pull/1"]
+-        )
+-        assert args.metrics is None
+@@ -2047,197 +2036,1 @@
+ 
+-    def test_review_pr_parses_metrics(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "--metrics",
+-                "/tmp/m.json",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+-        )
+-        assert args.metrics == "/tmp/m.json"
+-
+-    def test_review_pr_max_diff_chars_defaults_to_200000(self) -> None:
+-        args = _build_parser().parse_args(
+-            ["review-pr", "-g", "key.txt", "https://github.com/owner/repo/pull/1"]
+-        )
+-        assert args.max_diff_chars == 200_000
+-
+-    def test_review_pr_parses_max_diff_chars(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "--max-diff-chars",
+-                "300000",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+-        )
+-        assert args.max_diff_chars == 300_000
+-
+-    def test_review_pr_max_tool_calls_defaults(self) -> None:
+-        args = _build_parser().parse_args(
+-            ["review-pr", "-g", "key.txt", "https://github.com/owner/repo/pull/1"]
+-        )
+-        assert args.max_tool_calls == DEFAULT_MAX_TOOL_CALLS
+-
+-    def test_review_pr_parses_max_tool_calls(self) -> None:
+-        args = _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                "key.txt",
+-                "--max-tool-calls",
+-                "60",
+-                "https://github.com/owner/repo/pull/1",
+-            ]
+-        )
+-        assert args.max_tool_calls == 60
+-
+-
+-class TestHandleReviewPr:
+-    def _make_args(
+-        self,
+-        tmp_path: Path,
+-        *,
+-        pr_url: str = "https://github.com/owner/repo/pull/42",
+-        github_token: str | None = "ghp_test",
+-        gemini_api_key_file: str | None = "__default__",
+-        repo_dir: str | None = None,
+-        dry_run: bool = False,
+-        max_diff_chars: int | None = None,
+-    ) -> argparse.Namespace:
+-        if gemini_api_key_file == "__default__":
+-            api_key_file = tmp_path / "api_key.txt"
+-            api_key_file.write_text("fake-key\n")
+-            gemini_api_key_file = str(api_key_file)
+-        return _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                *(["-g", gemini_api_key_file] if gemini_api_key_file else []),
+-                *(["--github-token", github_token] if github_token else []),
+-                *(["--repo-dir", repo_dir] if repo_dir else []),
+-                *(["--dry-run"] if dry_run else []),
+-                *(
+-                    ["--max-diff-chars", str(max_diff_chars)]
+-                    if max_diff_chars is not None
+-                    else []
+-                ),
+-                pr_url,
+-            ]
+-        )
+-
+-    def test_posts_review_after_fetching_diff(self, tmp_path: Path) -> None:
+-        """End-to-end: diff is fetched, reviewed, and posted to GitHub."""
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request(
+-            "owner", "repo", 42, diff=_PR_DIFF, description="Add sys import"
+-        )
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_REVIEW_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(self._make_args(tmp_path, repo_dir=str(tmp_path)))
+-
+-        reviews = github_client.get_posted_reviews("owner", "repo", 42)
+-        assert len(reviews) == 1
+-        assert reviews[0]["body"] == (
+-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good overall."
+-        )
+-
+-    def test_inline_comments_are_posted(self, tmp_path: Path) -> None:
+-        """Inline comments from the LLM response are included in the posted review."""
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_REVIEW_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(self._make_args(tmp_path, repo_dir=str(tmp_path)))
+-
+-        reviews = github_client.get_posted_reviews("owner", "repo", 42)
+-        comments = reviews[0]["comments"]
+-        assert len(comments) == 1
+-        assert comments[0]["path"] == "src/foo.py"
+-        assert comments[0]["line"] == 2
+-        assert comments[0]["body"] == "Nice import."
+-
+-    def test_no_inline_comments_when_empty(self, tmp_path: Path) -> None:
+-        """When the LLM returns no inline comments, an empty list is posted."""
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(self._make_args(tmp_path, repo_dir=str(tmp_path)))
+-
+-        reviews = github_client.get_posted_reviews("owner", "repo", 42)
+-        assert reviews[0]["comments"] == []
+-
+-    def test_empty_diff_posts_default_no_changes_review(self, tmp_path: Path) -> None:
+-        """When the PR diff is empty, post a deterministic no-changes review."""
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff="")
+-        llm = FakeLLMClient()
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(self._make_args(tmp_path, repo_dir=str(tmp_path)))
+-
+-        reviews = github_client.get_posted_reviews("owner", "repo", 42)
+-        assert len(reviews) == 1
+-        assert reviews[0]["body"] == EMPTY_DIFF_GENERAL_COMMENT
+-        assert reviews[0]["comments"] == []
+-        assert llm._client.received_prompts == []
+-
+-    def test_dry_run_prints_json_to_stdout(
+-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        """With --dry-run, the JSON review is printed to stdout, not posted."""
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_REVIEW_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(
+-                self._make_args(tmp_path, dry_run=True, repo_dir=str(tmp_path))
+-            )
+-
+-        captured = capsys.readouterr()
+-        data = json.loads(captured.out)
+-        assert data["general_comment"] == (
+-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good overall."
+-        )
+-
+-    def test_dry_run_does_not_post_review(self, tmp_path: Path) -> None:
+-        """With --dry-run, no review is posted to GitHub."""
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(
+-                self._make_args(tmp_path, dry_run=True, repo_dir=str(tmp_path))
+-            )
+-
+-        reviews = github_client.get_posted_reviews("owner", "repo", 42)
+-        assert reviews == []
+-
+-    def test_token_read_from_env_var(
+@@ -2244,581 +2038,2 @@
+         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+     ) -> None:
+-        """When --github-token is absent, GITHUB_TOKEN env var is used."""
+-        monkeypatch.setenv("GITHUB_TOKEN", "env-token")
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        captured_token: list[str] = []
+-
+-        def fake_github_client(token: str) -> FakeGitHubClient:
+-            captured_token.append(token)
+-            return github_client
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch(
+-                "maas_code_reviewer.cli.GitHubClient", side_effect=fake_github_client
+-            ),
+-        ):
+-            handle_review_pr(
+-                self._make_args(tmp_path, github_token=None, repo_dir=str(tmp_path))
+-            )
+-
+-        assert captured_token == ["env-token"]
+-
+-    def test_explicit_token_overrides_env_var(
+-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+-    ) -> None:
+-        """--github-token takes precedence over GITHUB_TOKEN env var."""
+-        monkeypatch.setenv("GITHUB_TOKEN", "env-token")
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        captured_token: list[str] = []
+-
+-        def fake_github_client(token: str) -> FakeGitHubClient:
+-            captured_token.append(token)
+-            return github_client
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch(
+-                "maas_code_reviewer.cli.GitHubClient", side_effect=fake_github_client
+-            ),
+-        ):
+-            handle_review_pr(
+-                self._make_args(
+-                    tmp_path, github_token="explicit-token", repo_dir=str(tmp_path)
+-                )
+-            )
+-
+-        assert captured_token == ["explicit-token"]
+-
+-    def test_missing_token_exits_with_error(
+-        self,
+-        tmp_path: Path,
+-        monkeypatch: pytest.MonkeyPatch,
+-        capsys: pytest.CaptureFixture[str],
+-    ) -> None:
+-        """When no token is available, the command exits with an error message."""
+-        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+-
+-        with pytest.raises(SystemExit) as exc_info:
+-            handle_review_pr(
+-                self._make_args(tmp_path, github_token=None, repo_dir=str(tmp_path))
+-            )
+-
+-        assert exc_info.value.code == 1
+-        captured = capsys.readouterr()
+-        assert "GITHUB_TOKEN" in captured.err
+-
+-    def test_gemini_api_key_read_from_env_var(
+-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+-    ) -> None:
+-        """When --gemini-api-key-file is absent, GEMINI_API_KEY env var is used."""
+-        monkeypatch.setenv("GEMINI_API_KEY", "env-gemini-key")
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        captured_keys: list[str] = []
+-
+-        def fake_gemini_client(*, api_key: str, model: str) -> object:
+-            captured_keys.append(api_key)
+-            return llm
+-
+-        with (
+-            patch(
+-                "maas_code_reviewer.cli.GeminiClient", side_effect=fake_gemini_client
+-            ),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(
+-                self._make_args(
+-                    tmp_path, gemini_api_key_file=None, repo_dir=str(tmp_path)
+-                )
+-            )
+-
+-        assert captured_keys == ["env-gemini-key"]
+-
+-    def test_missing_gemini_api_key_exits_with_error(
+-        self,
+-        tmp_path: Path,
+-        monkeypatch: pytest.MonkeyPatch,
+-        capsys: pytest.CaptureFixture[str],
+-    ) -> None:
+-        """When no Gemini API key is available, the command exits with an error."""
+-        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+-
+-        with pytest.raises(SystemExit) as exc_info:
+-            handle_review_pr(
+-                self._make_args(
+-                    tmp_path, gemini_api_key_file=None, repo_dir=str(tmp_path)
+-                )
+-            )
+-
+-        assert exc_info.value.code == 1
+-        captured = capsys.readouterr()
+-        assert "GEMINI_API_KEY" in captured.err
+-
+-    def test_description_passed_to_llm(self, tmp_path: Path) -> None:
+-        """The PR description is included in the LLM prompt."""
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request(
+-            "owner", "repo", 42, diff=_PR_DIFF, description="Fix the widget bug"
+-        )
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(self._make_args(tmp_path, repo_dir=str(tmp_path)))
+-
+-        prompt = _prompt_text(llm._client.received_prompts[0])
+-        assert "Fix the widget bug" in prompt
+-
+-    def test_diff_passed_to_llm(self, tmp_path: Path) -> None:
+-        """The PR diff is included in the LLM prompt."""
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(self._make_args(tmp_path, repo_dir=str(tmp_path)))
+-
+-        prompt = _prompt_text(llm._client.received_prompts[0])
+-        assert "import sys" in prompt
+-
+-    def test_max_diff_chars_truncates_diff_sent_to_llm(
+-        self, tmp_path: Path
+-    ) -> None:
+-        """A low --max-diff-chars truncates the diff before it reaches the LLM."""
+-        truncated_diff = (
+-            "diff --git a/src/foo.py b/src/foo.py\n"
+-            "--- a/src/foo.py\n"
+-            "+++ b/src/foo.py\n"
+-            "@@ -1,3 +1,4 @@\n"
+-            " import os\n"
+-            "+import sys\n"
+-            "\n"
+-            " def main():\n"
+-        )
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=truncated_diff)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(
+-                self._make_args(
+-                    tmp_path, repo_dir=str(tmp_path), max_diff_chars=10
+-                )
+-            )
+-
+-        prompt = _prompt_text(llm._client.received_prompts[0])
+-        assert "import sys" not in prompt
+-        assert "truncated" in prompt.lower()
+-
+-    def test_default_repo_dir_is_cwd(
+-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+-    ) -> None:
+-        """When --repo-dir is omitted, the current working directory is used."""
+-        monkeypatch.chdir(tmp_path)
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            # No --repo-dir; args.repo_dir will be None
+-            handle_review_pr(self._make_args(tmp_path, repo_dir=None))
+-
+-        # If we get here without error, cwd was used successfully.
+-        reviews = github_client.get_posted_reviews("owner", "repo", 42)
+-        assert len(reviews) == 1
+-
+-    def test_validate_review_tool_provided_to_llm(self, tmp_path: Path) -> None:
+-        """The validate_review tool is provided to the LLM for structured output."""
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(self._make_args(tmp_path, repo_dir=str(tmp_path)))
+-
+-        tool_names = {t.__name__ for t in llm._client.received_tools[0]}
+-        assert "validate_review" in tool_names
+-
+-
+-class TestHandleReviewDiffMetrics:
+-    def test_no_metrics_flag_no_file_written(
+-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text("--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new\n")
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+-
+-        llm = FakeLLMClient([ScriptedResponse(text="All good.")])
+-
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+-            args = _build_parser().parse_args(
+-                [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+-                    "--repo-dir",
+-                    str(tmp_path),
+-                    str(diff_file),
+-                ]
+-            )
+-            handle_review_diff(args)
+-
+-        # No metrics file should exist
+-        assert not (tmp_path / "metrics.json").exists()
+-
+-    def test_metrics_written_with_correct_fields(self, tmp_path: Path) -> None:
+-        diff_content = "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+-        diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text(diff_content)
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+-        metrics_file = tmp_path / "metrics.json"
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="All good.",
+-                    tokens_input=10,
+-                    tokens_output=20,
+-                    tokens_thinking=30,
+-                )
+-            ]
+-        )
+-
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+-            args = _build_parser().parse_args(
+-                [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+-                    "--repo-dir",
+-                    str(tmp_path),
+-                    "--metrics",
+-                    str(metrics_file),
+-                    str(diff_file),
+-                ]
+-            )
+-            handle_review_diff(args)
+-
+-        assert metrics_file.exists()
+-        data = json.loads(metrics_file.read_text())
+-        assert data["model_name"] == "gemini-3-flash-preview"
+-        assert data["tokens_input"] == 10
+-        assert data["tokens_output"] == 20
+-        assert data["tokens_thinking"] == 30
+-        assert data["diff_lines"] == diff_content.count("\n")
+-        assert data["diff_size_bytes"] == len(diff_content.encode("utf-8"))
+-        assert data["files_read"] == 0
+-        assert data["agents_md_read"] is False
+-
+-    def test_metrics_tracks_files_read(self, tmp_path: Path) -> None:
+-        repo_dir = tmp_path / "myrepo"
+-        repo_dir.mkdir()
+-        (repo_dir / "AGENTS.md").write_text("# Rules\nBe nice.\n")
+-
+-        diff_file = tmp_path / "patch.diff"
+-        diff_file.write_text("--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n")
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+-        metrics_file = tmp_path / "metrics.json"
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="Used context.",
+-                    tool_calls=[ToolCall(name="read_file", args={"path": "AGENTS.md"})],
+-                )
+-            ]
+-        )
+-
+-        with patch("maas_code_reviewer.cli.GeminiClient", return_value=llm):
+-            args = _build_parser().parse_args(
+-                [
+-                    "review-diff",
+-                    "-g",
+-                    str(api_key_file),
+-                    "--repo-dir",
+-                    str(repo_dir),
+-                    "--metrics",
+-                    str(metrics_file),
+-                    str(diff_file),
+-                ]
+-            )
+-            handle_review_diff(args)
+-
+-        data = json.loads(metrics_file.read_text())
+-        assert data["files_read"] == 1
+-        assert data["agents_md_read"] is True
+-
+-
+-class TestHandleReviewPrMetrics:
+-    def _make_args(
+-        self,
+-        tmp_path: Path,
+-        *,
+-        pr_url: str = "https://github.com/owner/repo/pull/42",
+-        github_token: str | None = "ghp_test",
+-        repo_dir: str | None = None,
+-        dry_run: bool = False,
+-        metrics: str | None = None,
+-    ) -> argparse.Namespace:
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+-        return _build_parser().parse_args(
+-            [
+-                "review-pr",
+-                "-g",
+-                str(api_key_file),
+-                *(["--github-token", github_token] if github_token else []),
+-                *(["--repo-dir", repo_dir] if repo_dir else []),
+-                *(["--dry-run"] if dry_run else []),
+-                *(["--metrics", metrics] if metrics else []),
+-                pr_url,
+-            ]
+-        )
+-
+-    def test_no_metrics_flag_no_file_written(self, tmp_path: Path) -> None:
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(self._make_args(tmp_path, repo_dir=str(tmp_path)))
+-
+-        assert not (tmp_path / "metrics.json").exists()
+-
+-    def test_metrics_written_with_correct_fields(self, tmp_path: Path) -> None:
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request(
+-            "owner", "repo", 42, diff=_PR_DIFF, description="Add sys import"
+-        )
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text=_PR_REVIEW_RESPONSE,
+-                    tokens_input=100,
+-                    tokens_output=200,
+-                    tokens_thinking=300,
+-                )
+-            ]
+-        )
+-        metrics_file = tmp_path / "metrics.json"
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            handle_review_pr(
+-                self._make_args(
+-                    tmp_path, repo_dir=str(tmp_path), metrics=str(metrics_file)
+-                )
+-            )
+-
+-        assert metrics_file.exists()
+-        data = json.loads(metrics_file.read_text())
+-        assert data["model_name"] == "gemini-3-flash-preview"
+-        assert data["tokens_input"] == 100
+-        assert data["tokens_output"] == 200
+-        assert data["tokens_thinking"] == 300
+-        assert data["diff_lines"] == _PR_DIFF.count("\n")
+-        assert data["diff_size_bytes"] == len(_PR_DIFF.encode("utf-8"))
+-        assert data["files_read"] == 0
+-        assert data["agents_md_read"] is False
+-
+-
+-class TestHandleReviewMpMetrics:
+-    def test_metrics_written_with_correct_fields(self, tmp_path: Path) -> None:
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+-
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="Looks great.",
+-                    tokens_input=50,
+-                    tokens_output=60,
+-                    tokens_thinking=70,
+-                )
+-            ]
+-        )
+-
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+-        metrics_file = tmp_path / "metrics.json"
+-
+-        with (
+-            patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+-            patch("maas_code_reviewer.cli.GitClient", return_value=git),
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-        ):
+-            args = _build_parser().parse_args(
+-                [
+-                    "review-mp",
+-                    "--dry-run",
+-                    "--gemini-api-key-file",
+-                    str(api_key_file),
+-                    "--metrics",
+-                    str(metrics_file),
+-                    mp.url,
+-                ]
+-            )
+-            handle_review_mp(args)
+-
+-        assert metrics_file.exists()
+-        data = json.loads(metrics_file.read_text())
+-        assert data["model_name"] == "gemini-3-flash-preview"
+-        assert data["tokens_input"] == 50
+-        assert data["tokens_output"] == 60
+-        assert data["tokens_thinking"] == 70
+-        assert data["diff_lines"] > 0
+-        assert data["diff_size_bytes"] > 0
+-
+-    def test_no_metrics_flag_no_file_written(self, tmp_path: Path) -> None:
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+-
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+-
+-        llm = FakeLLMClient([ScriptedResponse(text="Looks great.")])
+-
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+-
+-        with (
+-            patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+-            patch("maas_code_reviewer.cli.GitClient", return_value=git),
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-        ):
+-            args = _build_parser().parse_args(
+-                [
+-                    "review-mp",
+-                    "--dry-run",
+-                    "--gemini-api-key-file",
+-                    str(api_key_file),
+-                    mp.url,
+-                ]
+-            )
+-            handle_review_mp(args)
+-
+-        assert not (tmp_path / "metrics.json").exists()
+-
+-    def test_no_metrics_written_when_already_reviewed(self, tmp_path: Path) -> None:
+-        git = FakeGitClient()
+-        target_repo, source_repo = _setup_repos(tmp_path, git)
+-
+-        lp = FakeLaunchpadClient(bot_username="ci-bot")
+-        mp = make_mp(
+-            source_git_repository=str(source_repo),
+-            source_git_path="refs/heads/feature",
+-            target_git_repository=str(target_repo),
+-            target_git_path="refs/heads/main",
+-        )
+-        lp.add_merge_proposal(mp)
+-        lp.add_comment(
+-            mp.api_url,
+-            Comment(
+-                author="ci-bot",
+-                body="[maas-code-reviewer review]\n\nAlready done.",
+-                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+-            ),
+-        )
+-
+-        llm = FakeLLMClient()
+-
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+-        metrics_file = tmp_path / "metrics.json"
+-
+-        with (
+-            patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+-            patch("maas_code_reviewer.cli.GitClient", return_value=git),
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-        ):
+-            args = _build_parser().parse_args(
+-                [
+-                    "review-mp",
+-                    "--gemini-api-key-file",
+-                    str(api_key_file),
+-                    "--metrics",
+-                    str(metrics_file),
+-                    mp.url,
+-                ]
+-            )
+-            handle_review_mp(args)
+-
+-        assert not metrics_file.exists()
+-
+-
+-class TestMainReviewPr:
+-    def test_review_pr_command_delegates_to_handle_review_pr(
+-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        api_key_file = tmp_path / "api_key.txt"
+-        api_key_file.write_text("fake-key\n")
+-
+-        github_client = FakeGitHubClient()
+-        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+-        llm = FakeLLMClient([ScriptedResponse(text=_PR_EMPTY_RESPONSE)])
+-
+-        with (
+-            patch("maas_code_reviewer.cli.GeminiClient", return_value=llm),
+-            patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client),
+-        ):
+-            main(
+-                [
+-                    "review-pr",
+-                    "-g",
+-                    str(api_key_file),
+-                    "--github-token",
+-                    "ghp_test",
+-                    "--repo-dir",
+-                    str(tmp_path),
+-                    "https://github.com/owner/repo/pull/42",
+-                ]
+-            )
+-
+-        reviews = github_client.get_posted_reviews("owner", "repo", 42)
+-        assert len(reviews) == 1
+diff --git a/tests/test_fakes.py b/tests/test_fakes.py
+index 4782184..1948f66 100644
+--- a/tests/test_fakes.py
++++ b/tests/test_fakes.py
+@@ -18,14 +26,2 @@
+-
+-
+-class TestFakeLLMClientErrors:
+-    def test_raises_when_no_scripted_responses(self) -> None:
+-        llm = FakeLLMClient()
+ 
+-        with pytest.raises(
+-            RuntimeError, match="FakeGenaiClient: no more scripted responses"
+-        ):
+-            llm.review("prompt", [])
+ 
+-    def test_raises_when_tool_not_found(self) -> None:
+-        def some_tool(path: str) -> str:
+-            return path  # pragma: no cover
+@@ -32,14 +36,2 @@
+ 
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="ok",
+-                    tool_calls=[ToolCall(name="nonexistent", args={"x": "y"})],
+-                ),
+-            ]
+-        )
+ 
+-        with pytest.raises(
+-            RuntimeError, match="FakeGenaiClient: tool 'nonexistent' not found"
+-        ):
+-            llm.review("prompt", [some_tool])
+diff --git a/tests/test_llm_client.py b/tests/test_llm_client.py
+deleted file mode 100644
+index c2c45ec..0000000
+--- a/tests/test_llm_client.py
++++ /dev/null
+@@ -1,299 +0,0 @@
+-# Copyright 2026 Canonical Ltd.  This software is licensed under the
+-# GNU Affero General Public License version 3 (see the file LICENSE).
+-
+-import pytest
+-from google.genai import types
+-
+-from maas_code_reviewer.llm_client import _RESUME_PROMPT, _print_thoughts
+-from tests.fake_llm import FakeLLMClient, ScriptedResponse, ToolCall
+-
+-
+-class TestPrintThoughts:
+-    # candidates is None when the *prompt* is blocked by a safety filter before
+-    # any generation starts.  The API sets prompt_feedback.block_reason instead
+-    # and returns no candidates at all.
+-    def test_none_candidates_prints_nothing(
+-        self, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        response = types.GenerateContentResponse(candidates=None)
+-        _print_thoughts(response)
+-        assert capsys.readouterr().err == ""
+-
+-    # candidates=[] is the same safety-block scenario reached via a slightly
+-    # different API path; both are falsy, so the same guard covers them.
+-    def test_empty_candidates_prints_nothing(
+-        self, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        response = types.GenerateContentResponse(candidates=[])
+-        _print_thoughts(response)
+-        assert capsys.readouterr().err == ""
+-
+-    # content is None when a candidate was started but its *output* was then
+-    # safety-filtered during generation (finish_reason=SAFETY).  The candidate
+-    # object exists but carries no returnable content.
+-    def test_none_content_prints_nothing(
+-        self, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        response = types.GenerateContentResponse(
+-            candidates=[types.Candidate(content=None)]
+-        )
+-        _print_thoughts(response)
+-        assert capsys.readouterr().err == ""
+-
+-    def test_thought_part_is_printed_to_stderr(
+-        self, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        response = types.GenerateContentResponse(
+-            candidates=[
+-                types.Candidate(
+-                    content=types.Content(
+-                        parts=[
+-                            types.Part(text="I am reasoning.", thought=True),
+-                            types.Part(text="The code looks good."),
+-                        ],
+-                        role="model",
+-                    )
+-                )
+-            ]
+-        )
+-        _print_thoughts(response)
+-        assert capsys.readouterr().err == "[Thinking]\nI am reasoning.\n\n"
+-
+-    def test_afc_history_thoughts_are_printed_to_stderr(
+-        self, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        # model turn: thought produced while deciding to call a tool
+-        model_content = types.Content(
+-            parts=[types.Part(text="I need to call read_file.", thought=True)],
+-            role="model",
+-        )
+-        # user turn: function response — should be skipped
+-        user_content = types.Content(
+-            parts=[types.Part(text="file contents here")],
+-            role="user",
+-        )
+-        response = types.GenerateContentResponse(
+-            candidates=[
+-                types.Candidate(
+-                    content=types.Content(
+-                        parts=[types.Part(text="Review complete.")],
+-                        role="model",
+-                    )
+-                )
+-            ],
+-            automatic_function_calling_history=[model_content, user_content],
+-        )
+-        _print_thoughts(response)
+-        captured = capsys.readouterr()
+-        # AFC-step thought is printed; user-role entry and non-thought final
+-        # part are both skipped.
+-        assert captured.err == "[Thinking (tool step)]\nI need to call read_file.\n\n"
+-
+-
+-class TestTokenCountProperties:
+-    def test_token_counts_reflect_scripted_values(self) -> None:
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="ok", tokens_input=100, tokens_output=50, tokens_thinking=200
+-                )
+-            ]
+-        )
+-        llm.review(["prompt"], [])
+-        assert llm.last_tokens_input == 100
+-        assert llm.last_tokens_output == 50
+-        assert llm.last_tokens_thinking == 200
+-
+-    def test_token_counts_default_to_zero(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        llm.review(["prompt"], [])
+-        assert llm.last_tokens_input == 0
+-        assert llm.last_tokens_output == 0
+-        assert llm.last_tokens_thinking == 0
+-
+-    def test_token_counts_reset_when_usage_metadata_is_none(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok", no_usage_metadata=True)])
+-        llm.review(["prompt"], [])
+-        assert llm.last_tokens_input == 0
+-        assert llm.last_tokens_output == 0
+-        assert llm.last_tokens_thinking == 0
+-
+-    def test_model_property_returns_model_name(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        assert llm.model == "gemini-3-flash-preview"
+-
+-
+-class TestGoogleSearch:
+-    def test_google_search_tool_always_present(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        llm.review(["prompt"], [])
+-        raw_tools = llm._client.received_raw_tools[0]
+-        assert any(
+-            getattr(tool, "google_search", None) is not None for tool in raw_tools
+-        )
+-
+-
+-class TestSystemInstructionAndAgentsMd:
+-    def test_default_system_instruction_is_none_in_config(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        llm.review(["prompt"], [])
+-        config = llm._client.received_configs[0]
+-        assert config.system_instruction is None
+-
+-    def test_system_instruction_passed_through_to_config(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        llm.review(["prompt"], [], system_instruction="Be terse.")
+-        config = llm._client.received_configs[0]
+-        assert config.system_instruction == "Be terse."
+-
+-    def test_no_agents_md_sends_prompt_as_sole_list_element(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        llm.review(["prompt"], [])
+-        assert llm._client.received_prompts[0] == ["prompt"]
+-
+-    def test_agents_md_wraps_prompt_in_part_list(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        llm.review(["prompt"], [], agents_md="# Rules\nBe nice.")
+-        message = llm._client.received_prompts[0]
+-        assert isinstance(message, list)
+-        assert "Be nice." in message[0].text
+-        assert message[1] == "prompt"
+-
+-    def test_agents_md_not_repeated_on_resume_turn(self) -> None:
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text=None,
+-                    pending_function_call=ToolCall(
+-                        name="list_directory", args={"path": "src"}
+-                    ),
+-                ),
+-                ScriptedResponse(text="final"),
+-            ]
+-        )
+-        llm.review(["prompt"], [], agents_md="# Rules\nBe nice.")
+-        assert isinstance(llm._client.received_prompts[0], list)
+-        assert llm._client.received_prompts[1] == _RESUME_PROMPT
+-
+-
+-class TestResumeOnNoText:
+-    # The model can end its turn on a function_call with no text — e.g. when
+-    # automatic function calling hits its remote-call cap. response.text is
+-    # then None, and review() must resume the chat to elicit a text answer.
+-    def test_resumes_when_first_response_is_function_call_only(self) -> None:
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text=None,
+-                    pending_function_call=ToolCall(
+-                        name="list_directory", args={"path": "src"}
+-                    ),
+-                ),
+-                ScriptedResponse(text="final answer"),
+-            ]
+-        )
+-        result = llm.review(["prompt"], [])
+-        assert result == "final answer"
+-        assert llm._client.received_prompts == [["prompt"], _RESUME_PROMPT]
+-
+-    def test_does_not_resume_when_text_returned(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        llm.review(["prompt"], [])
+-        assert llm._client.received_prompts == [["prompt"]]
+-
+-    def test_accumulates_usage_across_resume_turns(self) -> None:
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text=None,
+-                    pending_function_call=ToolCall(
+-                        name="list_directory", args={"path": "src"}
+-                    ),
+-                    tokens_input=100,
+-                    tokens_output=10,
+-                    tokens_thinking=20,
+-                ),
+-                ScriptedResponse(
+-                    text="ok",
+-                    tokens_input=5,
+-                    tokens_output=15,
+-                    tokens_thinking=25,
+-                ),
+-            ]
+-        )
+-        llm.review(["prompt"], [])
+-        assert llm.last_tokens_input == 105
+-        assert llm.last_tokens_output == 25
+-        assert llm.last_tokens_thinking == 45
+-
+-    def test_gives_up_after_max_resume_attempts(self) -> None:
+-        # Four function-call-only responses: one initial turn plus three
+-        # resume attempts. After that review() returns an empty string.
+-        no_text = ScriptedResponse(
+-            text=None,
+-            pending_function_call=ToolCall(
+-                name="list_directory", args={"path": "src"}
+-            ),
+-        )
+-        llm = FakeLLMClient([no_text, no_text, no_text, no_text])
+-        result = llm.review(["prompt"], [])
+-        assert result == ""
+-        assert len(llm._client.received_prompts) == 4
+-
+-
+-
+-class TestToolCallTracking:
+-    def test_default_limit_is_recorded(self) -> None:
+-        from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS
+-
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        llm.review(["prompt"], [])
+-        assert llm.last_tool_call_limit == DEFAULT_MAX_TOOL_CALLS
+-        assert llm.last_tool_call_limit_reached is False
+-        assert llm.last_resume_attempts == 0
+-
+-    def test_custom_limit_is_recorded(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        llm.review(["prompt"], [], max_tool_calls=15)
+-        assert llm.last_tool_call_limit == 15
+-
+-    def test_limit_reached_flag_set_on_resume(self) -> None:
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text=None,
+-                    pending_function_call=ToolCall(
+-                        name="list_directory", args={"path": "src"}
+-                    ),
+-                ),
+-                ScriptedResponse(text="ok"),
+-            ]
+-        )
+-        llm.review(["prompt"], [])
+-        assert llm.last_tool_call_limit_reached is True
+-        assert llm.last_resume_attempts == 1
+-
+-    def test_limit_reached_flag_false_when_text_returned(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        llm.review(["prompt"], [])
+-        assert llm.last_tool_call_limit_reached is False
+-        assert llm.last_resume_attempts == 0
+-
+-    def test_logs_limit_reached_to_stderr(
+-        self, capsys: pytest.CaptureFixture[str]
+-    ) -> None:
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text=None,
+-                    pending_function_call=ToolCall(
+-                        name="list_directory", args={"path": "src"}
+-                    ),
+-                ),
+-                ScriptedResponse(text="ok"),
+-            ]
+-        )
+-        llm.review(["prompt"], [], max_tool_calls=5)
+-        err = capsys.readouterr().err
+-        assert "Tool-call limit (5) reached" in err
+-        assert "resume_attempts: 1" in err
+diff --git a/tests/test_repo_tools.py b/tests/test_repo_tools.py
+index 0f668d8..52b7c08 100644
+--- a/tests/test_repo_tools.py
++++ b/tests/test_repo_tools.py
+@@ -6,203 +6,16 @@
+ from maas_code_reviewer.repo_tools import RepoTools
+ 
+ 
+-class TestRepoTools:
+-    def test_read_file_returns_content(self, tmp_path: Path) -> None:
+-        """read_file returns the content of a file inside the repository."""
+-        (tmp_path / "notes.txt").write_text("hello\n")
+-
+-        tools = RepoTools(tmp_path)
+-
+-        assert tools.read_file("notes.txt") == "hello\n"
+-
+-    def test_read_file_returns_error_for_missing_file(self, tmp_path: Path) -> None:
+-        """read_file returns an error string when the file does not exist."""
+-        tools = RepoTools(tmp_path)
+-
+-        assert tools.read_file("missing.txt") == "Error: file not found: missing.txt"
+-
+-    def test_read_file_rejects_dotdot_traversal(self, tmp_path: Path) -> None:
+-        """read_file refuses a relative path that escapes the repository."""
+-        repo = tmp_path / "repo"
+-        repo.mkdir()
+-        secret = tmp_path / "credentials.txt"
+-        secret.write_text("super-secret-api-key\n")
+-
+-        tools = RepoTools(repo)
+-        result = tools.read_file("../credentials.txt")
+-
+-        assert "Error: path outside repository" in result
+-        assert "super-secret-api-key" not in result
+-
+-    def test_read_file_rejects_absolute_path(self, tmp_path: Path) -> None:
+-        """read_file refuses an absolute path pointing outside the repository."""
+-        repo = tmp_path / "repo"
+-        repo.mkdir()
+-        secret = tmp_path / "credentials.txt"
+-        secret.write_text("super-secret-api-key\n")
+-
+-        tools = RepoTools(repo)
+-        result = tools.read_file(str(secret))
+-
+-        assert "Error: path outside repository" in result
+-        assert "super-secret-api-key" not in result
+-
+-    def test_list_directory_returns_sorted_entries(self, tmp_path: Path) -> None:
+-        """list_directory returns a sorted newline-joined list of entry names."""
+-        src = tmp_path / "src"
+-        src.mkdir()
+-        (src / "beta.py").write_text("pass\n")
+-        (src / "alpha.py").write_text("pass\n")
+-
+-        tools = RepoTools(tmp_path)
+-
+-        assert tools.list_directory("src") == "alpha.py\nbeta.py"
+-
+-    def test_list_directory_returns_error_for_missing_dir(self, tmp_path: Path) -> None:
+-        """list_directory returns an error string when the directory does not exist."""
+-        tools = RepoTools(tmp_path)
+-
+-        assert (
+-            tools.list_directory("nonexistent")
+-            == "Error: directory not found: nonexistent"
+-        )
+-
+-    def test_list_directory_rejects_dotdot_traversal(self, tmp_path: Path) -> None:
+-        """list_directory refuses a relative path that escapes the repository."""
+-        repo = tmp_path / "repo"
+-        repo.mkdir()
+-
+-        tools = RepoTools(repo)
+-        result = tools.list_directory("../..")
+-
+-        assert "Error: path outside repository" in result
+-
+-    def test_list_directory_rejects_absolute_path(self, tmp_path: Path) -> None:
+-        """list_directory refuses an absolute path pointing outside the repository."""
+-        repo = tmp_path / "repo"
+-        repo.mkdir()
+-
+-        tools = RepoTools(repo)
+-        result = tools.list_directory(str(tmp_path))
+-
+-        assert "Error: path outside repository" in result
+-
+-    def test_read_file_reads_nested_file(self, tmp_path: Path) -> None:
+-        """read_file can read files in subdirectories."""
+-        subdir = tmp_path / "src" / "pkg"
+-        subdir.mkdir(parents=True)
+-        (subdir / "module.py").write_text("x = 1\n")
+-
+-        tools = RepoTools(tmp_path)
+-
+-        assert tools.read_file("src/pkg/module.py") == "x = 1\n"
+-
+-    def test_list_directory_root(self, tmp_path: Path) -> None:
+-        """list_directory works for the repository root itself."""
+-        (tmp_path / "a.txt").write_text("")
+-        (tmp_path / "b.txt").write_text("")
+-
+-        tools = RepoTools(tmp_path)
+-
+-        assert tools.list_directory(".") == "a.txt\nb.txt"
+-
+-    def test_repo_dir_resolved_at_construction(self, tmp_path: Path) -> None:
+-        """RepoTools resolves symlinks in repo_dir at construction time."""
+-        real_repo = tmp_path / "real"
+-        real_repo.mkdir()
+-        (real_repo / "file.txt").write_text("content\n")
+-        link = tmp_path / "link"
+-        link.symlink_to(real_repo)
+-
+-        tools = RepoTools(link)
+-
+-        assert tools.read_file("file.txt") == "content\n"
+-
+-
+-class TestRepoToolsMetrics:
+-    def test_files_read_count_starts_at_zero(self, tmp_path: Path) -> None:
+-        tools = RepoTools(tmp_path)
+-        assert tools.files_read_count == 0
+-
+-    def test_files_read_count_increments_on_successful_read(
+-        self, tmp_path: Path
+-    ) -> None:
+-        (tmp_path / "a.txt").write_text("a")
+-        (tmp_path / "b.txt").write_text("b")
+-        tools = RepoTools(tmp_path)
+-        tools.read_file("a.txt")
+-        assert tools.files_read_count == 1
+-        tools.read_file("b.txt")
+-        assert tools.files_read_count == 2
+-
+-    def test_files_read_count_not_incremented_on_missing_file(
+-        self, tmp_path: Path
+-    ) -> None:
+-        tools = RepoTools(tmp_path)
+-        tools.read_file("missing.txt")
+-        assert tools.files_read_count == 0
+-
+-    def test_files_read_count_not_incremented_on_path_traversal(
+-        self, tmp_path: Path
+-    ) -> None:
+-        repo = tmp_path / "repo"
+-        repo.mkdir()
+-        tools = RepoTools(repo)
+-        tools.read_file("../secret.txt")
+-        assert tools.files_read_count == 0
+-
+-    def test_agents_md_read_starts_false(self, tmp_path: Path) -> None:
+-        tools = RepoTools(tmp_path)
+-        assert tools.agents_md_read is False
+-
+-    def test_agents_md_read_becomes_true_when_agents_md_read(
+-        self, tmp_path: Path
+-    ) -> None:
+-        (tmp_path / "AGENTS.md").write_text("# Rules")
+-        tools = RepoTools(tmp_path)
+-        tools.read_file("AGENTS.md")
+-        assert tools.agents_md_read is True
+-
+-    def test_agents_md_read_true_for_nested_agents_md(self, tmp_path: Path) -> None:
+-        subdir = tmp_path / "subdir"
+-        subdir.mkdir()
+-        (subdir / "AGENTS.md").write_text("# Rules")
+-        tools = RepoTools(tmp_path)
+-        tools.read_file("subdir/AGENTS.md")
+-        assert tools.agents_md_read is True
+-
+-    def test_agents_md_read_stays_false_for_non_agents_file(
+-        self, tmp_path: Path
+-    ) -> None:
+-        (tmp_path / "README.md").write_text("# Readme")
+-        tools = RepoTools(tmp_path)
+-        tools.read_file("README.md")
+-        assert tools.agents_md_read is False
+-
+-
+ class TestReadAgentsMd:
+     def test_returns_none_when_no_agents_md(self, tmp_path: Path) -> None:
+         tools = RepoTools(tmp_path)
+         assert tools.read_agents_md() is None
+-        assert tools.agents_md_read is False
+ 
+     def test_returns_content_when_agents_md_present(self, tmp_path: Path) -> None:
+         (tmp_path / "AGENTS.md").write_text("# Rules\nBe nice.\n")
+         tools = RepoTools(tmp_path)
+         assert tools.read_agents_md() == "# Rules\nBe nice.\n"
+ 
+-    def test_sets_agents_md_read_flag_when_present(self, tmp_path: Path) -> None:
+-        (tmp_path / "AGENTS.md").write_text("# Rules")
+-        tools = RepoTools(tmp_path)
+-        tools.read_agents_md()
+-        assert tools.agents_md_read is True
+-
+-    def test_does_not_increment_files_read_count(self, tmp_path: Path) -> None:
+-        (tmp_path / "AGENTS.md").write_text("# Rules")
+-        tools = RepoTools(tmp_path)
+-        tools.read_agents_md()
+-        assert tools.files_read_count == 0
+-
+     def test_rejects_agents_md_symlinked_outside_repo(self, tmp_path: Path) -> None:
+         """A symlinked AGENTS.md pointing outside the repo must not be read."""
+         outside = tmp_path / "outside"
+@@ -216,4 +29,15 @@
+ 
+         tools = RepoTools(repo_dir)
+         assert tools.read_agents_md() is None
+-        assert tools.agents_md_read is False
++
++    def test_repo_dir_resolved_at_construction(self, tmp_path: Path) -> None:
++        """RepoTools resolves symlinks in repo_dir at construction time."""
++        real_repo = tmp_path / "real"
++        real_repo.mkdir()
++        (real_repo / "AGENTS.md").write_text("# Rules\n")
++        link = tmp_path / "link"
++        link.symlink_to(real_repo)
++
++        tools = RepoTools(link)
++
++        assert tools.read_agents_md() == "# Rules\n"
+diff --git a/tests/test_reviewer.py b/tests/test_reviewer.py
+index 87e49fd..02262d2 100644
+--- a/tests/test_reviewer.py
++++ b/tests/test_reviewer.py
+@@ -9,17 +28,7 @@
+ from maas_code_reviewer.reviewer import (
+     EMPTY_DIFF_GENERAL_COMMENT,
+-    REVIEW_MARKER,
+-    REVIEW_PREAMBLE,
+     STRUCTURED_SYSTEM_INSTRUCTION,
+-    SYSTEM_INSTRUCTION,
+     TRUNCATION_MANIFEST_HEADER,
+     TRUNCATION_NOTE,
+     TRUNCATION_NOTE_MID_FILE,
+-    NoReviewText,
+-    _build_prompt,
+-    _build_structured_prompt,
+-    _extract_json,
+     _truncate_diff,
+-    _validate_review,
+-    review_diff,
+-    review_diff_structured,
+@@ -26,62 +37,1 @@
+ )
+-from tests.fake_llm import FakeLLMClient, ScriptedResponse, ToolCall
+-
+-
+-def _make_read_file(files: dict[str, str] | None = None) -> callable:
+-    """Return a ``read_file`` callable backed by *files*."""
+-    store = files or {}
+-
+-    def read_file(path: str) -> str:
+-        if path in store:
+-            return store[path]
+-        return f"Error: file not found: {path}"
+-
+-    return read_file
+-
+-
+-def _make_list_directory(dirs: dict[str, list[str]] | None = None) -> callable:
+-    """Return a ``list_directory`` callable backed by *dirs*."""
+-    store = dirs or {}
+-
+-    def list_directory(path: str) -> str:
+-        if path in store:
+-            return "\n".join(store[path])
+-        return f"Error: directory not found: {path}"
+-
+-    return list_directory
+-
+-
+-def _prompt_text(parts: list) -> str:
+-    """Join Part/str prompt elements into a single string for assertions."""
+-    return "".join(getattr(p, "text", p) for p in parts)
+-
+-
+-class TestBuildPrompt:
+-    def test_does_not_contain_system_instruction(self) -> None:
+-        """The system instruction is sent via GenerateContentConfig, not here."""
+-        prompt = _build_prompt("some diff", None)
+-        assert SYSTEM_INSTRUCTION not in _prompt_text(prompt)
+-
+-    def test_contains_diff(self) -> None:
+-        prompt = _build_prompt("my-diff-content", None)
+-        assert "my-diff-content" in _prompt_text(prompt)
+-
+-    def test_diff_wrapped_in_code_block(self) -> None:
+-        prompt = _build_prompt("some diff", None)
+-        assert "```\nsome diff\n```" in _prompt_text(prompt)
+-
+-    def test_includes_description_when_provided(self) -> None:
+-        prompt = _build_prompt("diff", "Fix the widget")
+-        text = _prompt_text(prompt)
+-        assert "Fix the widget" in text
+-        assert "## Merge Proposal Description" in text
+-
+-    def test_no_description_section_when_none(self) -> None:
+-        prompt = _build_prompt("diff", None)
+-        assert "## Merge Proposal Description" not in _prompt_text(prompt)
+-
+-    def test_includes_instructions_section(self) -> None:
+-        prompt = _build_prompt("diff", None)
+-        text = _prompt_text(prompt)
+-        assert "## Instructions" in text
+-        assert "provided tools" in text
+@@ -326,266 +277,3 @@
+         assert "- small.py" in result
+ 
+ 
+-class TestReviewDiff:
+-    def test_returns_review_with_marker_prefix(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="Looks good!")])
+-        result = review_diff(
+-            llm,
+-            diff="some diff",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        assert result.startswith(REVIEW_MARKER)
+-        assert "Looks good!" in result
+-
+-    def test_marker_is_on_first_line(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="All fine.")])
+-        result = review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        first_line = result.split("\n")[0]
+-        assert first_line == REVIEW_MARKER
+-
+-    def test_review_text_separated_from_marker_by_blank_line(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="Review body.")])
+-        result = review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        assert f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nReview body." == result
+-
+-    def test_prompt_contains_diff(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        review_diff(
+-            llm,
+-            diff="my-diff",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        assert "my-diff" in _prompt_text(llm._client.received_prompts[0])
+-
+-    def test_prompt_contains_description(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        review_diff(
+-            llm,
+-            diff="d",
+-            description="Add feature X",
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        assert "Add feature X" in _prompt_text(llm._client.received_prompts[0])
+-
+-    def test_diff_truncated_when_exceeding_max(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        big_diff = "x" * 200
+-        review_diff(
+-            llm,
+-            diff=big_diff,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            max_diff_chars=50,
+-        )
+-        prompt = _prompt_text(llm._client.received_prompts[0])
+-        # The full 200-char diff should NOT appear
+-        assert "x" * 200 not in prompt
+-        # But the truncated portion and note should
+-        assert "x" * 50 in prompt
+-        assert TRUNCATION_NOTE_MID_FILE in prompt
+-
+-    def test_diff_not_truncated_when_under_max(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        diff = "y" * 50
+-        review_diff(
+-            llm,
+-            diff=diff,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            max_diff_chars=100,
+-        )
+-        prompt = _prompt_text(llm._client.received_prompts[0])
+-        assert "y" * 50 in prompt
+-        assert TRUNCATION_NOTE not in prompt
+-        assert TRUNCATION_NOTE_MID_FILE not in prompt
+-
+-    def test_tools_provided_to_llm(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        rf = _make_read_file()
+-        ld = _make_list_directory()
+-        review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=rf,
+-            list_directory=ld,
+-        )
+-        tool_names = {t.__name__ for t in llm._client.received_tools[0]}
+-        assert "read_file" in tool_names
+-        assert "list_directory" in tool_names
+-
+-    def test_tool_invocation_read_file(self) -> None:
+-        """The fake LLM invokes read_file and we verify it worked."""
+-        rf = _make_read_file({"AGENTS.md": "# Agent rules\nBe nice."})
+-        ld = _make_list_directory()
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="Reviewed with context from AGENTS.md.",
+-                    tool_calls=[ToolCall(name="read_file", args={"path": "AGENTS.md"})],
+-                ),
+-            ]
+-        )
+-        result = review_diff(
+-            llm,
+-            diff="diff content",
+-            description=None,
+-            read_file=rf,
+-            list_directory=ld,
+-        )
+-        assert "Reviewed with context from AGENTS.md." in result
+-
+-    def test_tool_invocation_list_directory(self) -> None:
+-        rf = _make_read_file()
+-        ld = _make_list_directory({"src": ["main.py", "utils.py"]})
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="Looks fine.",
+-                    tool_calls=[ToolCall(name="list_directory", args={"path": "src"})],
+-                ),
+-            ]
+-        )
+-        result = review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=rf,
+-            list_directory=ld,
+-        )
+-        assert "Looks fine." in result
+-
+-    def test_multiple_tool_calls(self) -> None:
+-        rf = _make_read_file(
+-            {"README.md": "readme content", "setup.py": "setup content"}
+-        )
+-        ld = _make_list_directory({".": ["README.md", "setup.py"]})
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="All good after checking files.",
+-                    tool_calls=[
+-                        ToolCall(name="list_directory", args={"path": "."}),
+-                        ToolCall(name="read_file", args={"path": "README.md"}),
+-                        ToolCall(name="read_file", args={"path": "setup.py"}),
+-                    ],
+-                ),
+-            ]
+-        )
+-        result = review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=rf,
+-            list_directory=ld,
+-        )
+-        assert "All good after checking files." in result
+-
+-    def test_no_description_still_works(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="fine")])
+-        result = review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        assert "fine" in result
+-
+-    def test_tool_read_file_returns_error_for_missing_file(self) -> None:
+-        rf = _make_read_file({"existing.py": "content"})
+-        ld = _make_list_directory()
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="File was missing.",
+-                    tool_calls=[
+-                        ToolCall(name="read_file", args={"path": "missing.py"}),
+-                    ],
+-                ),
+-            ]
+-        )
+-        result = review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=rf,
+-            list_directory=ld,
+-        )
+-        assert "File was missing." in result
+-
+-    def test_tool_list_directory_returns_error_for_missing_dir(self) -> None:
+-        rf = _make_read_file()
+-        ld = _make_list_directory({"src": ["main.py"]})
+-
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="Dir was missing.",
+-                    tool_calls=[
+-                        ToolCall(name="list_directory", args={"path": "nope"}),
+-                    ],
+-                ),
+-            ]
+-        )
+-        result = review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=rf,
+-            list_directory=ld,
+-        )
+-        assert "Dir was missing." in result
+-
+-    def test_empty_diff_skips_llm_and_returns_default_review(self) -> None:
+-        llm = FakeLLMClient()
+-        result = review_diff(
+-            llm,
+-            diff="",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        assert EMPTY_DIFF_GENERAL_COMMENT in result
+-        assert result.startswith(REVIEW_MARKER)
+-        assert llm._client.received_prompts == []
+-
+-    def test_raises_no_review_text_when_llm_returns_empty(self) -> None:
+-        no_text = ScriptedResponse(
+-            text=None,
+-            pending_function_call=ToolCall(
+-                name="list_directory", args={"path": "src"}
+-            ),
+-        )
+-        llm = FakeLLMClient([no_text, no_text, no_text, no_text])
+-        with pytest.raises(NoReviewText, match="no review text"):
+-            review_diff(
+-                llm,
+-                diff="d",
+-                description=None,
+-                read_file=_make_read_file(),
+-                list_directory=_make_list_directory(),
+-            )
+@@ -592,80 +315,2 @@
+ 
+-    def test_google_search_tool_present(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        raw_tools = llm._client.received_raw_tools[0]
+-        assert any(
+-            getattr(tool, "google_search", None) is not None for tool in raw_tools
+-        )
+ 
+-    def test_system_instruction_passed_to_llm_config(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        config = llm._client.received_configs[0]
+-        assert config.system_instruction == SYSTEM_INSTRUCTION
+-
+-    def test_agents_md_sent_as_extra_context_part(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            agents_md="# Rules\nBe nice.",
+-        )
+-        message = llm._client.received_prompts[0]
+-        assert isinstance(message, list)
+-        assert "Be nice." in message[0].text
+-        assert "```\nd\n```" in _prompt_text(message)
+-
+-    def test_no_agents_md_omits_extra_context_part(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        message = llm._client.received_prompts[0]
+-        assert isinstance(message, list)
+-        assert "Project conventions" not in _prompt_text(message)
+-        assert "```\nd\n```" in message[0].text
+-
+-
+-# ---------------------------------------------------------------------------
+-# Helpers shared by structured-review tests
+-# ---------------------------------------------------------------------------
+-
+-_SIMPLE_DIFF = """\
+---- a/src/foo.py
+-+++ b/src/foo.py
+-@@ -1,3 +1,4 @@
+- import os
+-+import sys
+-
+- def main():
+-"""
+-
+-_VALID_JSON_RESPONSE = json.dumps(
+-    {
+-        "general_comment": "Looks good.",
+-        "inline_comments": {
+-            "src/foo.py": {
+-                "2": "Good addition.",
+-            }
+-        },
+-    }
+@@ -672,7 +321,1 @@
+ )
+-
+-_EMPTY_INLINE_JSON_RESPONSE = json.dumps(
+-    {
+-        "general_comment": "No issues.",
+-        "inline_comments": {},
+-    }
+@@ -679,28 +338,3 @@
+ )
+ 
+ 
+-class TestValidateReview:
+-    def test_returns_empty_string_for_valid_json(self) -> None:
+-        result = _validate_review(_VALID_JSON_RESPONSE, _SIMPLE_DIFF)
+-        assert result == ""
+-
+-    def test_returns_error_for_invalid_json(self) -> None:
+-        result = _validate_review("not json {{{", _SIMPLE_DIFF)
+-        assert result.startswith("Invalid JSON:")
+-
+-    def test_returns_errors_for_invalid_review(self) -> None:
+-        bad_review = json.dumps({"wrong_key": "value", "inline_comments": {}})
+-        result = _validate_review(bad_review, _SIMPLE_DIFF)
+-        assert "general_comment" in result
+-
+-    def test_returns_multiple_errors_joined_by_newline(self) -> None:
+-        bad_review = json.dumps({"inline_comments": {}})
+-        result = _validate_review(bad_review, _SIMPLE_DIFF)
+-        assert "\n" not in result  # only one error: missing general_comment
+-
+-    def test_validates_against_diff(self) -> None:
+-        review = json.dumps(
+-            {
+-                "general_comment": "ok",
+-                "inline_comments": {"nonexistent.py": {"1": "nope"}},
+-            }
+@@ -707,4 +349,1 @@
+         )
+-        result = _validate_review(review, _SIMPLE_DIFF)
+-        assert "nonexistent.py" in result
+-
+@@ -711,9 +351,2 @@
+ 
+-class TestExtractJson:
+-    def test_plain_json_unchanged(self) -> None:
+-        text = '{"a": 1}'
+-        assert _extract_json(text) == '{"a": 1}'
+ 
+-    def test_strips_json_fence(self) -> None:
+-        text = '```json\n{"a": 1}\n```'
+-        assert _extract_json(text) == '{"a": 1}'
+@@ -720,52 +357,2 @@
+ 
+-    def test_strips_plain_fence(self) -> None:
+-        text = '```\n{"a": 1}\n```'
+-        assert _extract_json(text) == '{"a": 1}'
+ 
+-    def test_strips_surrounding_whitespace(self) -> None:
+-        text = '  \n  {"a": 1}  \n  '
+-        assert _extract_json(text) == '{"a": 1}'
+-
+-    def test_strips_fence_and_whitespace(self) -> None:
+-        text = '  ```json\n  {"a": 1}\n  ```  '
+-        result = _extract_json(text)
+-        assert result == '{"a": 1}'
+-
+-    def test_extracts_json_object_from_mixed_text(self) -> None:
+-        text = 'Some preamble\n{"a": 1}\nSome trailing text'
+-        assert _extract_json(text) == '{"a": 1}'
+-
+-    def test_skips_invalid_brace_prefix_and_extracts_valid_json(self) -> None:
+-        text = "Not JSON {broken then valid {\"a\": 1}"
+-        assert _extract_json(text) == '{"a": 1}'
+-
+-
+-class TestBuildStructuredPrompt:
+-    def test_does_not_contain_structured_system_instruction(self) -> None:
+-        """The system instruction is sent via GenerateContentConfig, not here."""
+-        prompt = _build_structured_prompt("some diff", None)
+-        assert STRUCTURED_SYSTEM_INSTRUCTION not in _prompt_text(prompt)
+-
+-    def test_contains_diff(self) -> None:
+-        prompt = _build_structured_prompt("my-diff-content", None)
+-        assert "my-diff-content" in _prompt_text(prompt)
+-
+-    def test_diff_wrapped_in_code_block(self) -> None:
+-        prompt = _build_structured_prompt("some diff", None)
+-        assert "```\nsome diff\n```" in _prompt_text(prompt)
+-
+-    def test_includes_description_when_provided(self) -> None:
+-        prompt = _build_structured_prompt("diff", "Fix the widget")
+-        assert "Fix the widget" in _prompt_text(prompt)
+-
+-    def test_no_description_section_when_none(self) -> None:
+-        prompt = _build_structured_prompt("diff", None)
+-        assert "Fix the widget" not in _prompt_text(prompt)
+-
+-    def test_mentions_validate_review_tool(self) -> None:
+-        prompt = _build_structured_prompt("diff", None)
+-        assert "validate_review" in _prompt_text(prompt)
+-
+-    def test_includes_instructions_section(self) -> None:
+-        prompt = _build_structured_prompt("diff", None)
+-        assert "## Instructions" in _prompt_text(prompt)
+@@ -773,21 +414,1 @@
+ 
+-class TestReviewDiffStructured:
+-    def test_returns_dict(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
+-        result = review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        assert isinstance(result, dict)
+-
+-    def test_returns_general_comment(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
+-        result = review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+@@ -794,3 +421,1 @@
+         )
+-        assert result["general_comment"] == (
+-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
+@@ -798,31 +428,1 @@
+ 
+-    def test_returns_inline_comments(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
+-        result = review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        assert result["inline_comments"]["src/foo.py"]["2"] == "Good addition."
+-
+-    def test_empty_inline_comments_allowed(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_INLINE_JSON_RESPONSE)])
+-        result = review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        assert result["inline_comments"] == {}
+-
+-    def test_empty_diff_skips_llm_and_returns_default_review(self) -> None:
+-        llm = FakeLLMClient()
+-        result = review_diff_structured(
+-            llm,
+-            diff="",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+@@ -829,2 +495,1 @@
+         )
+-        assert result == {
+@@ -831,25 +497,3 @@
+             "general_comment": EMPTY_DIFF_GENERAL_COMMENT,
+             "inline_comments": {},
+         }
+-        assert llm._client.received_prompts == []
+-
+-    def test_read_file_tool_provided_to_llm(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
+-        review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        tool_names = {t.__name__ for t in llm._client.received_tools[0]}
+-        assert "read_file" in tool_names
+-
+-    def test_prompt_contains_diff(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_INLINE_JSON_RESPONSE)])
+-        review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+@@ -856,11 +541,1 @@
+         )
+-        assert _SIMPLE_DIFF in _prompt_text(llm._client.received_prompts[0])
+-
+-    def test_prompt_contains_description(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_INLINE_JSON_RESPONSE)])
+-        review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description="Add sys import",
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+@@ -867,12 +639,1 @@
+         )
+-        assert "Add sys import" in _prompt_text(llm._client.received_prompts[0])
+-
+-    def test_strips_json_fence_from_response(self) -> None:
+-        fenced = f"```json\n{_VALID_JSON_RESPONSE}\n```"
+-        llm = FakeLLMClient([ScriptedResponse(text=fenced)])
+-        result = review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+@@ -879,3 +696,1 @@
+         )
+-        assert result["general_comment"] == (
+-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
+@@ -882,13 +700,1 @@
+         )
+-
+-    def test_diff_truncated_when_exceeding_max(self) -> None:
+-        big_diff = "x" * 200
+-        # The LLM receives a truncated diff — we just need it to return valid JSON.
+-        llm = FakeLLMClient([ScriptedResponse(text=_EMPTY_INLINE_JSON_RESPONSE)])
+-        result = review_diff_structured(
+-            llm,
+-            diff=big_diff,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            max_diff_chars=50,
+@@ -895,20 +769,1 @@
+         )
+-        # The truncated diff has no real files, so empty inline_comments is valid.
+-        assert isinstance(result, dict)
+-        prompt = _prompt_text(llm._client.received_prompts[0])
+-        assert "x" * 200 not in prompt
+-        assert TRUNCATION_NOTE_MID_FILE in prompt
+-
+-    def test_validate_review_tool_called_by_llm(self) -> None:
+-        """When the scripted LLM calls validate_review, no exception is raised."""
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text=_VALID_JSON_RESPONSE,
+-                    tool_calls=[
+-                        ToolCall(
+-                            name="validate_review",
+-                            args={"json_text": _VALID_JSON_RESPONSE},
+-                        )
+-                    ],
+-                )
+@@ -915,9 +816,2 @@
+             ]
+         )
+-        # Should not raise
+-        result = review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+@@ -924,3 +844,1 @@
+         )
+-        assert result["general_comment"] == (
+-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
+@@ -927,21 +870,1 @@
+         )
+-
+-    def test_raises_on_invalid_json_response(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="this is not json at all")])
+-        with pytest.raises(Exception):
+-            review_diff_structured(
+-                llm,
+-                diff=_SIMPLE_DIFF,
+-                description=None,
+-                read_file=_make_read_file(),
+-                list_directory=_make_list_directory(),
+-            )
+-
+-    def test_validate_review_tool_provided_to_llm(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
+-        review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+@@ -948,14 +889,1 @@
+         )
+-        tool_names = {t.__name__ for t in llm._client.received_tools[0]}
+-        assert "validate_review" in tool_names
+-
+-    def test_tool_calls_read_file_for_context(self) -> None:
+-        rf = _make_read_file({"src/foo.py": "import os\nimport sys\n"})
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text=_VALID_JSON_RESPONSE,
+-                    tool_calls=[
+-                        ToolCall(name="read_file", args={"path": "src/foo.py"})
+-                    ],
+-                )
+@@ -962,11 +904,2 @@
+             ]
+         )
+-        result = review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=rf,
+-            list_directory=_make_list_directory(),
+-        )
+-        assert result["general_comment"] == (
+-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
+@@ -974,13 +961,1 @@
+ 
+-    def test_google_search_tool_present(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
+-        review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        raw_tools = llm._client.received_raw_tools[0]
+-        assert any(
+-            getattr(tool, "google_search", None) is not None for tool in raw_tools
+@@ -988,12 +985,1 @@
+ 
+-    def test_resumes_when_llm_ends_on_function_call(self) -> None:
+-        # Reproduces issue #57: the model ends its turn on a function_call
+-        # (no text) after exhausting its tool-call budget. review() resumes
+-        # and the second turn yields the JSON review.
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text=None,
+-                    pending_function_call=ToolCall(
+-                        name="list_directory", args={"path": "src"}
+-                    ),
+@@ -1000,10 +1005,3 @@
+                 ),
+-                ScriptedResponse(text=_VALID_JSON_RESPONSE),
+             ]
+         )
+-        result = review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+@@ -1010,3 +1010,1 @@
+         )
+-        assert result["general_comment"] == (
+-            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good."
+@@ -1014,47 +1018,2 @@
+ 
+-    def test_raises_clear_error_when_llm_never_returns_text(self) -> None:
+-        # When the model never produces text (even after resume attempts),
+-        # a NoReviewText exception is raised instead of a cryptic
+-        # JSONDecodeError.
+-        no_text = ScriptedResponse(
+-            text=None,
+-            pending_function_call=ToolCall(
+-                name="list_directory", args={"path": "src"}
+-            ),
+-        )
+-        llm = FakeLLMClient([no_text, no_text, no_text, no_text])
+-        with pytest.raises(NoReviewText, match="no review text"):
+-            review_diff_structured(
+-                llm,
+-                diff=_SIMPLE_DIFF,
+-                description=None,
+-                read_file=_make_read_file(),
+-                list_directory=_make_list_directory(),
+-            )
+ 
+-    def test_system_instruction_passed_to_llm_config(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
+-        review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        config = llm._client.received_configs[0]
+-        assert config.system_instruction == STRUCTURED_SYSTEM_INSTRUCTION
+-
+-    def test_agents_md_sent_as_extra_context_part(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
+-        review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            agents_md="# Rules\nBe nice.",
+-        )
+-        message = llm._client.received_prompts[0]
+-        assert isinstance(message, list)
+-        assert "Be nice." in message[0].text
+-        assert _SIMPLE_DIFF in _prompt_text(message)
+@@ -1062,9 +1027,1 @@
+ 
+-class TestReviewDiffMetrics:
+-    def test_review_diff_populates_metrics(self) -> None:
+-        llm = FakeLLMClient(
+-            [
+-                ScriptedResponse(
+-                    text="ok", tokens_input=10, tokens_output=20, tokens_thinking=30
+-                )
+-            ]
+@@ -1071,14 +1034,1 @@
+         )
+-        metrics = ReviewMetrics()
+-        review_diff(
+-            llm,
+-            diff="some diff",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            metrics=metrics,
+-        )
+-        assert metrics.model_name == "gemini-3-flash-preview"
+-        assert metrics.tokens_input == 10
+-        assert metrics.tokens_output == 20
+-        assert metrics.tokens_thinking == 30
+@@ -1085,3 +1058,1 @@
+ 
+-    def test_review_diff_structured_populates_metrics(self) -> None:
+-        llm = FakeLLMClient(
+@@ -1088,6 +1063,1 @@
+             [
+-                ScriptedResponse(
+-                    text=_VALID_JSON_RESPONSE,
+-                    tokens_input=100,
+-                    tokens_output=200,
+-                    tokens_thinking=300,
+@@ -1094,38 +1068,3 @@
+                 )
+             ]
+         )
+-        metrics = ReviewMetrics()
+-        review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            metrics=metrics,
+-        )
+-        assert metrics.model_name == "gemini-3-flash-preview"
+-        assert metrics.tokens_input == 100
+-        assert metrics.tokens_output == 200
+-        assert metrics.tokens_thinking == 300
+-
+-    def test_review_diff_none_metrics_no_error(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        review_diff(
+-            llm,
+-            diff="d",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        # No error — backwards compatible
+-
+-    def test_review_diff_structured_none_metrics_no_error(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text=_VALID_JSON_RESPONSE)])
+-        review_diff_structured(
+-            llm,
+-            diff=_SIMPLE_DIFF,
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-        )
+-        # No error — backwards compatible
+@@ -1132,3 +1073,1 @@
+ 
+-    def test_review_diff_populates_tool_call_metrics(self) -> None:
+-        from maas_code_reviewer.llm_client import DEFAULT_MAX_TOOL_CALLS
+@@ -1135,14 +1080,1 @@
+ 
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        metrics = ReviewMetrics()
+-        review_diff(
+-            llm,
+-            diff="some diff",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            metrics=metrics,
+-        )
+-        assert metrics.tool_call_limit == DEFAULT_MAX_TOOL_CALLS
+-        assert metrics.tool_call_limit_reached is False
+-        assert metrics.resume_attempts == 0
+@@ -1149,14 +1088,1 @@
+ 
+-    def test_review_diff_custom_max_tool_calls_in_metrics(self) -> None:
+-        llm = FakeLLMClient([ScriptedResponse(text="ok")])
+-        metrics = ReviewMetrics()
+-        review_diff(
+-            llm,
+-            diff="some diff",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            metrics=metrics,
+-            max_tool_calls=42,
+-        )
+-        assert metrics.tool_call_limit == 42
+@@ -1163,7 +1096,1 @@
+ 
+-    def test_review_diff_records_limit_reached_in_metrics(self) -> None:
+-        no_text = ScriptedResponse(
+-            text=None,
+-            pending_function_call=ToolCall(
+-                name="list_directory", args={"path": "src"}
+-            ),
+@@ -1170,10 +1125,1 @@
+         )
+-        llm = FakeLLMClient([no_text, ScriptedResponse(text="ok")])
+-        metrics = ReviewMetrics()
+-        review_diff(
+-            llm,
+-            diff="some diff",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            metrics=metrics,
+@@ -1180,3 +1139,1 @@
+         )
+-        assert metrics.tool_call_limit_reached is True
+-        assert metrics.resume_attempts == 1
+@@ -1183,11 +1145,1 @@
+ 
+-    def test_empty_diff_metrics_have_zero_tool_call_fields(self) -> None:
+-        llm = FakeLLMClient()
+-        metrics = ReviewMetrics()
+-        review_diff_structured(
+-            llm,
+-            diff="",
+-            description=None,
+-            read_file=_make_read_file(),
+-            list_directory=_make_list_directory(),
+-            metrics=metrics,
+@@ -1194,4 +1169,1 @@
+         )
+-        assert metrics.tool_call_limit == 0
+-        assert metrics.tool_call_limit_reached is False
+-        assert metrics.resume_attempts == 0

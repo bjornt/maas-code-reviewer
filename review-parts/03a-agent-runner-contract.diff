@@ -1,0 +1,271 @@
+diff --git a/src/maas_code_reviewer/agent_runner.py b/src/maas_code_reviewer/agent_runner.py
+new file mode 100644
+index 0000000..3c0a5cd
+--- /dev/null
++++ b/src/maas_code_reviewer/agent_runner.py
+@@ -0,0 +1,120 @@
++# Copyright 2026 Canonical Ltd.  This software is licensed under the
++# GNU Affero General Public License version 3 (see the file LICENSE).
++
++"""Synchronous application boundary for one isolated, non-resumable agent review.
++
++No provider, protocol SDK, process, publication client, or filesystem callback
++belongs in this contract. The reviewer validates terminal output against the
++original full diff before decorating or publishing it.
++"""
++
++from dataclasses import dataclass, field
++from enum import StrEnum
++from pathlib import Path
++from typing import Protocol
++
++
++class CompletionStatus(StrEnum):
++    COMPLETED = "completed"
++    CANCELLED = "cancelled"
++    REFUSED = "refused"
++    LIMIT_REACHED = "limit_reached"
++
++
++@dataclass(frozen=True)
++class ReviewRequest:
++    """Host-owned inputs; repository contents must never select runtime policy.
++
++    The caller keeps repository_path alive for the whole synchronous run. The
++    timeout covers startup and the turn; cleanup may use a bounded grace period.
++    task_prompt may be bounded, but full_diff must retain the original input.
++    """
++
++    repository_path: Path
++    full_diff: str
++    task_prompt: str
++    system_instruction: str
++    timeout_seconds: float
++    model: str | None = None
++    mcp_servers: tuple[dict, ...] = ()
++
++
++@dataclass(frozen=True)
++class AgentUsage:
++    """Only reported measurements; None is unavailable, not a measured zero.
++
++    Token fields are reported independently: input, cache, and total semantics
++    can differ by harness. Do not derive totals or sum cumulative notifications.
++    """
++
++    input_tokens: int | None = None
++    output_tokens: int | None = None
++    cache_read_tokens: int | None = None
++    cache_write_tokens: int | None = None
++    thinking_tokens: int | None = None
++    total_tokens: int | None = None
++    cost: float | None = None
++    cost_currency: str | None = None
++
++
++@dataclass(frozen=True)
++class AgentRunResult:
++    """One terminal message, never a concatenated protocol transcript.
++
++    Only COMPLETED with nonempty, host-validated terminal_text is publishable.
++    agent_name/version describe the initialized harness; model is the resolved
++    identity when available, not merely the user's requested selector.
++    """
++
++    terminal_text: str
++    status: CompletionStatus
++    agent_name: str
++    agent_version: str | None = None
++    model: str | None = None
++    usage: AgentUsage = field(default_factory=AgentUsage)
++
++
++class AgentRunner(Protocol):
++    def run(self, request: ReviewRequest) -> AgentRunResult:
++        """Complete one job synchronously; return only after bounded teardown."""
++        ...
++
++
++class AgentRunnerError(RuntimeError):
++    """A non-publishable failure, optionally carrying actually reported usage."""
++
++    def __init__(self, message: str, *, usage: AgentUsage | None = None) -> None:
++        super().__init__(message)
++        self.usage = usage
++
++
++class RunnerConfigurationError(AgentRunnerError):
++    """Missing/invalid trusted configuration or an unsupported explicit model."""
++
++
++class RunnerStartupError(AgentRunnerError):
++    """The isolated job or harness could not start."""
++
++
++class RunnerTransportError(AgentRunnerError):
++    """Protocol/process failure, including unexpected EOF or malformed frames."""
++
++
++class RunnerTimeoutError(AgentRunnerError):
++    """The total startup/turn deadline expired."""
++
++
++class RunnerCancelledError(AgentRunnerError):
++    """The review was cancelled; partial output must not be published."""
++
++
++class RunnerRefusedError(AgentRunnerError):
++    """The harness refused the task."""
++
++
++class RunnerLimitError(AgentRunnerError):
++    """The harness exhausted its token/request limit without a complete review."""
++
++
++class RunnerResultError(AgentRunnerError):
++    """Missing/invalid terminal output or ambiguous completion."""
+diff --git a/tests/fake_agent_runner.py b/tests/fake_agent_runner.py
+new file mode 100644
+index 0000000..6eeb9c2
+--- /dev/null
++++ b/tests/fake_agent_runner.py
+@@ -0,0 +1,41 @@
++# Copyright 2026 Canonical Ltd.  This software is licensed under the
++# GNU Affero General Public License version 3 (see the file LICENSE).
++
++from maas_code_reviewer.agent_runner import (
++    AgentRunnerError,
++    AgentRunResult,
++    ReviewRequest,
++)
++
++
++class FakeAgentRunner:
++    """Return controlled terminal outcomes without importing a runtime SDK.
++
++    Requests are exposed for policy tests (especially empty/skip paths). Failed
++    runs can report partial usage through the same exception as a real runner.
++    `outcomes` scripts a sequence of returns, one per run() call, for repair
++    tests; later calls fall back to the mutable `outcome` attribute so tests
++    can still adjust the outcome between invocations.
++    """
++
++    def __init__(
++        self,
++        outcome: AgentRunResult | AgentRunnerError | None = None,
++        *,
++        outcomes: list[AgentRunResult | AgentRunnerError] | None = None,
++    ) -> None:
++        self.outcomes = list(outcomes) if outcomes is not None else None
++        self.outcome = self.outcomes[0] if self.outcomes else outcome
++        self.requests: list[ReviewRequest] = []
++
++    def run(self, request: ReviewRequest) -> AgentRunResult:
++        self.requests.append(request)
++        if self.outcomes is not None and len(self.requests) <= len(self.outcomes):
++            outcome = self.outcomes[len(self.requests) - 1]
++        else:
++            outcome = self.outcome
++        if outcome is None:
++            raise AssertionError("FakeAgentRunner has no outcome to return")
++        if isinstance(outcome, AgentRunnerError):
++            raise outcome
++        return outcome
+diff --git a/tests/test_fakes.py b/tests/test_fakes.py
+index 4782184..1948f66 100644
+--- a/tests/test_fakes.py
++++ b/tests/test_fakes.py
+@@ -7,11 +7,19 @@
+ 
+ import pytest
+ 
++from maas_code_reviewer.agent_runner import (
++    AgentRunnerError,
++    AgentRunResult,
++    AgentUsage,
++    CompletionStatus,
++    ReviewRequest,
++    RunnerTransportError,
++)
+ from maas_code_reviewer.launchpad_client import web_url_to_api_url
++from tests.fake_agent_runner import FakeAgentRunner
+ from tests.fake_git import FakeGitClient
+ from tests.fake_launchpadlib import (
+     FakeLaunchpad,
+     make_fake_comment,
+     make_fake_mp,
+ )
+-from tests.fake_llm import FakeLLMClient, ScriptedResponse, ToolCall
+@@ -32,1 +28,9 @@
++def _make_request() -> ReviewRequest:
++    return ReviewRequest(
++        repository_path=Path("/repo"),
++        full_diff="diff --git a/x b/x\n",
++        task_prompt="Review the diff.",
++        system_instruction="You review diffs.",
++        timeout_seconds=300.0,
++    )
+ 
+@@ -46,3 +38,9 @@
++def _make_result(text: str = "{}") -> AgentRunResult:
++    return AgentRunResult(
++        terminal_text=text,
++        status=CompletionStatus.COMPLETED,
++        agent_name="omp",
++    )
+ 
+ 
+ class TestFakeLaunchpadlibEdgeCases:
+@@ -84,3 +82,52 @@
+         assert bare_repo.exists()
+         # A bare repo has a HEAD file at the top level
+         assert (bare_repo / "HEAD").exists()
++
++
++class TestFakeAgentRunnerEdgeCases:
++    def test_raises_when_no_outcome(self) -> None:
++        runner = FakeAgentRunner()
++
++        with pytest.raises(AssertionError, match="no outcome to return"):
++            runner.run(_make_request())
++
++    def test_returns_single_outcome_for_every_call(self) -> None:
++        outcome = _make_result()
++        runner = FakeAgentRunner(outcome)
++        first, second = _make_request(), _make_request()
++
++        assert runner.run(first) is outcome
++        assert runner.run(second) is outcome
++        assert runner.requests == [first, second]
++
++    def test_scripts_one_outcome_per_call_then_falls_back(self) -> None:
++        first, second = _make_result("one"), _make_result("two")
++        runner = FakeAgentRunner(outcomes=[first, second])
++
++        assert runner.run(_make_request()) is first
++        assert runner.run(_make_request()) is second
++        assert runner.run(_make_request()) is first
++
++    def test_empty_outcomes_falls_back_to_outcome(self) -> None:
++        outcome = _make_result()
++        runner = FakeAgentRunner(outcome, outcomes=[])
++
++        assert runner.run(_make_request()) is outcome
++
++    def test_raises_scripted_error_and_keeps_partial_usage(self) -> None:
++        usage = AgentUsage(input_tokens=5)
++        runner = FakeAgentRunner(RunnerTransportError("connection lost", usage=usage))
++
++        with pytest.raises(RunnerTransportError, match="connection lost") as info:
++            runner.run(_make_request())
++
++        assert info.value.usage is usage
++        assert isinstance(info.value, AgentRunnerError)
++
++    def test_outcome_attribute_adjustable_between_calls(self) -> None:
++        runner = FakeAgentRunner(_make_result())
++        replacement = _make_result("replaced")
++
++        assert runner.run(_make_request()).terminal_text == "{}"
++        runner.outcome = replacement
++        assert runner.run(_make_request()) is replacement
