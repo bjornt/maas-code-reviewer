@@ -1,0 +1,992 @@
+diff --git a/src/maas_code_reviewer/review_schema.py b/src/maas_code_reviewer/review_schema.py
+index 6cc3978..970a20f 100644
+--- a/src/maas_code_reviewer/review_schema.py
++++ b/src/maas_code_reviewer/review_schema.py
+@@ -1,6 +1,12 @@
+ # Copyright 2026 Canonical Ltd.  This software is licensed under the
+ # GNU Affero General Public License version 3 (see the file LICENSE).
+ 
++import ast
++import json
++import os
++from collections.abc import Set
++from pathlib import Path
++
+ REVIEW_JSON_SCHEMA: dict = {
+     "type": "object",
+     "required": ["general_comment", "inline_comments"],
+@@ -17,71 +23,120 @@
+ }
+ 
+ 
+-def parse_diff_files_and_lines(diff_text: str) -> dict[str, set[int]]:
+-    """Extract the set of valid file paths and changed line numbers from a unified diff.
++def parse_diff_files_and_lines(
++    diff_text: str,
++    *,
++    path_prefix: str | None = None,
++    repository_files: Set[str] = frozenset(),
++) -> dict[str, set[int]]:
++    """Map repository-relative new-side paths to lines in unified diff hunks.
+ 
+-    Returns a dict mapping file path → set of new-side line numbers that
+-    appear in the diff hunk headers and added/context lines.  Only lines
+-    that are actually present in the new version of the file (i.e. not
+-    deletion-only lines starting with ``-``) are included.
++    New-side diff paths are resolved to repository coordinates against
++    rename/copy targets, the old-side path, the ``path_prefix`` override,
++    and the original checkout listing — never against model output.
+     """
+     result: dict[str, set[int]] = {}
+     current_file: str | None = None
+-    current_line: int = 0
+-
+-    for raw_line in diff_text.splitlines():
+-        if raw_line.startswith("+++ "):
+-            # Extract the file path, stripping the "b/" prefix if present.
+-            path = raw_line[4:]
+-            if path.startswith("b/"):
+-                path = path[2:]
+-            if path != "/dev/null":
+-                current_file = path
+-                if current_file not in result:
+-                    result[current_file] = set()
+-            else:
+-                current_file = None
+-            continue
++    current_line = 0
++    old_remaining = new_remaining = 0
++    old_path: str | None = None
++    git_header: str | None = None
++    renamed_path: str | None = None
+ 
+-        if raw_line.startswith("--- "):
+-            # Handled via +++
+-            continue
++    for raw_line in diff_text.removesuffix("\n").split("\n"):
++        raw_line = raw_line.removesuffix("\r")
++        if old_remaining or new_remaining:
++            # Hunk content is interpreted before headers: an added line may
++            # itself look like "+++ " or "diff --git" metadata.
++            if raw_line.startswith("+") and new_remaining:
++                if current_file is not None:
++                    result[current_file].add(current_line)
++                current_line += 1
++                new_remaining -= 1
++                continue
++            if raw_line.startswith("-") and old_remaining:
++                old_remaining -= 1
++                continue
++            if (
++                (raw_line.startswith(" ") or raw_line == "")
++                and old_remaining
++                and new_remaining
++            ):
++                if current_file is not None:
++                    result[current_file].add(current_line)
++                current_line += 1
++                old_remaining -= 1
++                new_remaining -= 1
++                continue
++            if raw_line.startswith("\\"):
++                # "\ No newline at end of file"
++                continue
++            # Malformed hunk: give up on the remainder of this hunk and let
++            # the line be interpreted as a header again.
++            old_remaining = new_remaining = 0
+ 
+-        if raw_line.startswith("@@ "):
+-            # Parse the new-file start line from the hunk header.
+-            # Format: @@ -old_start[,old_count] +new_start[,new_count] @@
++        if raw_line.startswith("diff --git "):
++            current_file = old_path = renamed_path = None
++            git_header = raw_line.removeprefix("diff --git ")
++        elif raw_line.startswith(("rename to ", "copy to ")):
++            renamed_path = _decode_diff_path(raw_line.split(" to ", 1)[1])
++        elif raw_line.startswith("--- "):
++            current_file = None
++            old_path = _decode_diff_path(raw_line[4:])
++        elif raw_line.startswith("+++ "):
++            encoded_path = raw_line[4:].partition("\t")[0]
++            path = _decode_diff_path(encoded_path)
++            if old_path == "/dev/null" and git_header is not None:
++                # A new file still records the old-side name in the
++                # "diff --git a/<old> b/<new>" header.
++                suffix = " " + encoded_path
++                if git_header.endswith(suffix):
++                    old_path = _decode_diff_path(git_header[: -len(suffix)])
++            current_file = (
++                _repository_path(
++                    path, old_path, renamed_path, path_prefix, repository_files
++                )
++                if path is not None and path != "/dev/null"
++                else None
++            )
++            git_header = renamed_path = None
++            if current_file is not None:
++                result.setdefault(current_file, set())
++        elif raw_line.startswith("@@ "):
+             parts = raw_line.split(" ")
+-            for part in parts:
+-                if part.startswith("+"):
+-                    line_info = part[1:]
+-                    if "," in line_info:
+-                        line_info = line_info.split(",")[0]
+-                    try:
+-                        current_line = int(line_info)
+-                    except ValueError:
+-                        current_line = 0
+-                    break
+-            continue
+-
+-        if current_file is None:
+-            continue
+-
+-        if raw_line.startswith("-"):
+-            # Deletion line — does not appear in new file; skip without
+-            # advancing the new-file line counter.
+-            continue
+-
+-        if raw_line.startswith("+") or raw_line.startswith(" ") or raw_line == "":
+-            # Added line (+), context line ( ), or a bare empty line (some diff
+-            # generators strip the trailing space from empty context lines) —
+-            # all present in the new file.
+-            result[current_file].add(current_line)
+-            current_line += 1
++            if (
++                len(parts) < 4
++                or not parts[1].startswith("-")
++                or not parts[2].startswith("+")
++                or parts[3] != "@@"
++            ):
++                continue
++            try:
++                old_start, old_remaining = _hunk_range(parts[1][1:])
++                current_line, new_remaining = _hunk_range(parts[2][1:])
++            except ValueError:
++                old_remaining = new_remaining = 0
++                continue
++            if (
++                old_start < 0
++                or current_line < 0
++                or old_remaining < 0
++                or new_remaining < 0
++                or (old_remaining and old_start == 0)
++                or (new_remaining and current_line == 0)
++            ):
++                old_remaining = new_remaining = 0
+ 
+     return result
+ 
+ 
+-def validate_review_json(data: dict, diff_text: str) -> list[str]:
++def validate_review_json(
++    data: dict,
++    diff_text: str,
++    *,
++    path_prefix: str | None = None,
++    repository_files: Set[str] = frozenset(),
++) -> list[str]:
+     """Validate *data* against the review JSON schema and against the diff.
+ 
+     Returns a list of error strings.  An empty list means the data is valid.
+@@ -92,12 +147,19 @@
+     2. ``general_comment`` must be present and be a ``str``.
+     3. ``inline_comments`` must be present and be a ``dict``.
+     4. Each value in ``inline_comments`` must be a ``dict``.
+-    5. Each key in each per-file dict must be a string that represents an
+-       integer (the line number).
++    5. Each key in each per-file dict must be a canonical positive decimal
++       integer string (the line number): ASCII digits only, no leading
++       zeros, signs, or surrounding whitespace.
+     6. Each value in each per-file dict must be a ``str``.
+-    7. Each file path in ``inline_comments`` must appear in the diff.
++    7. Each file path in ``inline_comments`` must be repository-relative
++       without traversal (non-empty, no backslashes, NUL bytes, ``.``,
++       ``..``, or empty path segments, or drive/scp-style colons) and must
++       appear in the diff.
+     8. Each line number in ``inline_comments`` must appear in the diff for
+        that file.
++    9. New-side diff paths are resolved to repository coordinates against
++       rename/copy targets, the old-side path, the ``path_prefix``
++       override, and the original checkout listing (``repository_files``).
+     """
+     errors: list[str] = []
+ 
+@@ -122,9 +184,24 @@
+         errors.append(f"'inline_comments' must be a JSON object (dict), got {got}.")
+         return errors
+ 
+-    diff_files = parse_diff_files_and_lines(diff_text)
++    diff_files = parse_diff_files_and_lines(
++        diff_text, path_prefix=path_prefix, repository_files=repository_files
++    )
+ 
+     for file_path, line_comments in inline.items():
++        if (
++            not isinstance(file_path, str)
++            or not file_path
++            or "\\" in file_path
++            or "\x00" in file_path
++            or ":" in file_path.split("/")[0]
++            or any(part in ("", ".", "..") for part in file_path.split("/"))
++        ):
++            errors.append(
++                f"File path {file_path!r} must be repository-relative "
++                "without traversal."
++            )
++            continue
+         if not isinstance(line_comments, dict):
+             errors.append(
+                 f"inline_comments[{file_path!r}] must be a JSON object (dict), "
+@@ -142,15 +219,22 @@
+         valid_lines = diff_files.get(file_path, set())
+ 
+         for line_key, comment in line_comments.items():
+-            # Validate that the key looks like an integer.
+-            try:
+-                line_number = int(line_key)
+-            except ValueError:
++            if (
++                not isinstance(line_key, str)
++                or not line_key.isascii()
++                or not line_key.isdecimal()
++                or line_key.startswith("0")
++            ):
+                 errors.append(
+                     f"inline_comments[{file_path!r}]: line key {line_key!r} is not "
+-                    f"a valid integer string."
++                    "a positive decimal integer string."
+                 )
+                 continue
++            try:
++                line_number = int(line_key)
++            except ValueError:
++                errors.append(f"Line number {line_key!r} is too large.")
++                continue
+ 
+             if not isinstance(comment, str):
+                 errors.append(
+@@ -164,3 +248,120 @@
+                 )
+ 
+     return errors
++
++
++def parse_review_document(
++    text: str,
++    *,
++    diff_text: str,
++    path_prefix: str | None = None,
++    repository_files: Set[str] = frozenset(),
++) -> tuple[dict | None, str | None]:
++    """Parse one terminal review document and validate it against the diff.
++
++    The text must be exactly one JSON object, optionally inside one exact
++    code fence: an opening line of ``` or ```json and a closing ``` line,
++    with no prose before or after. Non-JSON numeric constants (NaN,
++    Infinity, -Infinity) are rejected. Returns (document, None) when the
++    document is publishable, otherwise (None, failure) with a message
++    describing every reason it is not. Shared by the reviewer (host
++    validation) and the in-session validate_review tool.
++    """
++    text = text.strip()
++    if text.startswith("```"):
++        lines = text.splitlines()
++        if lines[0] not in ("```", "```json") or lines[-1] != "```":
++            return None, "Review must contain one JSON object or exact JSON fence."
++        text = "\n".join(lines[1:-1])
++    try:
++        result = json.loads(text, parse_constant=_reject_json_constant)
++    except ValueError as exc:
++        return None, f"Invalid review JSON: {exc}"
++    errors = validate_review_json(
++        result, diff_text, path_prefix=path_prefix, repository_files=repository_files
++    )
++    if errors:
++        return None, "Invalid review document: " + "\n".join(errors)
++    return result, None
++
++
++def repository_files(root: Path) -> frozenset[str]:
++    """List repository-relative files and symlinked directories under *root*."""
++    paths: set[str] = set()
++    for directory, directories, files in os.walk(root, followlinks=False):
++        directories[:] = [name for name in directories if name.casefold() != ".git"]
++        relative = Path(directory).relative_to(root)
++        paths.update(
++            (relative / name).as_posix() for name in files if name.casefold() != ".git"
++        )
++        paths.update(
++            (relative / name).as_posix()
++            for name in directories
++            if (Path(directory) / name).is_symlink()
++        )
++    return frozenset(paths)
++
++
++def _decode_diff_path(value: str) -> str | None:
++    value = value.partition("\t")[0]
++    if not value.startswith('"'):
++        return value
++    # Git quotes C byte strings, including octal UTF-8 and literal Unicode.
++    encoded = value.encode("utf-8").decode("ascii", "backslashreplace")
++    try:
++        path = ast.literal_eval("b" + encoded)
++    except (SyntaxError, ValueError):
++        return None
++    return os.fsdecode(path) if isinstance(path, bytes) else None
++
++
++def _repository_path(
++    path: str,
++    old_path: str | None,
++    renamed_path: str | None,
++    prefix: str | None,
++    repository_files: Set[str],
++) -> str:
++    if prefix is not None:
++        if not path.startswith(prefix) or not path[len(prefix) :]:
++            raise ValueError(
++                f"Diff path {path!r} does not match --diff-prefix {prefix!r}"
++            )
++        return path[len(prefix) :]
++    if renamed_path is not None and path.endswith(renamed_path):
++        return renamed_path
++    if old_path is not None and old_path.startswith("a/") and path.startswith("b/"):
++        return path[2:]
++
++    candidates = [
++        path[index:] for index in range(len(path)) if path[index:] in repository_files
++    ]
++    if len(candidates) > 1:
++        raise ValueError(
++            f"Ambiguous diff path {path!r}; specify --diff-prefix PREFIX "
++            "(use an empty string for prefix-free paths)"
++        )
++    if candidates:
++        return candidates[0]
++
++    if old_path == path:
++        return path
++    if old_path is not None and old_path != "/dev/null":
++        old_parts, new_parts = old_path.split("/"), path.split("/")
++        count = 0
++        for old, new in zip(reversed(old_parts), reversed(new_parts)):
++            if old != new:
++                break
++            count += 1
++        if count:
++            return "/".join(new_parts[-count:])
++    return path.removeprefix("b/")
++
++
++def _hunk_range(value: str) -> tuple[int, int]:
++    start, separator, count = value.partition(",")
++    return int(start), int(count) if separator else 1
++
++
++def _reject_json_constant(value: str) -> None:
++    raise ValueError(f"Non-JSON numeric constant: {value}")
+diff --git a/tests/test_review_schema.py b/tests/test_review_schema.py
+index 05518d0..4dc7933 100644
+--- a/tests/test_review_schema.py
++++ b/tests/test_review_schema.py
+@@ -1,8 +1,15 @@
+ # Copyright 2026 Canonical Ltd.  This software is licensed under the
+ # GNU Affero General Public License version 3 (see the file LICENSE).
+ 
++import json
++from pathlib import Path
++
++import pytest
++
+ from maas_code_reviewer.review_schema import (
+     parse_diff_files_and_lines,
++    parse_review_document,
++    repository_files,
+     validate_review_json,
+ )
+ 
+@@ -185,15 +192,246 @@
+         result = parse_diff_files_and_lines(diff)
+         assert "plain.py" in result
+ 
+-    def test_malformed_hunk_header_sets_line_to_zero(self) -> None:
+-        # If the hunk header has a non-integer new-file start, the parser
+-        # falls back to current_line = 0 and still processes subsequent lines.
++    def test_diff_git_header_alone_records_no_file(self) -> None:
++        # A header without a patch authorizes nothing.
++        result = parse_diff_files_and_lines("diff --git a/x.py b/x.py\n")
++        assert result == {}
++
++    def test_rename_to_target_is_the_repository_path(self) -> None:
++        diff = (
++            "diff --git previous/old/name.py current/new/name.py\n"
++            "rename from old/name.py\n"
++            "rename to new/name.py\n"
++            "--- previous/old/name.py\n"
++            "+++ current/new/name.py\n"
++            "@@ -1 +1 @@\n"
++            "-old\n"
++            "+new\n"
++        )
++        result = parse_diff_files_and_lines(
++            diff, repository_files=frozenset({"new/name.py", "name.py"})
++        )
++        assert result == {"new/name.py": {1}}
++
++    def test_copy_to_target_is_the_repository_path(self) -> None:
++        diff = (
++            "diff --git previous/old/name.py current/new/name.py\n"
++            "copy from old/name.py\n"
++            "copy to new/name.py\n"
++            "--- previous/old/name.py\n"
++            "+++ current/new/name.py\n"
++            "@@ -1 +1 @@\n"
++            "-old\n"
++            "+new\n"
++        )
++        result = parse_diff_files_and_lines(
++            diff, repository_files=frozenset({"new/name.py", "name.py"})
++        )
++        assert result == {"new/name.py": {1}}
++
++    def test_dev_null_source_with_git_header_resolves_prefixed_new_file(self) -> None:
++        # The old-side name is recovered from the "diff --git" header, so the
++        # common-suffix ladder can resolve the prefixed new-file path.
++        diff = (
++            "diff --git before/x.py after/x.py\n"
++            "--- /dev/null\n"
++            "+++ after/x.py\n"
++            "@@ -0,0 +1 @@\n"
++            "+new\n"
++        )
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"x.py": {1}}
++
++    def test_crlf_diff_parses_like_lf(self) -> None:
++        diff = "--- i/file.py\n+++ w/file.py\n@@ -1 +1 @@\n-old\n+new\n"
++        result = parse_diff_files_and_lines(diff.replace("\n", "\r\n"))
++        assert result == {"file.py": {1}}
++
++    def test_tab_timestamp_after_path_is_ignored(self) -> None:
++        diff = (
++            "--- a/x.py\n"
++            "+++ b/x.py\t2026-10-27 10:00:00\n"
++            "@@ -1 +1 @@\n"
++            "-old\n"
++            "+new\n"
++        )
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"x.py": {1}}
++
++    @pytest.mark.parametrize(
++        ("diff", "expected"),
++        [
++            (
++                '--- "before/caf\\303\\251.py"\told stamp\n'
++                '+++ "after/caf\\303\\251.py"\tnew stamp\n'
++                "@@ -1 +1 @@\n"
++                "-old\n"
++                "+new\n",
++                {"café.py": {1}},
++            ),
++            (
++                '--- "target/é.py"\n'
++                '+++ "target/é.py"\n'
++                "@@ -1 +1 @@\n"
++                "-old\n"
++                "+new\n",
++                {"target/é.py": {1}},
++            ),
++        ],
++    )
++    def test_quoted_c_style_paths_are_decoded(
++        self, diff: str, expected: dict[str, set[int]]
++    ) -> None:
++        assert parse_diff_files_and_lines(diff) == expected
++
++    @pytest.mark.parametrize(
++        "encoded_path", ['"unterminated', '"x" + "y"', '"x", "y"']
++    )
++    def test_malformed_quoted_path_records_no_file(self, encoded_path: str) -> None:
++        diff = f"--- a/x.py\n+++ {encoded_path}\n@@ -1 +1 @@\n-old\n+new\n"
++        assert parse_diff_files_and_lines(diff) == {}
++
++    def test_hunk_content_looking_like_a_header_stays_content(self) -> None:
++        # While the declared hunk budgets remain, content-shaped lines are
++        # content, not headers — the old parser could be hijacked this way.
++        diff = (
++            "--- a/x.py\n"
++            "+++ b/x.py\n"
++            "@@ -1 +1,2 @@\n"
++            "-old\n"
++            "+diff --git a/evil.py b/evil.py\n"
++            "+second\n"
++        )
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"x.py": {1, 2}}
++        assert "evil.py" not in result
++
++    def test_no_newline_marker_is_skipped(self) -> None:
++        # "\ No newline at end of file" consumes no budget and no line number.
++        diff = (
++            "--- a/x.py\n"
++            "+++ b/x.py\n"
++            "@@ -1,2 +1,2 @@\n"
++            " line1\n"
++            "\\ No newline at end of file\n"
++            " line2\n"
++        )
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"x.py": {1, 2}}
++
++    def test_truncated_hunk_recovers_at_next_file_header(self) -> None:
++        diff = (
++            "--- a/x.py\n"
++            "+++ b/x.py\n"
++            "@@ -1,5 +1,5 @@\n"
++            " line1\n"
++            " line2\n"
++            "diff --git a/b.py b/b.py\n"
++            "--- a/b.py\n"
++            "+++ b/b.py\n"
++            "@@ -1 +1 @@\n"
++            "+x\n"
++        )
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"x.py": {1, 2}, "b.py": {1}}
++
++    def test_malformed_hunk_header_records_no_lines(self) -> None:
++        # A non-integer new-file start sets no budgets; its content is not
++        # recorded (the old parser recorded a bogus line 0).
+         diff = "--- a/f.py\n+++ b/f.py\n@@ -1 +abc @@\n+added\n"
+         result = parse_diff_files_and_lines(diff)
+         assert "f.py" in result
+-        # current_line was set to 0 after ValueError, then the "+added"
+-        # line records line 0 and advances to 1.
+-        assert 0 in result["f.py"]
++        assert result["f.py"] == set()
++        assert 0 not in result["f.py"]
++
++    def test_short_hunk_header_is_rejected(self) -> None:
++        diff = "--- a/f.py\n+++ b/f.py\n@@ -1 +1\n+added\n"
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"f.py": set()}
++
++    def test_hunk_with_function_context_suffix_is_parsed(self) -> None:
++        diff = "--- a/f.py\n+++ b/f.py\n@@ -1,2 +1,2 @@ def main():\n one\n+two\n"
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"f.py": {1, 2}}
++
++    def test_zero_start_with_nonzero_count_is_rejected(self) -> None:
++        diff = "--- a/f.py\n+++ b/f.py\n@@ -0,1 +1,2 @@\n+added\n context\n"
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"f.py": set()}
++
++    def test_negative_start_is_rejected(self) -> None:
++        diff = "--- a/f.py\n+++ b/f.py\n@@ -1,2 +-1,2 @@\n+added\n context\n"
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"f.py": set()}
++
++    def test_path_prefix_strips_matching_prefix(self) -> None:
++        diff = "--- i/src/foo.py\n+++ w/src/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
++        result = parse_diff_files_and_lines(diff, path_prefix="w/")
++        assert result == {"src/foo.py": {1}}
++
++    def test_path_prefix_mismatch_raises_value_error(self) -> None:
++        diff = "--- a/src/foo.py\n+++ b/src/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
++        with pytest.raises(ValueError, match="--diff-prefix"):
++            parse_diff_files_and_lines(diff, path_prefix="wrong/")
++
++    def test_path_prefix_requires_nonempty_suffix(self) -> None:
++        # The whole path being the prefix leaves nothing to resolve.
++        diff = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
++        with pytest.raises(ValueError):
++            parse_diff_files_and_lines(diff, path_prefix="b/file.py")
++
++    def test_empty_path_prefix_preserves_prefix_free_paths(self) -> None:
++        # An empty prefix legitimately preserves a real directory named "b".
++        diff = "--- b/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
++        result = parse_diff_files_and_lines(diff, path_prefix="")
++        assert result == {"b/file.py": {1}}
++
++    def test_real_directory_named_b_not_stripped_without_a_prefix(self) -> None:
++        # Without a/… on the old side, "b/" is not stripped.
++        diff = "--- b/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"b/file.py": {1}}
++
++    def test_repository_files_listing_disambiguates_prefixed_path(self) -> None:
++        diff = "--- i/src/file.py\n+++ w/src/file.py\n@@ -1 +1 @@\n-old\n+new\n"
++        result = parse_diff_files_and_lines(
++            diff, repository_files=frozenset({"src/file.py"})
++        )
++        assert result == {"src/file.py": {1}}
++
++    def test_ambiguous_suffix_raises_value_error_naming_diff_prefix(self) -> None:
++        diff = (
++            "--- before/common/src/file.py\n"
++            "+++ after/common/src/file.py\n"
++            "@@ -1 +1 @@\n"
++            "-old\n"
++            "+new\n"
++        )
++        files = frozenset({"src/file.py", "file.py"})
++        with pytest.raises(ValueError) as exc_info:
++            parse_diff_files_and_lines(diff, repository_files=files)
++        assert "Ambiguous diff path" in str(exc_info.value)
++        assert "--diff-prefix" in str(exc_info.value)
++        result = parse_diff_files_and_lines(
++            diff, path_prefix="after/common/", repository_files=files
++        )
++        assert result == {"src/file.py": {1}}
++
++    def test_common_suffix_resolution_without_listing(self) -> None:
++        diff = (
++            "--- before/src/file.py\n"
++            "+++ after/src/file.py\n"
++            "@@ -1 +1 @@\n"
++            "-old\n"
++            "+new\n"
++        )
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"src/file.py": {1}}
++
++    def test_unprefixed_identical_paths_are_preserved(self) -> None:
++        diff = "--- src/foo.py\n+++ src/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
++        result = parse_diff_files_and_lines(diff)
++        assert result == {"src/foo.py": {1}}
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -340,3 +578,328 @@
+         }
+         errors = validate_review_json(data, SIMPLE_DIFF)
+         assert errors == []
++
++    @pytest.mark.parametrize(
++        "file_path",
++        [
++            "",
++            ".",
++            "..",
++            "/etc/passwd",
++            "src//foo.py",
++            "./src/foo.py",
++            "src/./foo.py",
++            "src/../foo.py",
++            "src/foo.py/",
++            "a\\b.py",
++            "a\x00b.py",
++            "C:/src/foo.py",
++            "host:src/foo.py",
++        ],
++    )
++    def test_unsafe_file_paths_are_rejected(self, file_path: str) -> None:
++        data = {
++            "general_comment": "ok",
++            "inline_comments": {file_path: {"1": "some comment"}},
++        }
++        errors = validate_review_json(data, SIMPLE_DIFF)
++        assert errors == [
++            f"File path {file_path!r} must be repository-relative "
++            "without traversal."
++        ]
++
++    def test_non_string_file_path_is_rejected(self) -> None:
++        data: dict = {"general_comment": "ok", "inline_comments": {2: {"1": "x"}}}
++        errors = validate_review_json(data, SIMPLE_DIFF)
++        assert len(errors) == 1
++        assert "must be repository-relative" in errors[0]
++
++    def test_legal_but_unusual_paths_still_validate(self) -> None:
++        diff = (
++            "--- a/src/foo bar.py\n"
++            "+++ b/src/foo bar.py\n"
++            "@@ -1 +1 @@\n"
++            "-old\n"
++            "+new\n"
++        )
++        data = {
++            "general_comment": "ok",
++            "inline_comments": {"src/foo bar.py": {"1": "comment"}},
++        }
++        assert validate_review_json(data, diff) == []
++
++    @pytest.mark.parametrize(
++        "line_key", ["", "0", "02", "+2", "-2", " 2", "2 ", "1_0", "1e2", "٢"]
++    )
++    def test_non_canonical_line_keys_are_rejected(self, line_key: str) -> None:
++        data = {
++            "general_comment": "ok",
++            "inline_comments": {"src/foo.py": {line_key: "some comment"}},
++        }
++        errors = validate_review_json(data, SIMPLE_DIFF)
++        assert len(errors) == 1
++        assert "positive decimal integer string" in errors[0]
++
++    @pytest.mark.parametrize(
++        ("diff", "file_path", "line_key"),
++        [
++            (SIMPLE_DIFF, "src/foo.py", "1"),
++            (SIMPLE_DIFF, "src/foo.py", "2"),
++            (TWO_FILE_DIFF, "src/bar.py", "10"),
++            (TWO_FILE_DIFF, "src/bar.py", "14"),
++            (NEW_FILE_DIFF, "new_module.py", "3"),
++        ],
++    )
++    def test_canonical_line_keys_are_valid(
++        self, diff: str, file_path: str, line_key: str
++    ) -> None:
++        data = {
++            "general_comment": "ok",
++            "inline_comments": {file_path: {line_key: "some comment"}},
++        }
++        assert validate_review_json(data, diff) == []
++
++    def test_oversized_line_key_reports_too_large(self) -> None:
++        # CPython refuses int() conversion beyond 4300 digits.
++        data = {
++            "general_comment": "ok",
++            "inline_comments": {"src/foo.py": {"1" * 5000: "some comment"}},
++        }
++        errors = validate_review_json(data, SIMPLE_DIFF)
++        assert len(errors) == 1
++        assert "too large" in errors[0]
++
++    @pytest.mark.parametrize(
++        ("source_prefix", "destination_prefix"),
++        [
++            ("i/", "w/"),
++            ("old/tree/", "new/tree/"),
++            ("left_", "right_"),
++            ("same/", "same/"),
++            ("", ""),
++            ("old prefix/", "new prefix/"),
++            ('source/é"/', 'target/é"/'),
++            ("before\u2028/", "after\u2028/"),
++            ("before\n/", "after\n/"),
++        ],
++    )
++    def test_arbitrary_prefix_pairs_authorize_only_repository_coordinates(
++        self, source_prefix: str, destination_prefix: str
++    ) -> None:
++        old_path = json.dumps(source_prefix + "src/file.py", ensure_ascii=False)
++        new_path = json.dumps(destination_prefix + "src/file.py", ensure_ascii=False)
++        diff = (
++            f"diff --git {old_path} {new_path}\n"
++            f"--- {old_path}\n"
++            f"+++ {new_path}\n"
++            "@@ -1,2 +1,2 @@\n"
++            " context\n"
++            "-old\n"
++            "+new\n"
++        )
++        files = frozenset({"src/file.py"})
++        data = {
++            "general_comment": "ok",
++            "inline_comments": {"src/file.py": {"2": "some comment"}},
++        }
++        assert validate_review_json(data, diff, repository_files=files) == []
++        data["inline_comments"]["src/file.py"]["3"] = "outside the hunk"
++        assert validate_review_json(data, diff, repository_files=files)
++        data["inline_comments"] = {"file.py": {"2": "wrong repository path"}}
++        assert validate_review_json(data, diff, repository_files=files)
++
++    def test_path_prefix_and_repository_files_reach_the_parser(self) -> None:
++        diff = "--- i/src/foo.py\n+++ w/src/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
++        data = {
++            "general_comment": "ok",
++            "inline_comments": {"src/foo.py": {"1": "some comment"}},
++        }
++        assert validate_review_json(
++            data,
++            diff,
++            path_prefix="w/",
++            repository_files=frozenset({"src/foo.py"}),
++        ) == []
++        # The parser resolved the diff coordinates; the model must use
++        # repository coordinates, not the prefixed diff path.
++        data["inline_comments"] = {"w/src/foo.py": {"1": "prefixed path"}}
++        assert validate_review_json(
++            data,
++            diff,
++            path_prefix="w/",
++            repository_files=frozenset({"src/foo.py"}),
++        )
++
++    def test_ambiguity_during_validation_raises_value_error(self) -> None:
++        diff = (
++            "--- before/common/src/file.py\n"
++            "+++ after/common/src/file.py\n"
++            "@@ -1 +1 @@\n"
++            "-old\n"
++            "+new\n"
++        )
++        data = {
++            "general_comment": "ok",
++            "inline_comments": {"src/file.py": {"1": "some comment"}},
++        }
++        with pytest.raises(ValueError):
++            validate_review_json(
++                data, diff, repository_files=frozenset({"src/file.py", "file.py"})
++            )
++
++
++PARSE_DOCUMENT = {
++    "general_comment": "ok",
++    "inline_comments": {"src/foo.py": {"2": "some comment"}},
++}
++
++
++class TestParseReviewDocument:
++    @pytest.mark.parametrize(
++        "wrapper",
++        [
++            lambda text: text,
++            lambda text: "```\n" + text + "\n```",
++            lambda text: "```json\n" + text + "\n```",
++        ],
++    )
++    def test_accepts_bare_and_fenced_objects(
++        self, wrapper, tmp_path: Path
++    ) -> None:
++        text = wrapper(json.dumps(PARSE_DOCUMENT))
++        document, failure = parse_review_document(
++            text, diff_text=SIMPLE_DIFF, repository_files=repository_files(tmp_path)
++        )
++        assert document == PARSE_DOCUMENT
++        assert failure is None
++
++    @pytest.mark.parametrize(
++        "text",
++        [
++            "```python\n" + json.dumps(PARSE_DOCUMENT) + "\n```",
++            "```\n" + json.dumps(PARSE_DOCUMENT) + "\n",
++            "```\n" + json.dumps(PARSE_DOCUMENT) + "\n```\nTrailing prose.",
++        ],
++    )
++    def test_rejects_inexact_fences(self, text: str) -> None:
++        document, failure = parse_review_document(text, diff_text=SIMPLE_DIFF)
++        assert document is None
++        assert failure == "Review must contain one JSON object or exact JSON fence."
++
++    def test_rejects_prose_around_the_object(self) -> None:
++        document, failure = parse_review_document(
++            "prose " + json.dumps(PARSE_DOCUMENT) + " prose",
++            diff_text=SIMPLE_DIFF,
++        )
++        assert document is None
++        assert failure is not None
++        assert failure.startswith("Invalid review JSON: ")
++
++    @pytest.mark.parametrize("constant", ["NaN", "Infinity"])
++    def test_rejects_non_json_constants(self, constant: str) -> None:
++        text = '{"general_comment": ' + constant + ', "inline_comments": {}}'
++        document, failure = parse_review_document(text, diff_text=SIMPLE_DIFF)
++        assert document is None
++        assert failure is not None
++        assert "Invalid review JSON" in failure
++        assert f"Non-JSON numeric constant: {constant}" in failure
++
++    @pytest.mark.parametrize(
++        ("text", "expected"),
++        [
++            ("true", "Review must be a JSON object (dict), got bool."),
++            ("[1, 2]", "Review must be a JSON object (dict), got list."),
++        ],
++    )
++    def test_rejects_non_object_documents(self, text: str, expected: str) -> None:
++        document, failure = parse_review_document(text, diff_text=SIMPLE_DIFF)
++        assert document is None
++        assert failure == f"Invalid review document: {expected}"
++
++    def test_reports_every_schema_error(self) -> None:
++        data = {
++            "general_comment": "ok",
++            "inline_comments": {"unknown.py": {"0": "x"}, "src/foo.py": {"2": 5}},
++        }
++        expected_errors = validate_review_json(data, SIMPLE_DIFF)
++        assert len(expected_errors) == 3
++        document, failure = parse_review_document(
++            json.dumps(data), diff_text=SIMPLE_DIFF
++        )
++        assert document is None
++        assert failure == "Invalid review document: " + "\n".join(expected_errors)
++
++    def test_threads_prefix_and_repository_listing(self, tmp_path: Path) -> None:
++        prefixed_diff = (
++            "--- a/updated/tree/src/foo.py\n"
++            "+++ b/updated/tree/src/foo.py\n"
++            "@@ -1 +1,2 @@\n"
++            " context\n+new\n"
++        )
++        files = frozenset({"src/foo.py"})
++        document, failure = parse_review_document(
++            json.dumps(PARSE_DOCUMENT),
++            diff_text=prefixed_diff,
++            path_prefix="b/updated/tree/",
++            repository_files=files,
++        )
++        assert document == PARSE_DOCUMENT
++        assert failure is None
++
++        # Without the prefix the prefixed diff paths resolve to prefixed
++        # repository coordinates the document never uses.
++        document, failure = parse_review_document(
++            json.dumps(PARSE_DOCUMENT), diff_text=prefixed_diff, repository_files=files
++        )
++        assert document is None
++        assert failure is not None
++        assert "'src/foo.py'" in failure
++
++    def test_valid_document_round_trips(self) -> None:
++        text = "```json\n" + json.dumps(PARSE_DOCUMENT) + "\n```"
++        document, failure = parse_review_document(text, diff_text=SIMPLE_DIFF)
++        assert document == PARSE_DOCUMENT
++        assert failure is None
++
++
++class TestRepositoryFiles:
++    def test_walks_files_recursively_as_posix_paths(self, tmp_path: Path) -> None:
++        (tmp_path / "AGENTS.md").write_text("rules")
++        (tmp_path / "src").mkdir()
++        (tmp_path / "src" / "foo.py").write_text("code")
++        (tmp_path / "src" / "pkg").mkdir()
++        (tmp_path / "src" / "pkg" / "bar.py").write_text("code")
++        assert repository_files(tmp_path) == frozenset(
++            {"AGENTS.md", "src/foo.py", "src/pkg/bar.py"}
++        )
++
++    @pytest.mark.parametrize("git_dir_name", [".git", ".GIT"])
++    def test_skips_git_directories(self, tmp_path: Path, git_dir_name: str) -> None:
++        (tmp_path / git_dir_name / "objects").mkdir(parents=True)
++        (tmp_path / git_dir_name / "objects" / "foo").write_text("object")
++        (tmp_path / "tracked.py").write_text("code")
++        assert repository_files(tmp_path) == frozenset({"tracked.py"})
++
++    def test_skips_git_worktree_pointer_file(self, tmp_path: Path) -> None:
++        (tmp_path / ".git").write_text("gitdir: /elsewhere/.git/worktrees/x")
++        (tmp_path / "tracked.py").write_text("code")
++        assert repository_files(tmp_path) == frozenset({"tracked.py"})
++
++    def test_symlinked_directories_are_entries_without_descent(
++        self, tmp_path: Path
++    ) -> None:
++        outside = tmp_path / "outside"
++        outside.mkdir()
++        (outside / "private.py").write_text("secret")
++        repo = tmp_path / "repo"
++        repo.mkdir()
++        (repo / "link").symlink_to(outside, target_is_directory=True)
++        assert repository_files(repo) == frozenset({"link"})
++
++    def test_symlinked_files_are_entries(self, tmp_path: Path) -> None:
++        (tmp_path / "real.txt").write_text("content")
++        (tmp_path / "alias").symlink_to(tmp_path / "real.txt")
++        assert repository_files(tmp_path) == frozenset({"real.txt", "alias"})
++
++    def test_missing_root_yields_empty_listing(self, tmp_path: Path) -> None:
++        assert repository_files(tmp_path / "nope") == frozenset()

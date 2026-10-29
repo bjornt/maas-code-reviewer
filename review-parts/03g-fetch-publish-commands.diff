@@ -1,0 +1,2365 @@
+diff --git a/src/maas_code_reviewer/cli.py b/src/maas_code_reviewer/cli.py
+index 53485b7..e543036 100644
+--- a/src/maas_code_reviewer/cli.py
++++ b/src/maas_code_reviewer/cli.py
+@@ -147,2 +48,4 @@
++def handle_fetch_mp(args: argparse.Namespace) -> None:
++    """Handle the fetch-mp subcommand."""
+     lp_client = LaunchpadClient(credentials_file=args.launchpad_credentials)
+     git_client = GitClient()
+@@ -152,2 +52,3 @@
++    fetched = fetch_merge_proposal(
+         lp_client,
+         git_client,
+@@ -159,1 +56,3 @@
++        Path(args.output_dir),
++        git_token=os.environ.get("LP_GIT_TOKEN", "").strip() or None,
+     )
+@@ -163,1 +59,2 @@
++    if not fetched:
+         print("Already reviewed, skipping.")
+@@ -176,1 +63,36 @@
++def handle_publish_mp(args: argparse.Namespace) -> None:
++    """Handle the publish-mp subcommand."""
++    review = load_validated_review(Path(args.review), Path(args.input_dir))
++    comment = render_merge_proposal_comment(review)
++    if args.dry_run:
++        print(comment)
++        return
++    lp_client = LaunchpadClient(credentials_file=args.launchpad_credentials)
++    mp = lp_client.get_merge_proposal(args.mp_url)
++    lp_client.post_comment(mp, comment, subject="Automated review")
++
++
++def handle_fetch_pr(args: argparse.Namespace) -> None:
++    """Handle the fetch-pr subcommand."""
++    token = _get_github_token(args)
++    if token is None:
++        _exit_missing_github_token()
++    github_client = GitHubClient(token)
++    fetch_pull_request(github_client, args.pr_url, Path(args.output_dir))
+ 
++
++def handle_publish_pr(args: argparse.Namespace) -> None:
++    """Handle the publish-pr subcommand."""
++    review = load_validated_review(Path(args.review), Path(args.input_dir))
++    review = render_pull_request_review(review)
++    if args.dry_run:
++        print(json.dumps(review, indent=2))
++        return
++    owner, repo, pr_number = parse_pr_url(args.pr_url)
++    token = _get_github_token(args)
++    if token is None:
++        _exit_missing_github_token()
++    github_client = GitHubClient(token)
++    post_pull_request_review(github_client, owner, repo, pr_number, review)
++
++
+@@ -318,2 +191,6 @@
++def _get_github_token(args: argparse.Namespace) -> str | None:
++    """Return the GitHub token from --github-token or the environment."""
++    token = args.github_token or os.environ.get("GITHUB_TOKEN")
++    return token or None
+ 
+ 
+@@ -322,1 +197,3 @@
++def _exit_missing_github_token() -> NoReturn:
++    """Print an error message about a missing GitHub token and exit."""
+     print(
+@@ -325,5 +200,7 @@
++        "Error: GitHub token not provided. Use --github-token or set the "
++        "GITHUB_TOKEN environment variable.",
+         file=sys.stderr,
+     )
+     sys.exit(1)
+ 
+ 
+@@ -395,1 +261,4 @@
++    fetch_mp_parser = subparsers.add_parser(
++        "fetch-mp",
++        help="Fetch a merge proposal's review inputs into a directory.",
+     )
+@@ -397,5 +265,6 @@
++    fetch_mp_parser.add_argument(
+         "--launchpad-credentials",
+         type=str,
+         default=None,
+         help="Path to Launchpad credentials file.",
+     )
+@@ -405,1 +271,3 @@
++    fetch_mp_parser.add_argument(
++        "--output-dir",
+         type=str,
+@@ -407,1 +274,3 @@
++        required=True,
++        metavar="DIR",
+         help=(
+@@ -410,2 +277,4 @@
++            "Directory to write diff.patch, description.md, metadata.json, "
++            "and the merged repository tree (repo/) into."
+         ),
+     )
+@@ -414,1 +281,12 @@
++    fetch_mp_parser.add_argument(
++        "mp_url",
++        help="URL of the merge proposal to fetch.",
++    )
++
++    publish_mp_parser = subparsers.add_parser(
++        "publish-mp",
++        help="Validate a candidate review and post it to a merge proposal.",
++    )
++    publish_mp_parser.add_argument(
++        "--launchpad-credentials",
+         type=str,
+@@ -417,1 +293,3 @@
++        default=None,
++        help="Path to Launchpad credentials file.",
+     )
+@@ -423,1 +296,13 @@
++    publish_mp_parser.add_argument(
++        "--review",
++        type=str,
++        required=True,
++        metavar="FILE",
++        help="Path to the candidate review JSON document to publish.",
++    )
++    publish_mp_parser.add_argument(
++        "--input-dir",
++        type=str,
++        required=True,
++        metavar="DIR",
+         help=(
+@@ -426,2 +309,4 @@
++            "Directory holding the fetch-mp output (diff.patch and "
++            "metadata.json) to validate against."
+         ),
+     )
+@@ -436,3 +313,4 @@
++    publish_mp_parser.add_argument(
+         "--dry-run",
+         action="store_true",
+         default=False,
+@@ -440,1 +317,2 @@
++        help="Print the Launchpad comment to stdout instead of posting it.",
+     )
+@@ -449,1 +319,2 @@
++    publish_mp_parser.add_argument(
+         "mp_url",
+@@ -451,2 +321,3 @@
++        help="URL of the merge proposal to publish the review to.",
+     )
+ 
+@@ -456,1 +324,4 @@
++    fetch_pr_parser = subparsers.add_parser(
++        "fetch-pr",
++        help="Fetch a pull request's review inputs into a directory.",
+     )
+@@ -460,3 +328,5 @@
++    fetch_pr_parser.add_argument(
++        "--github-token",
+         type=str,
+         default=None,
+         help=(
+@@ -465,2 +333,4 @@
++            "GitHub personal access token. If not provided, read from the "
++            "GITHUB_TOKEN environment variable."
+         ),
+     )
+@@ -469,1 +337,3 @@
++    fetch_pr_parser.add_argument(
++        "--output-dir",
+         type=str,
+@@ -478,1 +340,3 @@
++        required=True,
++        metavar="DIR",
+         help=(
+@@ -481,2 +343,4 @@
++            "Directory to write diff.patch, description.md, and "
++            "metadata.json into."
+         ),
+     )
+@@ -489,1 +347,4 @@
++    fetch_pr_parser.add_argument(
++        "pr_url",
++        help="Full GitHub PR URL, e.g. https://github.com/owner/repo/pull/42.",
+     )
+@@ -492,3 +351,10 @@
++
++    publish_pr_parser = subparsers.add_parser(
++        "publish-pr",
++        help="Validate a candidate review and post it to a pull request.",
++    )
++    publish_pr_parser.add_argument(
++        "--github-token",
+         type=str,
+         default=None,
+         help=(
+@@ -498,2 +361,4 @@
++            "GitHub personal access token. If not provided, read from the "
++            "GITHUB_TOKEN environment variable."
+         ),
+     )
+@@ -502,1 +365,3 @@
++    publish_pr_parser.add_argument(
++        "--review",
+         type=str,
+@@ -504,2 +368,10 @@
++        required=True,
+         metavar="FILE",
++        help="Path to the candidate review JSON document to publish.",
++    )
++    publish_pr_parser.add_argument(
++        "--input-dir",
++        type=str,
++        required=True,
++        metavar="DIR",
+         help=(
+@@ -509,2 +378,4 @@
++            "Directory holding the fetch-pr output (diff.patch and "
++            "metadata.json) to validate against."
+         ),
+     )
+@@ -517,1 +382,6 @@
++    publish_pr_parser.add_argument(
++        "--dry-run",
++        action="store_true",
++        default=False,
++        help="Print the review JSON to stdout instead of posting it.",
+     )
+@@ -521,2 +388,5 @@
++    publish_pr_parser.add_argument(
++        "pr_url",
++        help="Full GitHub PR URL to publish the review to.",
+     )
+ 
+diff --git a/src/maas_code_reviewer/git.py b/src/maas_code_reviewer/git.py
+index c18d213..48688e3 100644
+--- a/src/maas_code_reviewer/git.py
++++ b/src/maas_code_reviewer/git.py
+@@ -8,12 +8,25 @@
+ class GitClient:
+     """GitClient implementation that wraps subprocess calls to git."""
+ 
+-    def clone(self, repo_url: str, dest: Path, branch: str) -> None:
+-        subprocess.run(
+-            ["git", "clone", "--branch", branch, repo_url, str(dest)],
+-            check=True,
+-            capture_output=True,
+-        )
++    def clone(
++        self,
++        repo_url: str,
++        dest: Path,
++        branch: str,
++        *,
++        http_extra_header: str | None = None,
++    ) -> None:
++        """Clone *repo_url* (one branch) into *dest*.
++
++        When *http_extra_header* is given it is passed to git as one-shot
++        ``http.extraHeader`` config (header auth), so no credential helper or
++        credential-bearing URL is ever used or persisted.
++        """
++        command = ["git"]
++        if http_extra_header is not None:
++            command += ["-c", f"http.extraHeader={http_extra_header}"]
++        command += ["clone", "--branch", branch, repo_url, str(dest)]
++        subprocess.run(command, check=True, capture_output=True)
+ 
+     def diff(self, repo_dir: Path, base_ref: str, head_ref: str) -> str:
+         result = subprocess.run(
+@@ -25,19 +38,37 @@
+         )
+         return result.stdout
+ 
+-    def merge_into(self, repo_dir: Path, source_url: str, source_branch: str) -> None:
++    def merge_into(
++        self,
++        repo_dir: Path,
++        source_url: str,
++        source_branch: str,
++        *,
++        http_extra_header: str | None = None,
++    ) -> None:
++        """Fetch *source_branch* from *source_url* and merge it (no editor)."""
++        command = ["git"]
++        if http_extra_header is not None:
++            command += ["-c", f"http.extraHeader={http_extra_header}"]
++        command += ["fetch", source_url, source_branch]
++        subprocess.run(command, cwd=repo_dir, check=True, capture_output=True)
+         subprocess.run(
+-            ["git", "fetch", source_url, source_branch],
++            ["git", "merge", "FETCH_HEAD", "--no-edit"],
+             cwd=repo_dir,
+             check=True,
+             capture_output=True,
+         )
+-        subprocess.run(
+-            ["git", "merge", "FETCH_HEAD", "--no-edit"],
++
++    def rev_parse(self, repo_dir: Path, ref: str) -> str:
++        """Resolve *ref* to its commit SHA inside *repo_dir*."""
++        result = subprocess.run(
++            ["git", "rev-parse", ref],
+             cwd=repo_dir,
+             check=True,
+             capture_output=True,
++            text=True,
+         )
++        return result.stdout.strip()
+ 
+     def read_file(self, repo_dir: Path, path: str) -> str | None:
+         file_path = repo_dir / path
+diff --git a/src/maas_code_reviewer/github_client.py b/src/maas_code_reviewer/github_client.py
+index e6ae6bd..f61be42 100644
+--- a/src/maas_code_reviewer/github_client.py
++++ b/src/maas_code_reviewer/github_client.py
+@@ -69,6 +69,28 @@
+         pr = gh_repo.get_pull(pr_number)
+         return pr.body or None
+ 
++    def get_pr_shas(self, owner: str, repo: str, pr_number: int) -> tuple[str, str]:
++        """Return the pull request's base and head commit SHAs.
++
++        Parameters
++        ----------
++        owner:
++            The repository owner.
++        repo:
++            The repository name.
++        pr_number:
++            The pull request number.
++
++        Returns
++        -------
++        tuple[str, str]
++            The ``(base_sha, head_sha)`` pair: the base-branch commit the
++            pull request is based on, and the pull request's head commit.
++        """
++        gh_repo = self._gh.get_repo(f"{owner}/{repo}")
++        pr = gh_repo.get_pull(pr_number)
++        return pr.base.sha, pr.head.sha
++
+     def post_review(
+         self,
+         owner: str,
+diff --git a/src/maas_code_reviewer/review_commands.py b/src/maas_code_reviewer/review_commands.py
+new file mode 100644
+index 0000000..090c8d0
+--- /dev/null
++++ b/src/maas_code_reviewer/review_commands.py
+@@ -3,0 +4,3 @@
++"""Merge-proposal and pull-request acquisition and publication."""
++
++import base64
+@@ -16,0 +17,1 @@
++from maas_code_reviewer.review_schema import validate_review_json
+@@ -19,0 +20,4 @@
++    REVIEW_PREAMBLE,
++)
++
++
+@@ -66,0 +67,180 @@
++def read_agents_context(repo_dir: Path) -> str | None:
++    """Load the repository's AGENTS.md guidance as review context.
++
++    Reads through the path-scoped RepoTools, so a symlinked AGENTS.md
++    cannot pull content in from outside the repository tree. Returns
++    None when the repository has no readable AGENTS.md.
++    """
++    return RepoTools(repo_dir).read_agents_md()
++
++
++def fetch_merge_proposal(
++    lp: LaunchpadClient,
++    git: GitClient,
++    mp_url: str,
++    output_dir: Path,
++    *,
++    git_token: str | None = None,
++) -> bool:
++    """Fetch a merge proposal's review inputs into *output_dir*.
++
++    Clones the target repository into ``output_dir/repo``, merges the source
++    branch, and writes ``diff.patch``, ``description.md``, and ``metadata.json``
++    (URLs, branch names, base/head SHAs, and the diff path prefix when it is
++    not the standard ``a/`` + ``b/``). Returns True.
++
++    When this tool has already reviewed the proposal, no clone happens:
++    ``status.json`` (``{"status": "skipped", "reason": "already-reviewed"}``)
++    is written instead and False is returned, so workflows can short-circuit
++    before running a review.
++
++    When *git_token* is given, the clone and the source fetch authenticate
++    with an ``Authorization: Basic`` header built from the bot's Launchpad
++    username and the token — never an on-disk credential helper.
++    """
++    mp = lp.get_merge_proposal(mp_url)
++
++    if has_existing_review(lp, mp):
++        output_dir.mkdir(parents=True, exist_ok=True)
++        (output_dir / "status.json").write_text(
++            json.dumps({"status": "skipped", "reason": "already-reviewed"}, indent=2)
++        )
++        return False
++
++    http_extra_header = None
++    if git_token is not None:
++        credentials = base64.b64encode(
++            f"{lp.get_bot_username()}:{git_token}".encode()
++        ).decode("ascii")
++        http_extra_header = f"Authorization: Basic {credentials}"
++
++    output_dir.mkdir(parents=True, exist_ok=True)
++    repo_dir = output_dir / "repo"
++    diff = _clone_merge_diff(git, mp, repo_dir, http_extra_header=http_extra_header)
++
++    description = mp.description or mp.commit_message or ""
++    (output_dir / "diff.patch").write_text(diff)
++    (output_dir / "description.md").write_text(description)
++    (output_dir / "metadata.json").write_text(
++        json.dumps(
++            {
++                "mp_url": mp_url,
++                "target_url": _lp_repo_url(mp.target_git_repository),
++                "target_branch": _ref_to_branch(mp.target_git_path),
++                "source_url": _lp_repo_url(mp.source_git_repository),
++                "source_branch": _ref_to_branch(mp.source_git_path),
++                "base_sha": git.rev_parse(repo_dir, "ORIG_HEAD"),
++                "head_sha": git.rev_parse(repo_dir, "HEAD"),
++                "diff_prefix": _detect_diff_prefix(diff),
++            },
++            indent=2,
++        )
++    )
++    return True
++
++
++class InvalidReviewError(Exception):
++    """Raised when a candidate review document fails publish-side validation."""
++
++    def __init__(self, errors: list[str]) -> None:
++        super().__init__("\n".join(["Invalid review document:", *errors]))
++
++
++def load_validated_review(review_path: Path, input_dir: Path) -> dict:
++    """Parse a candidate review and validate it against the fetch output.
++
++    The candidate JSON at *review_path* is validated against the authoritative
++    ``diff.patch`` in *input_dir*, resolving inline coordinates with the diff
++    path prefix ``fetch-mp`` recorded in ``metadata.json``. Deliberately no
++    repository listing is passed: the recorded prefix replaces it on the
++    trusted side.
++
++    Returns the parsed review document, or raises InvalidReviewError when the
++    candidate is invalid — including unparseable JSON and input-diff errors
++    such as prefix mismatches. Nothing is posted.
++    """
++    try:
++        review = json.loads(review_path.read_text())
++    except json.JSONDecodeError as exc:
++        raise InvalidReviewError([f"Review file is not valid JSON: {exc}"]) from exc
++    diff = (input_dir / "diff.patch").read_text()
++    metadata = json.loads((input_dir / "metadata.json").read_text())
++    try:
++        errors = validate_review_json(
++            review, diff, path_prefix=metadata.get("diff_prefix")
++        )
++    except ValueError as exc:
++        raise InvalidReviewError([str(exc)]) from exc
++    if errors:
++        raise InvalidReviewError(errors)
++    return review
++
++
++def render_merge_proposal_comment(review: dict) -> str:
++    """Render a validated review document as Launchpad comment text.
++
++    The general comment leads; every inline finding follows as its own
++    ``### <path>:<line>`` section with the finding's relative path and line,
++    in the document's key order. The review marker and preamble are
++    prepended exactly once: the document itself never carries them, and any
++    marker text the candidate did carry is removed first.
++    """
++    sections = [_decorate_review_text(review["general_comment"])]
++    for file_path, line_comments in review["inline_comments"].items():
++        for line, comment in line_comments.items():
++            sections.append(f"### {file_path}:{line}\n\n{comment}")
++    return "\n\n".join(sections)
++
++
++def fetch_pull_request(
++    github: GitHubClient,
++    pr_url: str,
++    output_dir: Path,
++) -> None:
++    """Fetch a pull request's review inputs into *output_dir*.
++
++    The diff, description, and base/head SHAs are fetched through the
++    GitHub API — no checkout is performed; the workflow or operator
++    provides the agent's repository context separately. Writes
++    ``diff.patch``, ``description.md``, and ``metadata.json`` (PR URL,
++    owner/repo/number, base/head SHAs, and the diff path prefix when it
++    is not the standard ``a/`` + ``b/``).
++    """
++    owner, repo, pr_number = parse_pr_url(pr_url)
++    diff = github.get_pr_diff(owner, repo, pr_number)
++    description = github.get_pr_description(owner, repo, pr_number)
++    base_sha, head_sha = github.get_pr_shas(owner, repo, pr_number)
++    output_dir.mkdir(parents=True, exist_ok=True)
++    (output_dir / "diff.patch").write_text(diff)
++    (output_dir / "description.md").write_text(description or "")
++    (output_dir / "metadata.json").write_text(
++        json.dumps(
++            {
++                "pr_url": pr_url,
++                "owner": owner,
++                "repo": repo,
++                "number": pr_number,
++                "base_sha": base_sha,
++                "head_sha": head_sha,
++                "diff_prefix": _detect_diff_prefix(diff),
++            },
++            indent=2,
++        )
++    )
++
++
++def render_pull_request_review(review: dict) -> dict:
++    """Render a validated review document for publication to GitHub.
++
++    Returns a shallow copy of the document with the review marker and
++    preamble prepended to the general comment exactly once; inline
++    findings are unchanged — GitHub's review API takes the general
++    comment as the review body and each finding as a structured comment,
++    so no comment text is composed. Any marker text the candidate itself
++    carried is removed first: the host owns this wrapper.
++    """
++    rendered = dict(review)
++    rendered["general_comment"] = _decorate_review_text(review["general_comment"])
++    return rendered
++
++
+@@ -308,0 +309,74 @@
++    git: GitClient,
++    mp: MergeProposal,
++    repo_dir: Path,
++    *,
++    http_extra_header: str | None = None,
++) -> str:
++    """Clone the MP target into *repo_dir*, merge the source, diff the result."""
++    git.clone(
++        _lp_repo_url(mp.target_git_repository),
++        repo_dir,
++        _ref_to_branch(mp.target_git_path),
++        http_extra_header=http_extra_header,
++    )
++    git.merge_into(
++        repo_dir,
++        _lp_repo_url(mp.source_git_repository),
++        _ref_to_branch(mp.source_git_path),
++        http_extra_header=http_extra_header,
++    )
++    return git.diff(repo_dir, "ORIG_HEAD", "HEAD")
++
++
++def _diff_header_path(value: str) -> str:
++    """Strip timestamps and C-style quoting from a file header path."""
++    path = value.partition("\t")[0]
++    if path.startswith('"'):
++        path = path[1:].partition('"')[0]
++    return path
++
++
++def _detect_diff_prefix(diff_text: str) -> str | None:
++    """Return the new-side diff path prefix of *diff_text*.
++
++    Standard ``a/`` + ``b/`` diffs (including new-file headers whose old side
++    is ``/dev/null``) return None — validation's ladder needs no override.
++    Any other leading path component is returned with its slash (``w/``,
++    ``YY/`` from custom src/dst prefixes), and prefix-free paths (``diff
++    noprefix``, or identical old/new paths) return the empty string.
++    """
++    old_path: str | None = None
++    for raw_line in diff_text.splitlines():
++        if raw_line.startswith("diff --git "):
++            old_path = None
++        elif old_path is None and raw_line.startswith("--- "):
++            old_path = _diff_header_path(raw_line[4:])
++        elif old_path is not None and raw_line.startswith("+++ "):
++            new_path = _diff_header_path(raw_line[4:])
++            if new_path == "/dev/null":
++                old_path = None
++            elif new_path.startswith("b/") and (
++                old_path.startswith("a/") or old_path == "/dev/null"
++            ):
++                return None
++            elif old_path == new_path:
++                return ""
++            else:
++                head, separator, _ = new_path.partition("/")
++                return head + separator if separator else ""
++    return None
++
++
++def _decorate_review_text(comment: str) -> str:
++    """Prepend the review marker and preamble exactly once.
++
++    Marker or preamble text already present in *comment* — for instance
++    repeated by the agent that produced the candidate — is removed first:
++    the host owns this wrapper.
++    """
++    comment = (
++        comment.replace(REVIEW_MARKER, "")
++        .replace(REVIEW_PREAMBLE.strip(), "")
++        .strip()
++    )
++    return f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{comment}"
+diff --git a/tests/fake_github.py b/tests/fake_github.py
+index 761c0ef..fa0e889 100644
+--- a/tests/fake_github.py
++++ b/tests/fake_github.py
+@@ -13,6 +13,8 @@
+     number: int
+     diff: str
+     description: str | None = None
++    base_sha: str = "base-sha"
++    head_sha: str = "head-sha"
+     posted_reviews: list[dict] = field(default_factory=list)
+ 
+ 
+@@ -34,6 +36,8 @@
+         number: int,
+         diff: str,
+         description: str | None = None,
++        base_sha: str = "base-sha",
++        head_sha: str = "head-sha",
+     ) -> FakePullRequest:
+         """Register a fake PR so the client can serve it during tests."""
+         pr = FakePullRequest(
+@@ -42,6 +46,8 @@
+             number=number,
+             diff=diff,
+             description=description,
++            base_sha=base_sha,
++            head_sha=head_sha,
+         )
+         self._pull_requests[(owner, repo, number)] = pr
+         return pr
+@@ -56,6 +62,11 @@
+         pr = self._pull_requests[(owner, repo, pr_number)]
+         return pr.description
+ 
++    def get_pr_shas(self, owner: str, repo: str, pr_number: int) -> tuple[str, str]:
++        """Return the registered base and head SHAs for the given PR."""
++        pr = self._pull_requests[(owner, repo, pr_number)]
++        return pr.base_sha, pr.head_sha
++
+     def post_review(
+         self,
+         owner: str,
+diff --git a/tests/fake_pygithub.py b/tests/fake_pygithub.py
+index 7ad7728..a3c9d50 100644
+--- a/tests/fake_pygithub.py
++++ b/tests/fake_pygithub.py
+@@ -36,12 +36,28 @@
+     patch: str | None = None
+ 
+ 
++@dataclass
++class FakePullRequestPart:
++    """In-memory representation of a pull request base/head ref."""
++
++    sha: str
++
++
+ @dataclass
+ class FakeGithubPull:
+-    """In-memory representation of a GitHub pull request."""
++    """In-memory representation of a GitHub pull request.
++
++    ``base``/``head`` carry the PR's base/head SHAs.
++    """
+ 
+     number: int
+     body: str | None = None
++    base: FakePullRequestPart = field(
++        default_factory=lambda: FakePullRequestPart(sha="base-sha")
++    )
++    head: FakePullRequestPart = field(
++        default_factory=lambda: FakePullRequestPart(sha="head-sha")
++    )
+     _files: list[FakeGithubFile] = field(default_factory=list)
+     posted_reviews: list[dict] = field(default_factory=list)
+ 
+@@ -83,6 +99,8 @@
+         number: int,
+         body: str | None = None,
+         files: list[FakeGithubFile] | None = None,
++        base_sha: str = "base-sha",
++        head_sha: str = "head-sha",
+     ) -> FakeGithubPull:
+         """Register a fake pull request.
+ 
+@@ -96,11 +114,21 @@
+             The PR description body text.
+         files:
+             List of changed files with optional patches.
++        base_sha:
++            The SHA of the base commit the pull request is based on.
++        head_sha:
++            The SHA of the pull request's head commit.
+         """
+         if full_name not in self._repos:
+             self._repos[full_name] = FakeGithubRepo(full_name=full_name)
+         repo = self._repos[full_name]
+-        pr = FakeGithubPull(number=number, body=body, _files=files or [])
++        pr = FakeGithubPull(
++            number=number,
++            body=body,
++            base=FakePullRequestPart(sha=base_sha),
++            head=FakePullRequestPart(sha=head_sha),
++            _files=files or [],
++        )
+         repo._pulls[number] = pr
+         return pr
+ 
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index dda2e16..0bad82b 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -286,2 +80,22 @@
++class TestBuildParserFetchMp:
++    def test_parses_output_dir_and_url(self) -> None:
++        parser = _build_parser()
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
++        args = parser.parse_args(["fetch-mp", "--output-dir", "out", url])
++        assert args.command == "fetch-mp"
++        assert args.output_dir == "out"
++        assert args.mp_url == url
++        assert args.launchpad_credentials is None
++
++    def test_missing_output_dir_exits(self) -> None:
++        parser = _build_parser()
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
++        with pytest.raises(SystemExit):
++            parser.parse_args(["fetch-mp", url])
++
++
++class TestBuildParserPublishMp:
++    def test_parses_review_input_dir_and_url(self) -> None:
+         parser = _build_parser()
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+         args = parser.parse_args(
+@@ -298,3 +102,8 @@
++            ["publish-mp", "--review", "r.json", "--input-dir", "in", url]
+         )
++        assert args.command == "publish-mp"
++        assert args.review == "r.json"
++        assert args.input_dir == "in"
++        assert args.mp_url == url
+         assert args.dry_run is False
+         assert args.launchpad_credentials is None
+@@ -307,3 +111,5 @@
++    def test_parses_dry_run(self) -> None:
+         parser = _build_parser()
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+         args = parser.parse_args(
+             [
+@@ -311,1 +116,6 @@
++                "publish-mp",
++                "--review",
++                "r.json",
++                "--input-dir",
++                "in",
+                 "--dry-run",
+@@ -315,4 +122,5 @@
++                url,
+             ]
+         )
+         assert args.dry_run is True
+ 
+@@ -322,1 +127,2 @@
++    def test_missing_review_exits(self) -> None:
+         parser = _build_parser()
+@@ -334,1 +129,4 @@
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
++        with pytest.raises(SystemExit):
++            parser.parse_args(["publish-mp", "--input-dir", "in", url])
+ 
+@@ -338,1 +133,2 @@
++    def test_missing_input_dir_exits(self) -> None:
+         parser = _build_parser()
+@@ -348,1 +135,4 @@
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
++        with pytest.raises(SystemExit):
++            parser.parse_args(["publish-mp", "--review", "r.json", url])
+ 
+@@ -368,1 +140,3 @@
++class TestBuildParserFetchPr:
++    def test_parses_output_dir_and_url(self) -> None:
+         parser = _build_parser()
+@@ -380,1 +143,7 @@
++        url = "https://github.com/owner/repo/pull/42"
++        args = parser.parse_args(["fetch-pr", "--output-dir", "out", url])
++        assert args.command == "fetch-pr"
++        assert args.output_dir == "out"
++        assert args.pr_url == url
++        assert args.github_token is None
+ 
+@@ -384,1 +150,2 @@
++    def test_missing_output_dir_exits(self) -> None:
+         parser = _build_parser()
+@@ -394,1 +152,4 @@
++        url = "https://github.com/owner/repo/pull/42"
++        with pytest.raises(SystemExit):
++            parser.parse_args(["fetch-pr", url])
+ 
+@@ -416,2 +157,5 @@
++class TestBuildParserPublishPr:
++    def test_parses_review_input_dir_and_url(self) -> None:
+         parser = _build_parser()
++        url = "https://github.com/owner/repo/pull/42"
+         args = parser.parse_args(
+@@ -424,1 +162,2 @@
++            ["publish-pr", "--review", "r.json", "--input-dir", "in", url]
+         )
+@@ -426,1 +164,7 @@
++        assert args.command == "publish-pr"
++        assert args.review == "r.json"
++        assert args.input_dir == "in"
++        assert args.pr_url == url
++        assert args.dry_run is False
++        assert args.github_token is None
+ 
+@@ -430,3 +171,5 @@
++    def test_parses_dry_run(self) -> None:
+         parser = _build_parser()
++        url = "https://github.com/owner/repo/pull/42"
+         args = parser.parse_args(
+             [
+@@ -439,2 +176,9 @@
++                "publish-pr",
++                "--review",
++                "r.json",
++                "--input-dir",
++                "in",
++                "--dry-run",
++                url,
+             ]
+         )
+@@ -442,1 +185,2 @@
++        assert args.dry_run is True
+ 
+@@ -446,1 +187,2 @@
++    def test_missing_review_exits(self) -> None:
+         parser = _build_parser()
+@@ -456,1 +189,4 @@
++        url = "https://github.com/owner/repo/pull/42"
++        with pytest.raises(SystemExit):
++            parser.parse_args(["publish-pr", "--input-dir", "in", url])
+ 
+@@ -460,1 +193,2 @@
++    def test_missing_input_dir_exits(self) -> None:
+         parser = _build_parser()
+@@ -472,3 +195,6 @@
++        url = "https://github.com/owner/repo/pull/42"
++        with pytest.raises(SystemExit):
++            parser.parse_args(["publish-pr", "--review", "r.json", url])
+ 
+ 
+ class TestMain:
+@@ -522,3 +217,4 @@
++    def test_fetch_mp_command_delegates_to_handle_fetch_mp(
+         self, tmp_path: Path
+     ) -> None:
+         git = FakeGitClient()
+@@ -540,4 +232,5 @@
++        out_dir = tmp_path / "out"
+ 
+         with (
+             patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+             patch("maas_code_reviewer.cli.GitClient", return_value=git),
+@@ -545,3 +237,29 @@
+         ):
++            main(["fetch-mp", "--output-dir", str(out_dir), mp.url])
++
++        assert (out_dir / "diff.patch").exists()
++        assert (out_dir / "description.md").exists()
++        assert (out_dir / "metadata.json").exists()
++        assert (out_dir / "repo").exists()
++
++    def test_publish_mp_command_delegates_to_handle_publish_mp(
++        self, tmp_path: Path
++    ) -> None:
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
++        review_file = tmp_path / "review.json"
++        review_file.write_text(
++            json.dumps(
++                {
++                    "general_comment": "LGTM",
++                    "inline_comments": {"f.txt": {"1": "Good"}},
++                }
++            )
++        )
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp(url=url)
++        lp.add_merge_proposal(mp)
++
++        with patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp):
+             main(
+                 [
+@@ -552,5 +266,11 @@
++                    "publish-mp",
++                    "--review",
++                    str(review_file),
++                    "--input-dir",
++                    str(input_dir),
++                    url,
+                 ]
+             )
+ 
+         comments = lp.get_comments_for(mp.api_url)
+         assert len(comments) == 1
+@@ -574,1 +277,2 @@
++        assert comments[0].body.startswith(REVIEW_MARKER)
+ 
+@@ -581,1 +279,12 @@
++    def test_invalid_review_exits_with_error(
++        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
++    ) -> None:
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
++        review_file = tmp_path / "review.json"
++        review_file.write_text(
++            json.dumps(
++                {
++                    "general_comment": "LGTM",
++                    "inline_comments": {"f.txt": {"9": "off"}},
++                }
+             )
+@@ -585,1 +291,3 @@
++        )
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
+ 
+@@ -591,1 +294,3 @@
++        with pytest.raises(SystemExit) as exc_info:
++            main(
+                 [
+@@ -598,2 +297,8 @@
++                    "publish-mp",
++                    "--review",
++                    str(review_file),
++                    "--input-dir",
++                    str(input_dir),
++                    url,
+                 ]
+             )
+@@ -305,0 +306,100 @@
++        assert exc_info.value.code == 1
++        captured = capsys.readouterr()
++        assert "Invalid review document" in captured.err
++
++    def test_fetch_pr_command_delegates_to_handle_fetch_pr(
++        self, tmp_path: Path
++    ) -> None:
++        github_client = FakeGitHubClient()
++        github_client.add_pull_request(
++            "owner",
++            "repo",
++            42,
++            diff=_PR_DIFF,
++            description="Add sys import",
++            base_sha="b" * 40,
++            head_sha="h" * 40,
++        )
++        out = tmp_path / "out"
++        url = "https://github.com/owner/repo/pull/42"
++
++        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
++            main(
++                [
++                    "fetch-pr",
++                    "--github-token",
++                    "ghp_test",
++                    "--output-dir",
++                    str(out),
++                    url,
++                ]
++            )
++
++        assert (out / "diff.patch").read_text() == _PR_DIFF
++        assert (out / "description.md").read_text() == "Add sys import"
++        metadata = json.loads((out / "metadata.json").read_text())
++        assert metadata == {
++            "pr_url": url,
++            "owner": "owner",
++            "repo": "repo",
++            "number": 42,
++            "base_sha": "b" * 40,
++            "head_sha": "h" * 40,
++            "diff_prefix": None,
++        }
++
++    def test_publish_pr_command_delegates_to_handle_publish_pr(
++        self, tmp_path: Path
++    ) -> None:
++        input_dir, review_path = _write_pr_publish_inputs(
++            tmp_path, json.loads(_PR_REVIEW_RESPONSE)
++        )
++        github_client = FakeGitHubClient()
++        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
++        url = "https://github.com/owner/repo/pull/42"
++
++        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
++            main(
++                [
++                    "publish-pr",
++                    "--github-token",
++                    "ghp_test",
++                    "--review",
++                    str(review_path),
++                    "--input-dir",
++                    str(input_dir),
++                    url,
++                ]
++            )
++
++        reviews = github_client.get_posted_reviews("owner", "repo", 42)
++        assert len(reviews) == 1
++        assert reviews[0]["body"].startswith(REVIEW_MARKER)
++
++    def test_publish_pr_invalid_review_exits_with_error(
++        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
++    ) -> None:
++        review = {
++            "general_comment": "LGTM",
++            "inline_comments": {"src/foo.py": {"9": "off"}},
++        }
++        input_dir, review_path = _write_pr_publish_inputs(tmp_path, review)
++        url = "https://github.com/owner/repo/pull/42"
++
++        with pytest.raises(SystemExit) as exc_info:
++            main(
++                [
++                    "publish-pr",
++                    "--review",
++                    str(review_path),
++                    "--input-dir",
++                    str(input_dir),
++                    url,
++                ]
++            )
++
++        assert exc_info.value.code == 1
++        captured = capsys.readouterr()
++        assert "Invalid review document" in captured.err
++
++
+@@ -628,3 +472,42 @@
++def _write_publish_inputs(
++    tmp_path: Path, diff: str, diff_prefix: str | None = None
++) -> Path:
++    """Write a fetch-style input directory and return its path."""
++    input_dir = tmp_path / "input"
++    input_dir.mkdir()
++    (input_dir / "diff.patch").write_text(diff)
++    (input_dir / "metadata.json").write_text(
++        json.dumps({"diff_prefix": diff_prefix})
++    )
++    return input_dir
++
++
++_SIMPLE_STD_DIFF = "--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-one\n+two\n"
++
++
++def _recording_run() -> tuple[list[list[str]], object]:
++    """Return a call list and a delegating subprocess.run recorder.
++
++    The recorder calls the real ``subprocess.run`` and records each
++    command's argv, so assertions can inspect the git invocations.
++    """
++    import subprocess
++
++    calls: list[list[str]] = []
++    real_run = subprocess.run
++
++    def recording_run(args, **kwargs):
++        calls.append(list(args))
++        return real_run(args, **kwargs)
++
++    return calls, recording_run
++
++
++class TestHandleFetchMp:
++    def test_writes_fetch_outputs(
++        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
++    ) -> None:
++        """The handler writes diff.patch, description.md, metadata.json, repo/."""
+         git = FakeGitClient()
+         target_repo, source_repo = _setup_repos(tmp_path, git)
+ 
+@@ -634,5 +517,6 @@
+             source_git_path="refs/heads/feature",
+             target_git_repository=str(target_repo),
+             target_git_path="refs/heads/main",
++            description="Fix the widget",
+         )
+         lp.add_merge_proposal(mp)
+@@ -644,4 +523,5 @@
++        out_dir = tmp_path / "out"
+ 
+         with (
+             patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+             patch("maas_code_reviewer.cli.GitClient", return_value=git),
+@@ -652,1 +530,2 @@
++                ["fetch-mp", "--output-dir", str(out_dir), mp.url]
+             )
+@@ -654,1 +532,2 @@
++            handle_fetch_mp(args)
+ 
+@@ -658,1 +534,7 @@
++        assert (out_dir / "diff.patch").exists()
++        assert (out_dir / "description.md").read_text() == "Fix the widget"
++        assert (out_dir / "metadata.json").exists()
++        assert (out_dir / "repo").exists()
++        captured = capsys.readouterr()
++        assert captured.out == ""
+ 
+@@ -660,5 +541,7 @@
++    def test_prints_already_reviewed_and_writes_status(
+         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+     ) -> None:
++        """An already-reviewed MP prints the skip message and writes status.json."""
+         git = FakeGitClient()
+         target_repo, source_repo = _setup_repos(tmp_path, git)
+ 
+@@ -678,3 +560,4 @@
++                body=f"{REVIEW_MARKER}\n\nAlready done.",
+                 date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
+             ),
+         )
+@@ -686,4 +564,5 @@
++        out_dir = tmp_path / "out"
+ 
+         with (
+             patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+             patch("maas_code_reviewer.cli.GitClient", return_value=git),
+@@ -694,1 +571,2 @@
++                ["fetch-mp", "--output-dir", str(out_dir), mp.url]
+             )
+@@ -696,4 +573,7 @@
++            handle_fetch_mp(args)
+ 
+         captured = capsys.readouterr()
+         assert "Already reviewed, skipping." in captured.out
++        assert (out_dir / "status.json").exists()
++        assert not (out_dir / "repo").exists()
+ 
+@@ -702,4 +580,9 @@
++    def test_reads_lp_git_token_from_environment(
++        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+     ) -> None:
++        """LP_GIT_TOKEN becomes an Authorization header on the clone."""
++        import base64
++
+         git = FakeGitClient()
+         target_repo, source_repo = _setup_repos(tmp_path, git)
+ 
+@@ -719,4 +597,13 @@
++        calls, recording_run = _recording_run()
++        monkeypatch.setattr(
++            "maas_code_reviewer.git.subprocess.run", recording_run
++        )
++        monkeypatch.setenv("LP_GIT_TOKEN", "tok")
++        expected_header = (
++            "Authorization: Basic "
++            + base64.b64encode(b"ci-bot:tok").decode("ascii")
++        )
+ 
+         with (
+             patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp),
+             patch("maas_code_reviewer.cli.GitClient", return_value=git),
+@@ -731,3 +613,6 @@
++                    "fetch-mp",
++                    "--output-dir",
++                    str(tmp_path / "out"),
+                     mp.url,
+                 ]
+             )
+@@ -735,1 +619,2 @@
++            handle_fetch_mp(args)
+ 
+@@ -739,1 +621,7 @@
++        assert calls[0][:4] == [
++            "git",
++            "-c",
++            f"http.extraHeader={expected_header}",
++            "clone",
++        ]
+ 
+@@ -751,2 +629,20 @@
++class TestHandlePublishMp:
++    def test_posts_rendered_comment(
++        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
++    ) -> None:
++        """A valid candidate is rendered, decorated, and posted."""
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
++        review_file = tmp_path / "review.json"
++        review_file.write_text(
++            json.dumps(
++                {
++                    "general_comment": "LGTM",
++                    "inline_comments": {"f.txt": {"1": "Good"}},
++                }
++            )
+         )
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp(url=url)
++        lp.add_merge_proposal(mp)
+ 
+@@ -755,1 +649,13 @@
++        with patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp):
++            args = _build_parser().parse_args(
++                [
++                    "publish-mp",
++                    "--review",
++                    str(review_file),
++                    "--input-dir",
++                    str(input_dir),
++                    url,
++                ]
++            )
++            handle_publish_mp(args)
+ 
+@@ -757,1 +662,6 @@
++        comments = lp.get_comments_for(mp.api_url)
++        assert len(comments) == 1
++        assert comments[0].body.startswith(REVIEW_MARKER)
++        assert "LGTM" in comments[0].body
++        assert "### f.txt:1" in comments[0].body
+         captured = capsys.readouterr()
+@@ -776,1 +668,2 @@
++        assert captured.out == ""
+ 
+@@ -781,1 +670,19 @@
++    def test_dry_run_prints_comment_without_posting(
++        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
++    ) -> None:
++        """--dry-run prints the rendered comment and never constructs a client."""
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
++        review_file = tmp_path / "review.json"
++        review_file.write_text(
++            json.dumps(
++                {
++                    "general_comment": "LGTM",
++                    "inline_comments": {"f.txt": {"1": "Good"}},
++                }
++            )
++        )
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp(url=url)
++        lp.add_merge_proposal(mp)
+ 
+@@ -786,1 +689,17 @@
++        with patch(
++            "maas_code_reviewer.cli.LaunchpadClient",
++            side_effect=AssertionError("must not construct"),
++        ):
++            args = _build_parser().parse_args(
++                [
++                    "publish-mp",
++                    "--review",
++                    str(review_file),
++                    "--input-dir",
++                    str(input_dir),
++                    "--dry-run",
++                    url,
++                ]
++            )
++            handle_publish_mp(args)
+ 
+@@ -790,1 +706,6 @@
++        captured = capsys.readouterr()
++        assert captured.out.startswith(REVIEW_MARKER)
++        assert "LGTM" in captured.out
++        assert "### f.txt:1" in captured.out
++        assert lp.get_comments_for(mp.api_url) == []
+ 
+@@ -794,1 +712,17 @@
++    def test_invalid_candidate_raises_without_posting(self, tmp_path: Path) -> None:
++        """An invalid candidate raises InvalidReviewError before any client use."""
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
++        review_file = tmp_path / "review.json"
++        review_file.write_text(
++            json.dumps(
++                {
++                    "general_comment": "LGTM",
++                    "inline_comments": {"f.txt": {"9": "off"}},
++                }
++            )
++        )
++        url = "https://code.launchpad.net/~user/project/+git/repo/+merge/1"
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp(url=url)
++        lp.add_merge_proposal(mp)
+ 
+@@ -800,1 +729,14 @@
++        with patch("maas_code_reviewer.cli.LaunchpadClient", return_value=lp):
++            args = _build_parser().parse_args(
++                [
++                    "publish-mp",
++                    "--review",
++                    str(review_file),
++                    "--input-dir",
++                    str(input_dir),
++                    url,
++                ]
++            )
++            with pytest.raises(InvalidReviewError):
++                handle_publish_mp(args)
+ 
+@@ -806,1 +743,2 @@
++        assert lp.get_comments_for(mp.api_url) == []
+ 
+@@ -815,1 +746,4 @@
++class TestHandleFetchPr:
++    def test_writes_fetch_outputs(
++        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+     ) -> None:
+@@ -818,1 +750,41 @@
++        github_client = FakeGitHubClient()
++        github_client.add_pull_request(
++            "owner",
++            "repo",
++            42,
++            diff=_PR_DIFF,
++            description="Add sys import",
++            base_sha="b" * 40,
++            head_sha="h" * 40,
++        )
++        out = tmp_path / "out"
++        url = "https://github.com/owner/repo/pull/42"
++
++        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
++            args = _build_parser().parse_args(
++                [
++                    "fetch-pr",
++                    "--github-token",
++                    "ghp_test",
++                    "--output-dir",
++                    str(out),
++                    url,
++                ]
++            )
++            handle_fetch_pr(args)
++
++        assert (out / "diff.patch").read_text() == _PR_DIFF
++        assert (out / "description.md").read_text() == "Add sys import"
++        metadata = json.loads((out / "metadata.json").read_text())
++        assert metadata == {
++            "pr_url": url,
++            "owner": "owner",
++            "repo": "repo",
++            "number": 42,
++            "base_sha": "b" * 40,
++            "head_sha": "h" * 40,
++            "diff_prefix": None,
++        }
++        captured = capsys.readouterr()
++        assert captured.out == ""
+ 
+@@ -820,2 +791,3 @@
++    def test_token_read_from_env_var(
+         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+     ) -> None:
+@@ -826,2 +794,8 @@
++        github_client = FakeGitHubClient()
++        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
++        out = tmp_path / "out"
++        monkeypatch.setenv("GITHUB_TOKEN", "env-token")
++        url = "https://github.com/owner/repo/pull/42"
+ 
++        captured_tokens: list[str] = []
+ 
+@@ -832,1 +802,4 @@
++        def fake_github_client(token: str) -> FakeGitHubClient:
++            captured_tokens.append(token)
++            return github_client
+ 
+@@ -836,2 +806,15 @@
++        with patch(
++            "maas_code_reviewer.cli.GitHubClient", side_effect=fake_github_client
++        ):
++            args = _build_parser().parse_args(
++                [
++                    "fetch-pr",
++                    "--output-dir",
++                    str(out),
++                    url,
++                ]
++            )
++            handle_fetch_pr(args)
+ 
++        assert captured_tokens == ["env-token"]
+ 
+@@ -841,1 +821,18 @@
++    def test_missing_token_exits_with_error(
++        self,
++        tmp_path: Path,
++        capsys: pytest.CaptureFixture[str],
++        monkeypatch: pytest.MonkeyPatch,
++    ) -> None:
++        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
++        out = tmp_path / "out"
++        url = "https://github.com/owner/repo/pull/42"
++        args = _build_parser().parse_args(
++            [
++                "fetch-pr",
++                "--output-dir",
++                str(out),
++                url,
++            ]
++        )
+ 
+@@ -844,1 +839,3 @@
++        with pytest.raises(SystemExit) as exc_info:
++            handle_fetch_pr(args)
+ 
+@@ -847,1 +842,4 @@
++        assert exc_info.value.code == 1
++        captured = capsys.readouterr()
++        assert "GITHUB_TOKEN" in captured.err
+ 
+@@ -850,2 +846,12 @@
+ 
++class TestHandlePublishPr:
++    def test_posts_validated_and_decorated_review(
++        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
++    ) -> None:
++        input_dir, review_path = _write_pr_publish_inputs(
++            tmp_path, json.loads(_PR_REVIEW_RESPONSE)
++        )
++        github_client = FakeGitHubClient()
++        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
++        url = "https://github.com/owner/repo/pull/42"
+ 
+@@ -857,1 +858,15 @@
++        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
++            args = _build_parser().parse_args(
++                [
++                    "publish-pr",
++                    "--github-token",
++                    "ghp_test",
++                    "--review",
++                    str(review_path),
++                    "--input-dir",
++                    str(input_dir),
++                    url,
++                ]
++            )
++            handle_publish_pr(args)
+ 
+@@ -859,1 +873,11 @@
++        reviews = github_client.get_posted_reviews("owner", "repo", 42)
++        assert len(reviews) == 1
++        assert reviews[0]["body"] == (
++            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good overall."
++        )
++        assert reviews[0]["comments"] == [
++            {"path": "src/foo.py", "line": 2, "body": "Nice import."}
++        ]
++        captured = capsys.readouterr()
++        assert captured.out == ""
+ 
+@@ -871,2 +884,14 @@
++    def test_dry_run_prints_json_without_posting(
++        self,
++        tmp_path: Path,
++        capsys: pytest.CaptureFixture[str],
++        monkeypatch: pytest.MonkeyPatch,
++    ) -> None:
++        input_dir, review_path = _write_pr_publish_inputs(
++            tmp_path, json.loads(_PR_REVIEW_RESPONSE)
+         )
++        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
++        url = "https://github.com/owner/repo/pull/42"
++        github_client = FakeGitHubClient()
++        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
+ 
+@@ -874,1 +898,17 @@
++        with patch(
++            "maas_code_reviewer.cli.GitHubClient",
++            side_effect=AssertionError("must not construct"),
++        ):
++            args = _build_parser().parse_args(
++                [
++                    "publish-pr",
++                    "--review",
++                    str(review_path),
++                    "--input-dir",
++                    str(input_dir),
++                    "--dry-run",
++                    url,
++                ]
++            )
++            handle_publish_pr(args)
+ 
+@@ -886,2 +915,18 @@
++        expected = json.loads(_PR_REVIEW_RESPONSE)
++        expected["general_comment"] = (
++            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good overall."
+         )
++        captured = capsys.readouterr()
++        assert json.loads(captured.out) == expected
++        assert github_client.get_posted_reviews("owner", "repo", 42) == []
++
++    def test_invalid_candidate_raises_without_posting(self, tmp_path: Path) -> None:
++        review = {
++            "general_comment": "LGTM",
++            "inline_comments": {"src/foo.py": {"9": "off"}},
++        }
++        input_dir, review_path = _write_pr_publish_inputs(tmp_path, review)
++        github_client = FakeGitHubClient()
++        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
++        url = "https://github.com/owner/repo/pull/42"
+ 
+@@ -901,2 +933,46 @@
++        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
++            args = _build_parser().parse_args(
++                [
++                    "publish-pr",
++                    "--github-token",
++                    "ghp_test",
++                    "--review",
++                    str(review_path),
++                    "--input-dir",
++                    str(input_dir),
++                    url,
++                ]
++            )
++            with pytest.raises(InvalidReviewError):
++                handle_publish_pr(args)
++
++        assert github_client.get_posted_reviews("owner", "repo", 42) == []
++
++    def test_missing_token_exits_without_posting(
++        self,
++        tmp_path: Path,
++        capsys: pytest.CaptureFixture[str],
++        monkeypatch: pytest.MonkeyPatch,
++    ) -> None:
++        input_dir, review_path = _write_pr_publish_inputs(
++            tmp_path, json.loads(_PR_REVIEW_RESPONSE)
+         )
++        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
++        github_client = FakeGitHubClient()
++        github_client.add_pull_request("owner", "repo", 42, diff=_PR_DIFF)
++        url = "https://github.com/owner/repo/pull/42"
++
++        with patch("maas_code_reviewer.cli.GitHubClient", return_value=github_client):
++            args = _build_parser().parse_args(
++                [
++                    "publish-pr",
++                    "--review",
++                    str(review_path),
++                    "--input-dir",
++                    str(input_dir),
++                    url,
++                ]
++            )
++            with pytest.raises(SystemExit) as exc_info:
++                handle_publish_pr(args)
+ 
+@@ -904,3 +979,7 @@
++        assert exc_info.value.code == 1
++        captured = capsys.readouterr()
++        assert "GITHUB_TOKEN" in captured.err
++        assert github_client.get_posted_reviews("owner", "repo", 42) == []
+ 
+ 
+ def _setup_repos(
+diff --git a/tests/test_github_client.py b/tests/test_github_client.py
+index 1d052df..d6253a9 100644
+--- a/tests/test_github_client.py
++++ b/tests/test_github_client.py
+@@ -203,6 +203,18 @@
+         assert desc is None
+ 
+ 
++class TestGitHubClientGetPrShas:
++    def test_returns_base_and_head_shas(self) -> None:
++        fake_gh = FakePyGithub()
++        fake_gh.add_pull("owner/repo", 1, base_sha="b" * 40, head_sha="h" * 40)
++        client = _make_client(fake_gh)
++
++        base_sha, head_sha = client.get_pr_shas("owner", "repo", 1)
++
++        assert base_sha == "b" * 40
++        assert head_sha == "h" * 40
++
++
+ class TestGitHubClientPostReview:
+     def test_posts_review_with_correct_args(self) -> None:
+         fake_gh = FakePyGithub()
+@@ -277,6 +289,30 @@
+             client.get_pr_description("owner", "repo", 99)
+ 
+ 
++class TestFakeGitHubClientGetPrShas:
++    def test_returns_registered_shas(self) -> None:
++        client = FakeGitHubClient()
++        client.add_pull_request(
++            "owner",
++            "repo",
++            1,
++            diff="",
++            base_sha="b" * 40,
++            head_sha="h" * 40,
++        )
++
++        base_sha, head_sha = client.get_pr_shas("owner", "repo", 1)
++
++        assert base_sha == "b" * 40
++        assert head_sha == "h" * 40
++
++    def test_unknown_pr_raises_key_error(self) -> None:
++        client = FakeGitHubClient()
++
++        with pytest.raises(KeyError):
++            client.get_pr_shas("owner", "repo", 99)
++
++
+ class TestFakeGitHubClientPostReview:
+     def test_records_posted_review(self) -> None:
+         client = FakeGitHubClient()
+diff --git a/tests/test_review_commands.py b/tests/test_review_commands.py
+new file mode 100644
+index 0000000..feaf608
+--- /dev/null
++++ b/tests/test_review_commands.py
+@@ -0,0 +1,32 @@
++# Copyright 2026 Canonical Ltd.  This software is licensed under the
++# GNU Affero General Public License version 3 (see the file LICENSE).
++
++import base64
++import json
++import subprocess
++from datetime import UTC, datetime
++from pathlib import Path
++
++import pytest
++
++from maas_code_reviewer.models import Comment
++from maas_code_reviewer.review_commands import (
++    InvalidReviewError,
++    MergeProposalSummary,
++    _detect_diff_prefix,
++    _lp_repo_url,
++    _ref_to_branch,
++    fetch_merge_proposal,
++    fetch_pull_request,
++    format_merge_proposals,
++    has_existing_review,
++    list_merge_proposals,
++    load_validated_review,
++    render_merge_proposal_comment,
++    render_pull_request_review,
++)
++from maas_code_reviewer.reviewer import (
++    EMPTY_DIFF_GENERAL_COMMENT,
++    REVIEW_MARKER,
++    REVIEW_PREAMBLE,
++)
+@@ -36,0 +37,41 @@
++
++
++def _recording_run() -> tuple[list[list[str]], object]:
++    """Return a call list and a delegating subprocess.run recorder.
++
++    The recorder calls the real ``subprocess.run`` and records each
++    command's argv, so assertions can inspect the git invocations.
++    """
++    calls: list[list[str]] = []
++    real_run = subprocess.run
++
++    def recording_run(args, **kwargs):
++        calls.append(list(args))
++        return real_run(args, **kwargs)
++
++    return calls, recording_run
++
++
++def _write_publish_inputs(
++    tmp_path: Path, diff: str, diff_prefix: str | None = None
++) -> Path:
++    """Write a fetch-style input directory and return its path."""
++    input_dir = tmp_path / "input"
++    input_dir.mkdir()
++    (input_dir / "diff.patch").write_text(diff)
++    (input_dir / "metadata.json").write_text(json.dumps({"diff_prefix": diff_prefix}))
++    return input_dir
++
++
++_SIMPLE_STD_DIFF = "--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-one\n+two\n"
++
++_GITHUB_PR_DIFF = (
++    "diff --git a/src/foo.py b/src/foo.py\n"
++    "--- a/src/foo.py\n"
++    "+++ b/src/foo.py\n"
++    "@@ -1,3 +1,4 @@\n"
++    " import os\n"
++    "+import sys\n"
++    "\n"
++    " def main():\n"
++)
+@@ -390,0 +391,124 @@
++def _make_fetch_mp(
++    lp: FakeLaunchpadClient,
++    target_repo: Path,
++    source_repo: Path,
++    **kwargs,
++):
++    """Build an MP wired to the fixture repos and register it with *lp*."""
++    mp = make_mp(
++        source_git_repository=str(source_repo),
++        source_git_path="refs/heads/feature",
++        target_git_repository=str(target_repo),
++        target_git_path="refs/heads/main",
++        **kwargs,
++    )
++    lp.add_merge_proposal(mp)
++    return mp
++
++
++class TestFetchMergeProposal:
++    def test_skip_writes_status_and_clones_nothing(
++        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """An already-reviewed MP writes only status.json — no git command runs."""
++        git = FakeGitClient()
++        target_repo, source_repo = _setup_repos(tmp_path, git)
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = _make_fetch_mp(lp, target_repo, source_repo)
++        lp.add_comment(
++            mp.api_url,
++            Comment(
++                author="ci-bot",
++                body=f"{REVIEW_MARKER}\n\nPrevious review.",
++                date=datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
++            ),
++        )
++        calls, recording_run = _recording_run()
++        monkeypatch.setattr("maas_code_reviewer.git.subprocess.run", recording_run)
++
++        result = fetch_merge_proposal(lp, git, mp.url, tmp_path / "out")
++
++        assert result is False
++        status = json.loads((tmp_path / "out" / "status.json").read_text())
++        assert status == {"status": "skipped", "reason": "already-reviewed"}
++        assert not (tmp_path / "out" / "repo").exists()
++        assert not (tmp_path / "out" / "diff.patch").exists()
++        assert not (tmp_path / "out" / "description.md").exists()
++        assert not (tmp_path / "out" / "metadata.json").exists()
++        assert calls == []
++
++    def test_fetch_writes_repo_diff_description_metadata(self, tmp_path: Path) -> None:
++        """A fresh MP writes the merged tree, diff, description, and metadata."""
++        git = FakeGitClient()
++        target_repo, source_repo = _setup_repos(tmp_path, git)
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = _make_fetch_mp(lp, target_repo, source_repo, description="Fix the widget")
++        out_dir = tmp_path / "out"
++
++        result = fetch_merge_proposal(lp, git, mp.url, out_dir)
++
++        assert result is True
++        assert (out_dir / "repo" / "file.txt").read_text() == "modified\n"
++        assert "+modified" in (out_dir / "diff.patch").read_text()
++        assert (out_dir / "description.md").read_text() == "Fix the widget"
++        metadata = json.loads((out_dir / "metadata.json").read_text())
++        assert metadata == {
++            "mp_url": mp.url,
++            "target_url": str(target_repo),
++            "target_branch": "main",
++            "source_url": str(source_repo),
++            "source_branch": "feature",
++            "base_sha": git.rev_parse(target_repo, "main"),
++            "head_sha": git.rev_parse(source_repo, "feature"),
++            "diff_prefix": None,
++        }
++
++    def test_creates_missing_output_dir_with_parents(self, tmp_path: Path) -> None:
++        """A nonexistent output directory is created with parents."""
++        git = FakeGitClient()
++        target_repo, source_repo = _setup_repos(tmp_path, git)
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = _make_fetch_mp(lp, target_repo, source_repo)
++        out_dir = tmp_path / "deep" / "nested" / "out"
++
++        fetch_merge_proposal(lp, git, mp.url, out_dir)
++
++        assert (out_dir / "diff.patch").exists()
++        assert (out_dir / "description.md").exists()
++        assert (out_dir / "metadata.json").exists()
++        assert (out_dir / "repo").exists()
++
++    def test_description_falls_back_to_commit_message(self, tmp_path: Path) -> None:
++        """description.md falls back to the commit message."""
++        git = FakeGitClient()
++        target_repo, source_repo = _setup_repos(tmp_path, git)
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = _make_fetch_mp(
++            lp, target_repo, source_repo, commit_message="Refactor auth"
++        )
++
++        fetch_merge_proposal(lp, git, mp.url, tmp_path / "out")
++
++        assert (tmp_path / "out" / "description.md").read_text() == "Refactor auth"
++
++    def test_missing_description_and_commit_message_write_empty_file(
++        self, tmp_path: Path
++    ) -> None:
++        """Both being None leaves description.md empty."""
++        git = FakeGitClient()
++        target_repo, source_repo = _setup_repos(tmp_path, git)
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = _make_fetch_mp(lp, target_repo, source_repo)
++
++        fetch_merge_proposal(lp, git, mp.url, tmp_path / "out")
++
++        assert (tmp_path / "out" / "description.md").read_text() == ""
++
++    def test_no_change_merge_writes_empty_diff(self, tmp_path: Path) -> None:
++        """An up-to-date merge produces an empty diff and equal SHAs."""
++        git = FakeGitClient()
++        target_repo, _source_repo = _setup_repos(tmp_path, git)
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = make_mp(
++            source_git_repository=str(target_repo),
++            source_git_path="refs/heads/main",
+@@ -518,0 +519,521 @@
++        out_dir = tmp_path / "out"
++
++        result = fetch_merge_proposal(lp, git, mp.url, out_dir)
++
++        assert result is True
++        assert (out_dir / "diff.patch").read_text() == ""
++        metadata = json.loads((out_dir / "metadata.json").read_text())
++        assert metadata["base_sha"] == metadata["head_sha"]
++
++    def test_git_token_applies_header_auth_to_clone_and_fetch(
++        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """The token becomes a one-shot http.extraHeader on clone and fetch."""
++        git = FakeGitClient()
++        target_repo, source_repo = _setup_repos(tmp_path, git)
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = _make_fetch_mp(lp, target_repo, source_repo)
++        calls, recording_run = _recording_run()
++        monkeypatch.setattr("maas_code_reviewer.git.subprocess.run", recording_run)
++        expected_header = "Authorization: Basic " + base64.b64encode(
++            b"ci-bot:tok"
++        ).decode("ascii")
++
++        result = fetch_merge_proposal(
++            lp, git, mp.url, tmp_path / "out", git_token="tok"
++        )
++
++        assert result is True
++        assert calls[0][:4] == [
++            "git",
++            "-c",
++            f"http.extraHeader={expected_header}",
++            "clone",
++        ]
++        fetch_call = next(call for call in calls if "fetch" in call)
++        fetch_index = fetch_call.index("fetch")
++        assert fetch_call[:fetch_index] == [
++            "git",
++            "-c",
++            f"http.extraHeader={expected_header}",
++        ]
++        assert all("credential.helper" not in call for call in calls)
++        # The header is passed exactly twice (clone + source fetch) as one-shot
++        # config, and no remote URL argument carries credentials.
++        header_args = [arg for call in calls for arg in call if "extraHeader=" in arg]
++        assert header_args == [f"http.extraHeader={expected_header}"] * 2
++        remote_args = [
++            arg
++            for call in calls
++            for arg in call
++            if arg.startswith(("http://", "https://", "/"))
++        ]
++        assert all("@" not in arg for arg in remote_args)
++        assert all("Authorization" not in arg for arg in remote_args)
++        # Nothing credential-bearing is persisted in the clone's config.
++        config_text = (tmp_path / "out" / "repo" / ".git" / "config").read_text()
++        assert "extraHeader" not in config_text
++        assert "Authorization" not in config_text
++
++    def test_no_token_omits_header(
++        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """Without a token, no -c/extraHeader is passed and fetch succeeds."""
++        git = FakeGitClient()
++        target_repo, source_repo = _setup_repos(tmp_path, git)
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = _make_fetch_mp(lp, target_repo, source_repo)
++        calls, recording_run = _recording_run()
++        monkeypatch.setattr("maas_code_reviewer.git.subprocess.run", recording_run)
++
++        result = fetch_merge_proposal(lp, git, mp.url, tmp_path / "out")
++
++        assert result is True
++        assert all("-c" not in call and "extraHeader" not in call for call in calls)
++
++    def test_records_prefix_from_git_config_environment(
++        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """Custom src/dst prefixes are recorded in metadata.json."""
++        git = FakeGitClient()
++        target_repo, source_repo = _setup_repos(tmp_path, git)
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = _make_fetch_mp(lp, target_repo, source_repo)
++        monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
++        monkeypatch.setenv("GIT_CONFIG_KEY_0", "diff.srcPrefix")
++        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "XX/")
++        monkeypatch.setenv("GIT_CONFIG_KEY_1", "diff.dstPrefix")
++        monkeypatch.setenv("GIT_CONFIG_VALUE_1", "YY/")
++        out_dir = tmp_path / "out"
++
++        fetch_merge_proposal(lp, git, mp.url, out_dir)
++
++        diff_text = (out_dir / "diff.patch").read_text()
++        assert "+++ YY/file.txt" in diff_text
++        metadata = json.loads((out_dir / "metadata.json").read_text())
++        assert metadata["diff_prefix"] == "YY/"
++
++    def test_fetch_prefix_round_trips_into_publish_validation(
++        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """The recorded prefix lets publish validate repository-keyed candidates."""
++        git = FakeGitClient()
++        target_repo, source_repo = _setup_repos(tmp_path, git)
++        lp = FakeLaunchpadClient(bot_username="ci-bot")
++        mp = _make_fetch_mp(lp, target_repo, source_repo)
++        monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
++        monkeypatch.setenv("GIT_CONFIG_KEY_0", "diff.srcPrefix")
++        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "XX/")
++        monkeypatch.setenv("GIT_CONFIG_KEY_1", "diff.dstPrefix")
++        monkeypatch.setenv("GIT_CONFIG_VALUE_1", "YY/")
++        out_dir = tmp_path / "out"
++
++        fetch_merge_proposal(lp, git, mp.url, out_dir)
++
++        repository_candidate = tmp_path / "review_repo.json"
++        repository_candidate.write_text(
++            json.dumps(
++                {
++                    "general_comment": "LGTM",
++                    "inline_comments": {"file.txt": {"1": "good"}},
++                }
++            )
++        )
++        prefixed_candidate = tmp_path / "review_prefixed.json"
++        prefixed_candidate.write_text(
++            json.dumps(
++                {
++                    "general_comment": "LGTM",
++                    "inline_comments": {"YY/file.txt": {"1": "good"}},
++                }
++            )
++        )
++
++        validated = load_validated_review(repository_candidate, out_dir)
++        assert validated == {
++            "general_comment": "LGTM",
++            "inline_comments": {"file.txt": {"1": "good"}},
++        }
++        with pytest.raises(InvalidReviewError):
++            load_validated_review(prefixed_candidate, out_dir)
++
++
++class TestDetectDiffPrefix:
++    def test_standard_diff_returns_none(self) -> None:
++        assert _detect_diff_prefix(_SIMPLE_STD_DIFF) is None
++
++    def test_new_file_header_returns_none(self) -> None:
++        diff = (
++            "diff --git a/new.py b/new.py\n"
++            "--- /dev/null\n"
++            "+++ b/new.py\n"
++            "@@ -0,0 +1 @@\n"
++            "+print()\n"
++        )
++        assert _detect_diff_prefix(diff) is None
++
++    def test_deletion_first_skips_to_next_header(self) -> None:
++        diff = (
++            "diff --git a/gone.py b/gone.py\n"
++            "--- a/gone.py\n"
++            "+++ /dev/null\n"
++            "diff --git a/f.txt b/f.txt\n"
++            "--- a/f.txt\n"
++            "+++ b/f.txt\n"
++            "@@ -1 +1 @@\n"
++            "-one\n"
++            "+two\n"
++        )
++        assert _detect_diff_prefix(diff) is None
++
++    def test_identical_paths_return_empty_prefix(self) -> None:
++        diff = "diff --git f.txt f.txt\n--- f.txt\n+++ f.txt\n@@ -1 +1 @@\n-one\n+two\n"
++        assert _detect_diff_prefix(diff) == ""
++
++    def test_custom_dst_prefix_is_returned(self) -> None:
++        diff = (
++            "diff --git XX/g.txt YY/g.txt\n"
++            "--- XX/g.txt\n"
++            "+++ YY/g.txt\n"
++            "@@ -1 +1 @@\n"
++            "-one\n"
++            "+two\n"
++        )
++        assert _detect_diff_prefix(diff) == "YY/"
++
++    def test_prefix_free_paths_without_slash_return_empty_prefix(self) -> None:
++        diff = (
++            "diff --git old.txt new.txt\n"
++            "--- old.txt\n"
++            "+++ new.txt\n"
++            "@@ -1 +1 @@\n"
++            "-one\n"
++            "+two\n"
++        )
++        assert _detect_diff_prefix(diff) == ""
++
++    def test_quoted_standard_path_returns_none(self) -> None:
++        diff = (
++            'diff --git "a/caf\\303\\251.py" "b/caf\\303\\251.py"\n'
++            '--- "a/caf\\303\\251.py"\n'
++            '+++ "b/caf\\303\\251.py"\n'
++            "@@ -1 +1 @@\n"
++            "-one\n"
++            "+two\n"
++        )
++        assert _detect_diff_prefix(diff) is None
++
++    def test_empty_diff_returns_none(self) -> None:
++        assert _detect_diff_prefix("") is None
++        rename_only = (
++            "diff --git a/old.py b/new.py\n"
++            "similarity index 100%\n"
++            "rename from old.py\n"
++            "rename to new.py\n"
++        )
++        assert _detect_diff_prefix(rename_only) is None
++
++
++class TestLoadValidatedReview:
++    def test_valid_candidate_returns_document(self, tmp_path: Path) -> None:
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
++        review_file = tmp_path / "review.json"
++        candidate = {
++            "general_comment": "LGTM",
++            "inline_comments": {"f.txt": {"1": "good"}},
++        }
++        review_file.write_text(json.dumps(candidate))
++
++        result = load_validated_review(review_file, input_dir)
++
++        assert result == candidate
++
++    def test_line_not_in_diff_raises(self, tmp_path: Path) -> None:
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
++        review_file = tmp_path / "review.json"
++        review_file.write_text(
++            json.dumps(
++                {"general_comment": "LGTM", "inline_comments": {"f.txt": {"9": "off"}}}
++            )
++        )
++
++        with pytest.raises(InvalidReviewError) as exc_info:
++            load_validated_review(review_file, input_dir)
++
++        assert "does not appear in the diff" in str(exc_info.value)
++
++    def test_unknown_file_raises(self, tmp_path: Path) -> None:
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
++        review_file = tmp_path / "review.json"
++        review_file.write_text(
++            json.dumps(
++                {
++                    "general_comment": "LGTM",
++                    "inline_comments": {"nope.py": {"1": "gone"}},
++                }
++            )
++        )
++
++        with pytest.raises(InvalidReviewError) as exc_info:
++            load_validated_review(review_file, input_dir)
++
++        message = str(exc_info.value)
++        assert "inline_comments" in message
++        assert "does not appear in the diff" in message
++
++    def test_unparseable_candidate_raises(self, tmp_path: Path) -> None:
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
++        review_file = tmp_path / "review.json"
++        review_file.write_text("not json {")
++
++        with pytest.raises(InvalidReviewError) as exc_info:
++            load_validated_review(review_file, input_dir)
++
++        assert "not valid JSON" in str(exc_info.value)
++
++    def test_recorded_prefix_mismatch_raises(self, tmp_path: Path) -> None:
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF, "w/")
++        review_file = tmp_path / "review.json"
++        review_file.write_text(
++            json.dumps(
++                {"general_comment": "LGTM", "inline_comments": {"f.txt": {"1": "good"}}}
++            )
++        )
++
++        with pytest.raises(InvalidReviewError) as exc_info:
++            load_validated_review(review_file, input_dir)
++
++        assert "--diff-prefix" in str(exc_info.value)
++
++    def test_recorded_prefix_resolves_coordinates(self, tmp_path: Path) -> None:
++        diff = "--- i/f.txt\n+++ w/f.txt\n@@ -1 +1 @@\n-one\n+two\n"
++        input_dir = _write_publish_inputs(tmp_path, diff, "w/")
++        valid_file = tmp_path / "valid.json"
++        valid_file.write_text(
++            json.dumps(
++                {"general_comment": "LGTM", "inline_comments": {"f.txt": {"1": "good"}}}
++            )
++        )
++        prefixed_file = tmp_path / "prefixed.json"
++        prefixed_file.write_text(
++            json.dumps(
++                {
++                    "general_comment": "LGTM",
++                    "inline_comments": {"w/f.txt": {"1": "good"}},
++                }
++            )
++        )
++
++        result = load_validated_review(valid_file, input_dir)
++        assert result["inline_comments"] == {"f.txt": {"1": "good"}}
++
++        with pytest.raises(InvalidReviewError):
++            load_validated_review(prefixed_file, input_dir)
++
++    def test_missing_general_comment_raises(self, tmp_path: Path) -> None:
++        input_dir = _write_publish_inputs(tmp_path, _SIMPLE_STD_DIFF)
++        review_file = tmp_path / "review.json"
++        review_file.write_text(json.dumps({"inline_comments": {}}))
++
++        with pytest.raises(InvalidReviewError) as exc_info:
++            load_validated_review(review_file, input_dir)
++
++        assert "Missing required key" in str(exc_info.value)
++
++    def test_empty_diff_document_validates(self, tmp_path: Path) -> None:
++        input_dir = _write_publish_inputs(tmp_path, "")
++        review_file = tmp_path / "review.json"
++        candidate = {
++            "general_comment": EMPTY_DIFF_GENERAL_COMMENT,
++            "inline_comments": {},
++        }
++        review_file.write_text(json.dumps(candidate))
++
++        result = load_validated_review(review_file, input_dir)
++
++        assert result == candidate
++
++
++class TestRenderMergeProposalComment:
++    def test_renders_marker_preamble_general_and_sections(self) -> None:
++        review = {
++            "general_comment": "LGTM",
++            "inline_comments": {"f.txt": {"1": "Good"}, "g.py": {"2": "Also good"}},
++        }
++
++        result = render_merge_proposal_comment(review)
++
++        assert result == (
++            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLGTM\n\n"
++            "### f.txt:1\n\nGood\n\n### g.py:2\n\nAlso good"
++        )
++
++    def test_marker_in_candidate_is_not_duplicated(self) -> None:
++        review = {
++            "general_comment": (
++                f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nSaid it twice"
++            ),
++            "inline_comments": {},
++        }
++
++        result = render_merge_proposal_comment(review)
++
++        assert result.startswith(REVIEW_MARKER)
++        assert result.count(REVIEW_MARKER) == 1
++        assert result.count(REVIEW_PREAMBLE.strip()) == 1
++        assert "Said it twice" in result
++
++    def test_no_inline_comments_renders_general_only(self) -> None:
++        review = {"general_comment": "LGTM", "inline_comments": {}}
++
++        result = render_merge_proposal_comment(review)
++
++        assert result == f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLGTM"
++        assert "###" not in result
++
++    def test_empty_diff_comment_is_decorated(self) -> None:
++        review = {
++            "general_comment": EMPTY_DIFF_GENERAL_COMMENT,
++            "inline_comments": {},
++        }
++
++        result = render_merge_proposal_comment(review)
++
++        assert result == (
++            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{EMPTY_DIFF_GENERAL_COMMENT}"
++        )
++
++
++class TestFetchPullRequest:
++    def test_writes_diff_description_and_metadata(self, tmp_path: Path) -> None:
++        github = FakeGitHubClient()
++        github.add_pull_request(
++            "owner",
++            "repo",
++            42,
++            diff=_GITHUB_PR_DIFF,
++            description="Fix the widget",
++            base_sha="b" * 40,
++            head_sha="h" * 40,
++        )
++
++        fetch_pull_request(
++            github, "https://github.com/owner/repo/pull/42", tmp_path / "out"
++        )
++
++        out = tmp_path / "out"
++        assert (out / "diff.patch").read_text() == _GITHUB_PR_DIFF
++        assert (out / "description.md").read_text() == "Fix the widget"
++        metadata = json.loads((out / "metadata.json").read_text())
++        assert metadata == {
++            "pr_url": "https://github.com/owner/repo/pull/42",
++            "owner": "owner",
++            "repo": "repo",
++            "number": 42,
++            "base_sha": "b" * 40,
++            "head_sha": "h" * 40,
++            "diff_prefix": None,
++        }
++        assert (tmp_path / "out" / "repo").exists() is False
++
++    def test_creates_missing_output_dir_with_parents(self, tmp_path: Path) -> None:
++        github = FakeGitHubClient()
++        github.add_pull_request("owner", "repo", 42, diff=_GITHUB_PR_DIFF)
++
++        fetch_pull_request(
++            github, "https://github.com/owner/repo/pull/42", tmp_path / "deep" / "out"
++        )
++
++        out = tmp_path / "deep" / "out"
++        assert (out / "diff.patch").exists()
++        assert (out / "description.md").exists()
++        assert (out / "metadata.json").exists()
++
++    def test_none_description_writes_empty_file(self, tmp_path: Path) -> None:
++        github = FakeGitHubClient()
++        github.add_pull_request("owner", "repo", 42, diff=_GITHUB_PR_DIFF)
++
++        fetch_pull_request(
++            github, "https://github.com/owner/repo/pull/42", tmp_path / "out"
++        )
++
++        assert (tmp_path / "out" / "description.md").read_text() == ""
++
++    def test_records_none_prefix_for_github_diff_shapes(self, tmp_path: Path) -> None:
++        diff = (
++            "diff --git a/new.py b/new.py\n"
++            "--- /dev/null\n"
++            "+++ b/new.py\n"
++            "@@ -0,0 +1,1 @@\n"
++            "+new\n"
++            "diff --git a/changed.py b/changed.py\n"
++            "--- a/changed.py\n"
++            "+++ b/changed.py\n"
++            "@@ -1 +1 @@\n"
++            "-old\n"
++            "+changed\n"
++            "diff --git a/gone.py b/gone.py\n"
++            "--- a/gone.py\n"
++            "+++ /dev/null\n"
++            "@@ -1 +0,0 @@\n"
++            "-gone\n"
++        )
++        github = FakeGitHubClient()
++        github.add_pull_request("owner", "repo", 42, diff=diff)
++
++        fetch_pull_request(
++            github, "https://github.com/owner/repo/pull/42", tmp_path / "out"
++        )
++
++        metadata = json.loads((tmp_path / "out" / "metadata.json").read_text())
++        assert metadata["diff_prefix"] is None
++
++    def test_invalid_pr_url_raises_value_error(self, tmp_path: Path) -> None:
++        github = FakeGitHubClient()
++
++        with pytest.raises(ValueError, match="Invalid GitHub PR URL"):
++            fetch_pull_request(
++                github, "https://github.com/owner/repo", tmp_path / "out"
++            )
++
++        assert not (tmp_path / "out").exists()
++
++
++class TestRenderPullRequestReview:
++    def test_decorates_general_comment_and_preserves_findings(self) -> None:
++        doc = {
++            "general_comment": "Looks good overall.",
++            "inline_comments": {"src/foo.py": {"2": "Nice import."}},
++        }
++
++        rendered = render_pull_request_review(doc)
++
++        assert rendered["general_comment"] == (
++            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nLooks good overall."
++        )
++        assert rendered["inline_comments"] == {"src/foo.py": {"2": "Nice import."}}
++        assert doc["general_comment"] == "Looks good overall."
++
++    def test_marker_in_candidate_is_not_duplicated(self) -> None:
++        doc = {
++            "general_comment": (
++                f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\nSaid it twice"
++            ),
++            "inline_comments": {},
++        }
++
++        rendered = render_pull_request_review(doc)
++
++        assert rendered["general_comment"].startswith(REVIEW_MARKER)
++        assert rendered["general_comment"].count(REVIEW_MARKER) == 1
++        assert rendered["general_comment"].count(REVIEW_PREAMBLE.strip()) == 1
++        assert "Said it twice" in rendered["general_comment"]
++
++    def test_empty_diff_comment_is_decorated(self) -> None:
++        doc = {"general_comment": EMPTY_DIFF_GENERAL_COMMENT, "inline_comments": {}}
++
++        rendered = render_pull_request_review(doc)
++
++        assert rendered["general_comment"] == (
++            f"{REVIEW_MARKER}\n\n{REVIEW_PREAMBLE}\n\n{EMPTY_DIFF_GENERAL_COMMENT}"
++        )
